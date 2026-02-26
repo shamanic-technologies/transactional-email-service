@@ -5,7 +5,7 @@ import { db } from "../db/index.js";
 import { emailEvents } from "../db/schema.js";
 import { getTemplate } from "../templates/index.js";
 import { sendEmail } from "../lib/email-gateway.js";
-import { resolveUserEmail, resolveOrgEmails } from "../lib/clerk.js";
+import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { SendRequestSchema } from "../schemas.js";
 
@@ -31,7 +31,7 @@ function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
-function buildDedupKey(appId: string, eventType: string, req: { clerkUserId?: string; recipientEmail?: string; productId?: string }): string | null {
+function buildDedupKey(appId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string }): string | null {
   // Product-scoped dedup: one per recipient per product instance
   if (PRODUCT_SCOPED_EVENTS.has(eventType)) {
     if (req.recipientEmail && req.productId) {
@@ -42,7 +42,7 @@ function buildDedupKey(appId: string, eventType: string, req: { clerkUserId?: st
 
   // Daily dedup: one per user per day
   if (DAILY_DEDUP_EVENTS.has(eventType)) {
-    const identifier = req.clerkUserId || req.recipientEmail || "unknown";
+    const identifier = req.userId || req.recipientEmail || "unknown";
     return `${appId}:${eventType}:${identifier}:${getTodayDate()}`;
   }
 
@@ -51,8 +51,8 @@ function buildDedupKey(appId: string, eventType: string, req: { clerkUserId?: st
     if (eventType === "waitlist" && req.recipientEmail) {
       return `${appId}:waitlist:${req.recipientEmail}`;
     }
-    if (req.clerkUserId) {
-      return `${appId}:${eventType}:${req.clerkUserId}`;
+    if (req.userId) {
+      return `${appId}:${eventType}:${req.userId}`;
     }
     // Anonymous fallback: dedup on email for once-only events
     if (req.recipientEmail) {
@@ -78,23 +78,21 @@ router.post("/send", requireApiKey, async (req, res) => {
 
     if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType)) {
       recipientEmails = [ADMIN_EMAIL];
-    } else if (body.clerkUserId) {
-      const email = await resolveUserEmail(body.clerkUserId);
+    } else if (body.userId) {
+      const email = await resolveUserEmail(body.userId);
       recipientEmails = [email];
-    } else if (body.clerkOrgId) {
-      recipientEmails = await resolveOrgEmails(body.clerkOrgId);
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
-      res.status(400).json({ error: "One of clerkUserId, clerkOrgId, or recipientEmail is required" });
+      res.status(400).json({ error: "One of userId or recipientEmail is required" });
       return;
     }
 
     // For admin notifications, enrich metadata with the user's email
     const metadata = { ...body.metadata };
-    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && body.clerkUserId && !metadata.email) {
+    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && body.userId && !metadata.email) {
       try {
-        const userEmail = await resolveUserEmail(body.clerkUserId);
+        const userEmail = await resolveUserEmail(body.userId);
         metadata.email = userEmail;
       } catch {
         // Continue without email in metadata
@@ -119,11 +117,11 @@ router.post("/send", requireApiKey, async (req, res) => {
 
       try {
         run = await createRun({
-          clerkOrgId: body.clerkOrgId || SYSTEM_ORG_ID,
+          orgId: body.orgId || SYSTEM_ORG_ID,
           appId: body.appId,
           serviceName: "transactional-email-service",
           taskName: `email-${body.eventType}`,
-          clerkUserId: body.clerkUserId,
+          userId: body.userId,
           brandId: body.brandId,
           campaignId: body.campaignId,
         });
@@ -145,8 +143,8 @@ router.post("/send", requireApiKey, async (req, res) => {
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: recipientDedupKey,
-              clerkUserId: body.clerkUserId || null,
-              clerkOrgId: body.clerkOrgId || null,
+              userId: body.userId || null,
+              orgId: body.orgId || null,
               status: "pending",
               metadata: metadata || null,
             })
@@ -169,8 +167,8 @@ router.post("/send", requireApiKey, async (req, res) => {
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: null,
-              clerkUserId: body.clerkUserId || null,
-              clerkOrgId: body.clerkOrgId || null,
+              userId: body.userId || null,
+              orgId: body.orgId || null,
               status: "pending",
               metadata: metadata || null,
             })
@@ -186,7 +184,7 @@ router.post("/send", requireApiKey, async (req, res) => {
           htmlBody: template.htmlBody,
           textBody: template.textBody,
           tag: `${body.appId}-${body.eventType}`,
-          orgId: body.clerkOrgId,
+          orgId: body.orgId,
           runId: run.id,
           appId: body.appId,
           brandId: body.brandId,

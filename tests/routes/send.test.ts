@@ -43,10 +43,9 @@ vi.mock("../../src/db/index.js", () => ({
   },
 }));
 
-// Mock clerk to avoid external calls
-vi.mock("../../src/lib/clerk.js", () => ({
+// Mock client-service to avoid external calls
+vi.mock("../../src/lib/client-service.js", () => ({
   resolveUserEmail: vi.fn().mockResolvedValue("user@example.com"),
-  resolveOrgEmails: vi.fn().mockResolvedValue(["user@example.com"]),
 }));
 
 // Mock runs-client to avoid external calls
@@ -96,8 +95,8 @@ describe("POST /send", () => {
         eventType: "user_active",
         brandId: "brand_abc",
         campaignId: "campaign_def",
-        clerkUserId: "user_123",
-        clerkOrgId: "org_456",
+        userId: "user_123",
+        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -116,7 +115,7 @@ describe("POST /send", () => {
     expect(body.campaignId).toBe("campaign_def");
   });
 
-  it("uses system org for createRun but omits clerkOrgId from email gateway when not provided", async () => {
+  it("uses system org for createRun but omits clerkOrgId from email gateway when orgId not provided", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
     const res = await request(app)
@@ -127,14 +126,14 @@ describe("POST /send", () => {
         eventType: "user_active",
         brandId: "brand_abc",
         campaignId: "campaign_def",
-        clerkUserId: "user_789",
+        userId: "user_789",
       });
 
     expect(res.status).toBe(200);
 
     // createRun should still use the system org ID
     expect(createRun).toHaveBeenCalledWith(
-      expect.objectContaining({ clerkOrgId: "transactional-email-service" })
+      expect.objectContaining({ orgId: "transactional-email-service" })
     );
 
     // email gateway should NOT receive a fake clerkOrgId
@@ -178,7 +177,7 @@ describe("POST /send", () => {
       .send({
         appId: "mcpfactory",
         eventType: "user_active",
-        clerkUserId: "user_123",
+        userId: "user_123",
       });
 
     expect(res.status).toBe(200);
@@ -221,7 +220,7 @@ describe("POST /send", () => {
       .send({
         appId: "mcpfactory",
         eventType: "user_active",
-        clerkUserId: "user_123",
+        userId: "user_123",
       });
 
     expect(res.status).toBe(200);
@@ -245,7 +244,7 @@ describe("POST /send", () => {
       .send({
         appId: "mcpfactory",
         eventType: "user_active",
-        clerkUserId: "user_123",
+        userId: "user_123",
       });
 
     expect(res.status).toBe(200);

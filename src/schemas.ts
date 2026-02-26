@@ -24,9 +24,9 @@ export const SendRequestSchema = z
     brandId: z.string().optional().openapi({ description: "Brand ID for tracking" }),
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
     productId: z.string().optional().openapi({ description: "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)" }),
-    clerkUserId: z.string().optional().openapi({ description: "Clerk user ID — used to resolve recipient email and as dedup identifier" }),
-    clerkOrgId: z.string().optional().openapi({ description: "Clerk org ID — sends to all org members" }),
-    recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (fallback when no Clerk IDs provided)" }),
+    userId: z.string().optional().openapi({ description: "User ID — used to resolve recipient email via client-service and as dedup identifier" }),
+    orgId: z.string().optional().openapi({ description: "Org ID — for tracking purposes" }),
+    recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (fallback when no userId provided)" }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
   .openapi("SendRequest");
@@ -72,8 +72,8 @@ export const ErrorResponseSchema = z
 export const StatsRequestSchema = z
   .object({
     appId: z.string().optional(),
-    clerkOrgId: z.string().optional(),
-    clerkUserId: z.string().optional(),
+    orgId: z.string().optional(),
+    userId: z.string().optional(),
     eventType: z.string().optional(),
   })
   .openapi("StatsRequest");
@@ -146,10 +146,10 @@ registry.registerPath({
   path: "/send",
   summary: "Send a lifecycle email",
   description:
-    "Send a templated lifecycle email. Resolves recipients via Clerk user/org IDs or direct email. " +
-    "One of clerkUserId, clerkOrgId, or recipientEmail is required.\n\n" +
+    "Send a templated lifecycle email. Resolves recipients via user ID (client-service) or direct email. " +
+    "One of userId or recipientEmail is required.\n\n" +
     "**Deduplication:** The dedup strategy depends on eventType:\n" +
-    "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{appId}:{eventType}:{clerkUserId or recipientEmail}`.\n" +
+    "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{appId}:{eventType}:{userId or recipientEmail}`.\n" +
     "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{appId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
     "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{appId}:{eventType}:{recipientEmail}:{productId}`.\n" +
     "- **No dedup** (all other event types): sends every time with no dedup.\n\n" +
@@ -183,7 +183,7 @@ registry.registerPath({
   path: "/stats",
   summary: "Get aggregated stats",
   description:
-    "Get aggregated email event stats filtered by appId, clerkOrgId, clerkUserId, and/or eventType. At least one filter required.",
+    "Get aggregated email event stats filtered by appId, orgId, userId, and/or eventType. At least one filter required.",
   tags: ["Stats"],
   security: [{ apiKey: [] }],
   request: {
