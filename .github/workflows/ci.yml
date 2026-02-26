@@ -14,7 +14,8 @@ jobs:
       NODE_ENV: test
       TRANSACTIONAL_EMAIL_SERVICE_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
       TRANSACTIONAL_EMAIL_SERVICE_API_KEY: ${{ secrets.TEST_API_KEY }}
-      CLERK_SECRET_KEY: fake-clerk-key
+      CLIENT_SERVICE_URL: http://localhost:9999
+      CLIENT_SERVICE_API_KEY: fake-client-service-key
       EMAIL_GATEWAY_SERVICE_API_KEY: fake-email-gateway-key
       EMAIL_GATEWAY_SERVICE_URL: http://localhost:9999
 

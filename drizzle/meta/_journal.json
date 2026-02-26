@@ -29,6 +29,13 @@
       "when": 1771758872936,
       "tag": "0003_concerned_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1772064000000,
+      "tag": "0004_rename_clerk_ids",
+      "breakpoints": true
     }
   ]
 }

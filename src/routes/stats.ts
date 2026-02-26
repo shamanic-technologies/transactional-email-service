@@ -20,12 +20,12 @@ router.post("/stats", requireApiKey, async (req, res) => {
     // Build filter conditions
     const conditions = [];
     if (body.appId) conditions.push(eq(emailEvents.appId, body.appId));
-    if (body.clerkOrgId) conditions.push(eq(emailEvents.clerkOrgId, body.clerkOrgId));
-    if (body.clerkUserId) conditions.push(eq(emailEvents.clerkUserId, body.clerkUserId));
+    if (body.orgId) conditions.push(eq(emailEvents.orgId, body.orgId));
+    if (body.userId) conditions.push(eq(emailEvents.userId, body.userId));
     if (body.eventType) conditions.push(eq(emailEvents.eventType, body.eventType));
 
     if (conditions.length === 0) {
-      res.status(400).json({ error: "At least one filter is required (appId, clerkOrgId, clerkUserId, or eventType)" });
+      res.status(400).json({ error: "At least one filter is required (appId, orgId, userId, or eventType)" });
       return;
     }
 

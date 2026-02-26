@@ -1,6 +1,6 @@
 # Transactional Email Service
 
-Transactional email service that sends event-triggered emails. Resolves recipients via Clerk, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
+Transactional email service that sends event-triggered emails. Resolves recipients via client-service, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
 
 ## API
 
@@ -17,7 +17,7 @@ Requires `x-api-key` header.
   "brandId": "brand_xxx",
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
-  "clerkUserId": "user_xxx",
+  "userId": "uuid-xxx",
   "metadata": { "name": "Alice" }
 }
 ```
@@ -29,12 +29,12 @@ Requires `x-api-key` header.
 | `brandId`        | No       | Brand ID (UUID) for tracking; omitted if not provided |
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
-| `clerkUserId`    | No       | Clerk user ID to resolve email           |
-| `clerkOrgId`     | No       | Clerk org ID to send to all members      |
-| `recipientEmail` | No       | Direct email (fallback if no Clerk IDs)  |
+| `userId`         | No       | Internal user ID to resolve email via client-service |
+| `orgId`          | No       | Internal org ID for tracking             |
+| `recipientEmail` | No       | Direct email (fallback if no userId)     |
 | `metadata`       | No       | Template-specific data                   |
 
-One of `clerkUserId`, `clerkOrgId`, or `recipientEmail` is required.
+One of `userId` or `recipientEmail` is required.
 
 ### `POST /stats`
 
@@ -45,8 +45,8 @@ Requires `x-api-key` header.
 ```json
 {
   "appId": "mcpfactory",
-  "clerkOrgId": "org_xxx",
-  "clerkUserId": "user_xxx",
+  "orgId": "uuid-xxx",
+  "userId": "uuid-xxx",
   "eventType": "welcome"
 }
 ```
@@ -54,8 +54,8 @@ Requires `x-api-key` header.
 | Field          | Required | Description                              |
 | -------------- | -------- | ---------------------------------------- |
 | `appId`        | No       | Filter by app ID                         |
-| `clerkOrgId`   | No       | Filter by Clerk org ID                   |
-| `clerkUserId`  | No       | Filter by Clerk user ID                  |
+| `orgId`        | No       | Filter by org ID                         |
+| `userId`       | No       | Filter by user ID                        |
 | `eventType`    | No       | Filter by event type                     |
 
 At least one filter is required.
@@ -185,7 +185,7 @@ Dedup key format: `{appId}:{eventType}:{recipientEmail}:{productId}`
 - **Framework:** Express
 - **Database:** PostgreSQL via Drizzle ORM
 - **Email delivery:** Email Gateway (routes to Postmark/Instantly)
-- **User resolution:** Clerk
+- **User resolution:** Client Service
 - **Validation & OpenAPI:** Zod + @asteasolutions/zod-to-openapi
 - **Deployment:** Railway (Docker)
 
@@ -208,7 +208,8 @@ npm run dev             # start dev server on PORT
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
-| `CLERK_SECRET_KEY` | Clerk secret key for user resolution |
+| `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |
+| `CLIENT_SERVICE_API_KEY` | Client service API key |
 | `SERVICE_URL` | Public URL used in OpenAPI spec (default: http://localhost:3000) |
 | `PORT` | Server port (default: 3008) |
 
@@ -236,9 +237,9 @@ src/
     index.ts            # Database connection
     schema.ts           # Drizzle schema (email_events + email_templates tables, incl. sender config)
   lib/
-    clerk.ts            # Clerk user/org email resolution
+    client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
-    runs-client.ts      # Runs service client (create/update runs via clerkOrgId)
+    runs-client.ts      # Runs service client (create/update runs via orgId)
   middleware/
     auth.ts             # API key authentication
   routes/

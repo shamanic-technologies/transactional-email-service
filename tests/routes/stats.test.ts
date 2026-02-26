@@ -83,11 +83,11 @@ describe("POST /stats", () => {
     });
   });
 
-  it("returns stats filtered by clerkOrgId", async () => {
+  it("returns stats filtered by orgId", async () => {
     const res = await request(app)
       .post("/stats")
       .set("X-API-Key", "test-service-key")
-      .send({ clerkOrgId: "org_123" });
+      .send({ orgId: "org_123" });
 
     expect(res.status).toBe(200);
     expect(res.body.stats.totalEmails).toBe(12);

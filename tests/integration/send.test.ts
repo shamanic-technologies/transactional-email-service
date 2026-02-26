@@ -4,9 +4,8 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { eq } from "drizzle-orm";
 
 // Mock external services before app imports
-vi.mock("../../src/lib/clerk.js", () => ({
+vi.mock("../../src/lib/client-service.js", () => ({
   resolveUserEmail: vi.fn().mockResolvedValue("user@test.com"),
-  resolveOrgEmails: vi.fn().mockResolvedValue(["org1@test.com", "org2@test.com"]),
 }));
 
 vi.mock("../../src/lib/email-gateway.js", () => ({
@@ -22,7 +21,7 @@ import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
 import { emailEvents } from "../../src/db/schema.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
-import { resolveUserEmail } from "../../src/lib/clerk.js";
+import { resolveUserEmail } from "../../src/lib/client-service.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 
@@ -100,7 +99,7 @@ describe("validation", () => {
       .set("x-api-key", API_KEY)
       .send({ appId: "mcpfactory", eventType: "waitlist", ...BASE });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/clerkUserId|clerkOrgId|recipientEmail/);
+    expect(res.body.error).toMatch(/userId|recipientEmail/);
   });
 });
 
@@ -128,8 +127,8 @@ describe("once-only dedup", () => {
     expect(res.body.results[0].reason).toBe("duplicate");
   });
 
-  it("sends welcome email via clerkUserId and blocks duplicate", async () => {
-    const payload = { appId: "mcpfactory", eventType: "welcome", ...BASE, clerkUserId: "user_123" };
+  it("sends welcome email via userId and blocks duplicate", async () => {
+    const payload = { appId: "mcpfactory", eventType: "welcome", ...BASE, userId: "user_123" };
 
     const first = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
     expect(first.body.results[0].sent).toBe(true);
@@ -147,13 +146,13 @@ describe("daily dedup", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "user_active", ...BASE, clerkUserId: "user_456" });
+      .send({ appId: "mcpfactory", eventType: "user_active", ...BASE, userId: "user_456" });
     expect(res.status).toBe(200);
     expect(res.body.results[0].sent).toBe(true);
   });
 
   it("blocks duplicate user_active for same user on same day", async () => {
-    const payload = { appId: "mcpfactory", eventType: "user_active", ...BASE, clerkUserId: "user_789" };
+    const payload = { appId: "mcpfactory", eventType: "user_active", ...BASE, userId: "user_789" };
 
     await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
     const res = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
@@ -241,7 +240,7 @@ describe("product-scoped dedup", () => {
 // --- Anonymous welcome dedup ---
 
 describe("anonymous welcome dedup", () => {
-  it("deduplicates welcome by recipientEmail when no clerkUserId", async () => {
+  it("deduplicates welcome by recipientEmail when no userId", async () => {
     const payload = {
       appId: "mcpfactory",
       eventType: "welcome",
@@ -285,11 +284,11 @@ describe("recipient resolution", () => {
     expect(res.body.results[0].sent).toBe(true);
   });
 
-  it("resolves email via Clerk when clerkUserId provided", async () => {
+  it("resolves email via client-service when userId provided", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE, clerkUserId: "user_abc" });
+      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE, userId: "user_abc" });
     expect(vi.mocked(resolveUserEmail)).toHaveBeenCalledWith("user_abc");
     expect(res.body.results[0].email).toBe("user@test.com");
     expect(res.body.results[0].sent).toBe(true);
@@ -299,7 +298,7 @@ describe("recipient resolution", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "signup_notification", ...BASE, clerkUserId: "user_new" });
+      .send({ appId: "mcpfactory", eventType: "signup_notification", ...BASE, userId: "user_new" });
     expect(res.body.results[0].email).toBe("kevin@mcpfactory.org");
     expect(res.body.results[0].sent).toBe(true);
   });
