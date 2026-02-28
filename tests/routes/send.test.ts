@@ -256,6 +256,37 @@ describe("POST /send", () => {
     );
   });
 
+  it("returns 404 when app has no templates registered", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .send({
+        appId: "unknown-app",
+        eventType: "welcome",
+        recipientEmail: "user@example.com",
+      });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain("No templates registered for app: unknown-app");
+    // Should NOT have attempted to send email or create a run
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when event type has no template in known app", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .send({
+        appId: "mcpfactory",
+        eventType: "nonexistent_event",
+        recipientEmail: "user@example.com",
+      });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain("No template for event");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("updates event status to 'failed' for non-deduped events when gateway fails", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: false,

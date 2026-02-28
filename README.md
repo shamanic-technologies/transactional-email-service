@@ -36,6 +36,13 @@ Requires `x-api-key` header.
 
 One of `userId` or `recipientEmail` is required.
 
+**Error responses:**
+
+| Status | Condition |
+| ------ | --------- |
+| 400    | Missing required fields (`appId`, `eventType`, or recipient) |
+| 404    | No templates registered for the given `appId` or `eventType` |
+
 ### `POST /stats`
 
 Requires `x-api-key` header.
