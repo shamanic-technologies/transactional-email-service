@@ -26,7 +26,7 @@ import { resolveUserEmail } from "../../src/lib/client-service.js";
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 
 // Base fields required by every request
-const BASE = { brandId: "brand_test", campaignId: "campaign_test" };
+const BASE = { userId: "user_test", orgId: "org_test", brandId: "brand_test", campaignId: "campaign_test" };
 
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
@@ -85,21 +85,32 @@ describe("validation", () => {
     expect(res.body.details.fieldErrors).toHaveProperty("eventType");
   });
 
+  it("rejects missing userId", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("x-api-key", API_KEY)
+      .send({ appId: "mcpfactory", eventType: "waitlist", orgId: "org_test", recipientEmail: "a@b.com" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
+    expect(res.body.details.fieldErrors).toHaveProperty("userId");
+  });
+
+  it("rejects missing orgId", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("x-api-key", API_KEY)
+      .send({ appId: "mcpfactory", eventType: "waitlist", userId: "user_test", recipientEmail: "a@b.com" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
+    expect(res.body.details.fieldErrors).toHaveProperty("orgId");
+  });
+
   it("succeeds without brandId or campaignId", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", recipientEmail: "a@b.com" });
+      .send({ appId: "mcpfactory", eventType: "waitlist", userId: "user_test", orgId: "org_test", recipientEmail: "a@b.com" });
     expect(res.status).toBe(200);
-  });
-
-  it("rejects request with no recipient info", async () => {
-    const res = await request(app)
-      .post("/send")
-      .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", ...BASE });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/userId|recipientEmail/);
   });
 });
 
@@ -127,8 +138,8 @@ describe("once-only dedup", () => {
     expect(res.body.results[0].reason).toBe("duplicate");
   });
 
-  it("sends welcome email via userId and blocks duplicate", async () => {
-    const payload = { appId: "mcpfactory", eventType: "welcome", ...BASE, userId: "user_123" };
+  it("sends welcome email and blocks duplicate", async () => {
+    const payload = { appId: "mcpfactory", eventType: "welcome", ...BASE };
 
     const first = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
     expect(first.body.results[0].sent).toBe(true);
@@ -146,7 +157,7 @@ describe("daily dedup", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "user_active", ...BASE, userId: "user_456" });
+      .send({ appId: "mcpfactory", eventType: "user_active", ...BASE });
     expect(res.status).toBe(200);
     expect(res.body.results[0].sent).toBe(true);
   });
@@ -172,6 +183,7 @@ describe("product-scoped dedup", () => {
       .send({
         appId: "generic",
         eventType: "webinar_welcome",
+        ...BASE,
         recipientEmail: "marie@test.com",
         productId: "webinar-2026-02-28",
         metadata: { productName: "Launch Webinar" },
@@ -185,6 +197,7 @@ describe("product-scoped dedup", () => {
     const payload = {
       appId: "generic",
       eventType: "webinar_welcome",
+      ...BASE,
       recipientEmail: "marie@test.com",
       productId: "webinar-2026-03-01",
       metadata: { productName: "Launch Webinar" },
@@ -201,6 +214,7 @@ describe("product-scoped dedup", () => {
     const base = {
       appId: "generic",
       eventType: "webinar_welcome",
+      ...BASE,
       recipientEmail: "marie@test.com",
       metadata: { productName: "Webinar" },
     };
@@ -223,6 +237,7 @@ describe("product-scoped dedup", () => {
     const payload = {
       appId: "generic",
       eventType: "j_minus_3",
+      ...BASE,
       recipientEmail: "bob@test.com",
       productId: "webinar-2026-03-15",
       metadata: { productName: "AI Workshop" },
@@ -235,26 +250,6 @@ describe("product-scoped dedup", () => {
     expect(second.body.results[0].sent).toBe(false);
     expect(second.body.results[0].reason).toBe("duplicate");
   });
-});
-
-// --- Anonymous welcome dedup ---
-
-describe("anonymous welcome dedup", () => {
-  it("deduplicates welcome by recipientEmail when no userId", async () => {
-    const payload = {
-      appId: "mcpfactory",
-      eventType: "welcome",
-      recipientEmail: "anon@test.com",
-    };
-
-    const first = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-    const second = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-
-    expect(first.body.results[0].sent).toBe(true);
-    expect(second.body.results[0].sent).toBe(false);
-    expect(second.body.results[0].reason).toBe("duplicate");
-  });
-
 });
 
 // --- Repeatable events ---
@@ -275,7 +270,7 @@ describe("repeatable events", () => {
 // --- Recipient resolution ---
 
 describe("recipient resolution", () => {
-  it("uses recipientEmail directly", async () => {
+  it("uses recipientEmail directly when provided", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
@@ -284,12 +279,12 @@ describe("recipient resolution", () => {
     expect(res.body.results[0].sent).toBe(true);
   });
 
-  it("resolves email via client-service when userId provided", async () => {
+  it("resolves email via client-service when no recipientEmail", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE, userId: "user_abc" });
-    expect(vi.mocked(resolveUserEmail)).toHaveBeenCalledWith("user_abc");
+      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE });
+    expect(vi.mocked(resolveUserEmail)).toHaveBeenCalledWith("user_test");
     expect(res.body.results[0].email).toBe("user@test.com");
     expect(res.body.results[0].sent).toBe(true);
   });
@@ -298,7 +293,7 @@ describe("recipient resolution", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "signup_notification", ...BASE, userId: "user_new" });
+      .send({ appId: "mcpfactory", eventType: "signup_notification", ...BASE });
     expect(res.body.results[0].email).toBe("kevin@mcpfactory.org");
     expect(res.body.results[0].sent).toBe(true);
   });
@@ -322,6 +317,8 @@ describe("database records", () => {
     expect(rows[0].appId).toBe("mcpfactory");
     expect(rows[0].eventType).toBe("campaign_created");
     expect(rows[0].status).toBe("sent");
+    expect(rows[0].orgId).toBe("org_test");
+    expect(rows[0].userId).toBe("user_test");
     expect(rows[0].metadata).toEqual({ foo: "bar" });
   });
 

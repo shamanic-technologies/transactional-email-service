@@ -76,14 +76,11 @@ router.post("/send", requireApiKey, async (req, res) => {
 
     if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType)) {
       recipientEmails = [ADMIN_EMAIL];
-    } else if (body.userId) {
-      const email = await resolveUserEmail(body.userId);
-      recipientEmails = [email];
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
-      res.status(400).json({ error: "One of userId or recipientEmail is required" });
-      return;
+      const email = await resolveUserEmail(body.userId);
+      recipientEmails = [email];
     }
 
     // For admin notifications, enrich metadata with the user's email
@@ -116,25 +113,23 @@ router.post("/send", requireApiKey, async (req, res) => {
         ? `${dedupKey}:${email}`
         : dedupKey;
 
-      // Create a run in runs-service before sending (only when we have a real orgId)
-      let run: { id: string } | null = null;
+      // Create a run in runs-service before sending
+      let run: { id: string };
 
-      if (body.orgId) {
-        try {
-          run = await createRun({
-            orgId: body.orgId,
-            appId: body.appId,
-            serviceName: "transactional-email-service",
-            taskName: `email-${body.eventType}`,
-            userId: body.userId,
-            brandId: body.brandId,
-            campaignId: body.campaignId,
-          });
-        } catch (runErr: any) {
-          console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
-          results.push({ email, sent: false, reason: `Run creation failed: ${runErr.message}` });
-          continue;
-        }
+      try {
+        run = await createRun({
+          orgId: body.orgId,
+          appId: body.appId,
+          serviceName: "transactional-email-service",
+          taskName: `email-${body.eventType}`,
+          userId: body.userId,
+          brandId: body.brandId,
+          campaignId: body.campaignId,
+        });
+      } catch (runErr: any) {
+        console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
+        results.push({ email, sent: false, reason: `Run creation failed: ${runErr.message}` });
+        continue;
       }
 
       let insertedEventId: string | null = null;
@@ -149,8 +144,8 @@ router.post("/send", requireApiKey, async (req, res) => {
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: recipientDedupKey,
-              userId: body.userId || null,
-              orgId: body.orgId || null,
+              userId: body.userId,
+              orgId: body.orgId,
               status: "pending",
               metadata: metadata || null,
             })
@@ -158,7 +153,7 @@ router.post("/send", requireApiKey, async (req, res) => {
             .returning();
 
           if (inserted.length === 0) {
-            if (run) await updateRun(run.id, "completed");
+            await updateRun(run.id, "completed");
             results.push({ email, sent: false, reason: "duplicate" });
             continue;
           }
@@ -173,8 +168,8 @@ router.post("/send", requireApiKey, async (req, res) => {
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: null,
-              userId: body.userId || null,
-              orgId: body.orgId || null,
+              userId: body.userId,
+              orgId: body.orgId,
               status: "pending",
               metadata: metadata || null,
             })
@@ -191,7 +186,7 @@ router.post("/send", requireApiKey, async (req, res) => {
           textBody: template.textBody,
           tag: `${body.appId}-${body.eventType}`,
           orgId: body.orgId,
-          runId: run?.id,
+          runId: run.id,
           appId: body.appId,
           brandId: body.brandId,
           campaignId: body.campaignId,
@@ -205,18 +200,16 @@ router.post("/send", requireApiKey, async (req, res) => {
           .set({ status: "sent" })
           .where(eq(emailEvents.id, insertedEventId));
 
-        if (run) await updateRun(run.id, "completed");
+        await updateRun(run.id, "completed");
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
 
         // Mark run as failed
-        if (run) {
-          try {
-            await updateRun(run.id, "failed");
-          } catch {
-            // Best effort
-          }
+        try {
+          await updateRun(run.id, "failed");
+        } catch {
+          // Best effort
         }
 
         // Update event status to failed

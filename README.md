@@ -14,10 +14,11 @@ Requires `x-api-key` header.
 {
   "appId": "mcpfactory",
   "eventType": "welcome",
+  "userId": "uuid-xxx",
+  "orgId": "uuid-xxx",
   "brandId": "brand_xxx",
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
-  "userId": "uuid-xxx",
   "metadata": { "name": "Alice" }
 }
 ```
@@ -26,21 +27,19 @@ Requires `x-api-key` header.
 | ---------------- | -------- | ---------------------------------------- |
 | `appId`          | Yes      | App identifier (e.g. `mcpfactory`)       |
 | `eventType`      | Yes      | Event type (see below)                   |
+| `userId`         | Yes      | Internal user ID (client-service UUID) — used for email resolution, dedup, and run tracking |
+| `orgId`          | Yes      | Internal org ID (client-service UUID) — used for run/cost tracking |
 | `brandId`        | No       | Brand ID (UUID) for tracking; omitted if not provided |
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
-| `userId`         | No       | Internal user ID to resolve email via client-service |
-| `orgId`          | No       | Internal org ID (client-service UUID). Required for run/cost tracking — if omitted, no run is created in runs-service |
-| `recipientEmail` | No       | Direct email (fallback if no userId)     |
+| `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
 | `metadata`       | No       | Template-specific data                   |
-
-One of `userId` or `recipientEmail` is required.
 
 **Error responses:**
 
 | Status | Condition |
 | ------ | --------- |
-| 400    | Missing required fields (`appId`, `eventType`, or recipient) |
+| 400    | Missing required fields (`appId`, `eventType`, `userId`, or `orgId`) |
 | 404    | No templates registered for the given `appId` or `eventType` |
 
 ### `POST /stats`
