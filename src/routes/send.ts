@@ -24,8 +24,6 @@ const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_
 const ADMIN_EMAIL = "kevin@mcpfactory.org";
 const ADMIN_NOTIFICATION_EVENTS = new Set(["signup_notification", "signin_notification", "user_active"]);
 
-// System org ID for runs without a user org (admin notifications, etc.)
-const SYSTEM_ORG_ID = "transactional-email-service";
 
 function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -118,23 +116,25 @@ router.post("/send", requireApiKey, async (req, res) => {
         ? `${dedupKey}:${email}`
         : dedupKey;
 
-      // Create a run in runs-service before sending
+      // Create a run in runs-service before sending (only when we have a real orgId)
       let run: { id: string } | null = null;
 
-      try {
-        run = await createRun({
-          orgId: body.orgId || SYSTEM_ORG_ID,
-          appId: body.appId,
-          serviceName: "transactional-email-service",
-          taskName: `email-${body.eventType}`,
-          userId: body.userId,
-          brandId: body.brandId,
-          campaignId: body.campaignId,
-        });
-      } catch (runErr: any) {
-        console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
-        results.push({ email, sent: false, reason: `Run creation failed: ${runErr.message}` });
-        continue;
+      if (body.orgId) {
+        try {
+          run = await createRun({
+            orgId: body.orgId,
+            appId: body.appId,
+            serviceName: "transactional-email-service",
+            taskName: `email-${body.eventType}`,
+            userId: body.userId,
+            brandId: body.brandId,
+            campaignId: body.campaignId,
+          });
+        } catch (runErr: any) {
+          console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
+          results.push({ email, sent: false, reason: `Run creation failed: ${runErr.message}` });
+          continue;
+        }
       }
 
       let insertedEventId: string | null = null;
@@ -158,7 +158,7 @@ router.post("/send", requireApiKey, async (req, res) => {
             .returning();
 
           if (inserted.length === 0) {
-            await updateRun(run.id, "completed");
+            if (run) await updateRun(run.id, "completed");
             results.push({ email, sent: false, reason: "duplicate" });
             continue;
           }
@@ -191,7 +191,7 @@ router.post("/send", requireApiKey, async (req, res) => {
           textBody: template.textBody,
           tag: `${body.appId}-${body.eventType}`,
           orgId: body.orgId,
-          runId: run.id,
+          runId: run?.id,
           appId: body.appId,
           brandId: body.brandId,
           campaignId: body.campaignId,
@@ -205,16 +205,18 @@ router.post("/send", requireApiKey, async (req, res) => {
           .set({ status: "sent" })
           .where(eq(emailEvents.id, insertedEventId));
 
-        await updateRun(run.id, "completed");
+        if (run) await updateRun(run.id, "completed");
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
 
         // Mark run as failed
-        try {
-          await updateRun(run.id, "failed");
-        } catch {
-          // Best effort
+        if (run) {
+          try {
+            await updateRun(run.id, "failed");
+          } catch {
+            // Best effort
+          }
         }
 
         // Update event status to failed
