@@ -196,7 +196,6 @@ router.post("/send", requireApiKey, async (req, res) => {
           brandId: body.brandId,
           campaignId: body.campaignId,
           from: template.from,
-          messageStream: template.messageStream,
         });
 
         // Mark as sent only after successful delivery

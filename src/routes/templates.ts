@@ -27,7 +27,6 @@ router.put("/templates", requireApiKey, async (req, res) => {
           htmlBody: tpl.htmlBody,
           textBody: tpl.textBody,
           fromAddress: tpl.from ?? null,
-          messageStream: tpl.messageStream ?? null,
         })
         .onConflictDoUpdate({
           target: [emailTemplates.appId, emailTemplates.name],
@@ -36,7 +35,6 @@ router.put("/templates", requireApiKey, async (req, res) => {
             htmlBody: tpl.htmlBody,
             textBody: tpl.textBody,
             fromAddress: tpl.from ?? null,
-            messageStream: tpl.messageStream ?? null,
             updatedAt: new Date(),
           },
         })

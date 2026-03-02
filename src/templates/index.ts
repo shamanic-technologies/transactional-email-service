@@ -9,7 +9,6 @@ export interface TemplateResult {
   htmlBody: string;
   textBody: string;
   from?: string | null;
-  messageStream?: string | null;
 }
 
 type TemplateFn = (metadata?: Record<string, unknown>) => TemplateResult;
@@ -45,7 +44,6 @@ export async function getTemplate(appId: string, eventType: string): Promise<Tem
       htmlBody: interpolate(row.htmlBody, metadata),
       textBody: interpolate(row.textBody, metadata),
       from: row.fromAddress,
-      messageStream: row.messageStream,
     });
   }
 

@@ -99,8 +99,7 @@ Requires `x-api-key` header.
       "subject": "Welcome to {{appName}}!",
       "htmlBody": "<h1>Welcome {{name}}!</h1>",
       "textBody": "Welcome {{name}}!",
-      "from": "GrowthAgency <hello@growthagency.dev>",
-      "messageStream": "outbound"
+      "from": "GrowthAgency <hello@growthagency.dev>"
     }
   ]
 }
@@ -115,7 +114,6 @@ Requires `x-api-key` header.
 | `templates[].htmlBody` | Yes | HTML body (supports `{{var}}` interpolation) |
 | `templates[].textBody` | No | Plain text body (supports `{{var}}` interpolation) |
 | `templates[].from` | No | Sender address, e.g. `"Display Name <email@domain.com>"`. If omitted, the email gateway default is used. |
-| `templates[].messageStream` | No | Postmark message stream ID, e.g. `"outbound"` or `"broadcast"`. If omitted, the email gateway default is used. |
 
 **Response:**
 
@@ -144,7 +142,6 @@ export async function register() {
           htmlBody: "<h1>Welcome!</h1>",
           textBody: "Welcome!",
           from: "MyApp <hello@myapp.dev>",       // optional: custom sender address
-          messageStream: "outbound",              // optional: Postmark stream ID
         },
       ]
     }),

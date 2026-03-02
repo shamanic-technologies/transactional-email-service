@@ -242,10 +242,6 @@
           "from": {
             "type": "string",
             "description": "Sender address for this template, e.g. \"Display Name <email@domain.com>\". If omitted, the email gateway default is used."
-          },
-          "messageStream": {
-            "type": "string",
-            "description": "Postmark message stream ID, e.g. \"outbound\" or \"broadcast\". If omitted, the email gateway default is used."
           }
         },
         "required": [

@@ -35,7 +35,6 @@ export const emailTemplates = pgTable(
     htmlBody: text("html_body").notNull(),
     textBody: text("text_body").notNull().default(""),
     fromAddress: text("from_address"),
-    messageStream: text("message_stream"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
