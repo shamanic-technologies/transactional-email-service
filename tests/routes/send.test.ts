@@ -115,7 +115,7 @@ describe("POST /send", () => {
     expect(body.campaignId).toBe("campaign_def");
   });
 
-  it("uses system org for createRun but omits clerkOrgId from email gateway when orgId not provided", async () => {
+  it("skips run creation when orgId not provided", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
     const res = await request(app)
@@ -131,17 +131,15 @@ describe("POST /send", () => {
 
     expect(res.status).toBe(200);
 
-    // createRun should still use the system org ID
-    expect(createRun).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: "transactional-email-service" })
-    );
+    // createRun should NOT be called when orgId is missing
+    expect(createRun).not.toHaveBeenCalled();
 
-    // email gateway should NOT receive a fake clerkOrgId
+    // email gateway should still be called, without clerkOrgId or runId
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
     expect(body.clerkOrgId).toBeUndefined();
-    expect(body.runId).toBe("run-456");
+    expect(body.runId).toBeUndefined();
   });
 
   it("returns 400 when appId or eventType is missing", async () => {

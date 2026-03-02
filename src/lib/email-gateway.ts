@@ -8,7 +8,7 @@ interface SendEmailParams {
   textBody: string;
   tag: string;
   orgId?: string;
-  runId: string;
+  runId?: string;
   appId: string;
   brandId?: string;
   campaignId?: string;
@@ -32,7 +32,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       appId: params.appId,
       ...(params.brandId && { brandId: params.brandId }),
       ...(params.campaignId && { campaignId: params.campaignId }),
-      runId: params.runId,
+      ...(params.runId && { runId: params.runId }),
       ...(params.orgId && { clerkOrgId: params.orgId }),
       to: params.to,
       recipientFirstName: "",

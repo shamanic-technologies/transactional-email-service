@@ -30,7 +30,7 @@ Requires `x-api-key` header.
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `userId`         | No       | Internal user ID to resolve email via client-service |
-| `orgId`          | No       | Internal org ID for tracking             |
+| `orgId`          | No       | Internal org ID (client-service UUID). Required for run/cost tracking — if omitted, no run is created in runs-service |
 | `recipientEmail` | No       | Direct email (fallback if no userId)     |
 | `metadata`       | No       | Template-specific data                   |
 
@@ -246,7 +246,7 @@ src/
   lib/
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
-    runs-client.ts      # Runs service client (create/update runs via orgId)
+    runs-client.ts      # Runs service client (create/update runs, skipped when no orgId)
   middleware/
     auth.ts             # API key authentication
   routes/
