@@ -13,7 +13,6 @@ interface SendEmailParams {
   brandId?: string;
   campaignId?: string;
   from?: string | null;
-  messageStream?: string | null;
 }
 
 export async function sendEmail(params: SendEmailParams): Promise<void> {
@@ -43,7 +42,6 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       textBody: params.textBody,
       tag: params.tag,
       ...(params.from && { from: params.from }),
-      ...(params.messageStream && { postmark: { messageStream: params.messageStream } }),
     }),
   });
 

@@ -129,7 +129,7 @@ describe("PUT /templates", () => {
     expect(res.body.templates[1]).toEqual({ name: "reset", action: "created" });
   });
 
-  it("persists per-template from and messageStream in upsert values", async () => {
+  it("persists per-template from in upsert values", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
@@ -141,7 +141,6 @@ describe("PUT /templates", () => {
             subject: "Thanks for your purchase!",
             htmlBody: "<h1>Thanks!</h1>",
             from: "GrowthAgency <hello@growthagency.dev>",
-            messageStream: "outbound",
           },
         ],
       });
@@ -149,11 +148,10 @@ describe("PUT /templates", () => {
     expect(res.status).toBe(200);
     expect(res.body.templates).toEqual([{ name: "checkout_success", action: "created" }]);
 
-    // Verify from and messageStream were passed to the insert values
+    // Verify from was passed to the insert values
     expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         fromAddress: "GrowthAgency <hello@growthagency.dev>",
-        messageStream: "outbound",
       })
     );
   });
@@ -170,14 +168,12 @@ describe("PUT /templates", () => {
             subject: "Welcome!",
             htmlBody: "<h1>Hi</h1>",
             from: "GrowthAgency <hello@growthagency.dev>",
-            messageStream: "outbound",
           },
           {
             name: "support_ticket",
             subject: "Ticket received",
             htmlBody: "<h1>Got it</h1>",
             from: "Support <support@growthagency.dev>",
-            messageStream: "transactional",
           },
         ],
       });
@@ -189,7 +185,6 @@ describe("PUT /templates", () => {
     expect(mockValues).toHaveBeenNthCalledWith(1,
       expect.objectContaining({
         fromAddress: "GrowthAgency <hello@growthagency.dev>",
-        messageStream: "outbound",
       })
     );
 
@@ -197,12 +192,11 @@ describe("PUT /templates", () => {
     expect(mockValues).toHaveBeenNthCalledWith(2,
       expect.objectContaining({
         fromAddress: "Support <support@growthagency.dev>",
-        messageStream: "transactional",
       })
     );
   });
 
-  it("sets fromAddress and messageStream to null when not provided", async () => {
+  it("sets fromAddress to null when not provided", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
@@ -222,7 +216,6 @@ describe("PUT /templates", () => {
     expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         fromAddress: null,
-        messageStream: null,
       })
     );
   });
