@@ -115,31 +115,35 @@ describe("POST /send", () => {
     expect(body.campaignId).toBe("campaign_def");
   });
 
-  it("skips run creation when orgId not provided", async () => {
-    const { createRun } = await import("../../src/lib/runs-client.js");
-
+  it("returns 400 when orgId is missing", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
       .send({
         appId: "mcpfactory",
         eventType: "user_active",
-        brandId: "brand_abc",
-        campaignId: "campaign_def",
         userId: "user_789",
       });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
+    expect(res.body.details.fieldErrors).toHaveProperty("orgId");
+  });
 
-    // createRun should NOT be called when orgId is missing
-    expect(createRun).not.toHaveBeenCalled();
+  it("returns 400 when userId is missing", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .send({
+        appId: "mcpfactory",
+        eventType: "user_active",
+        orgId: "org_456",
+        recipientEmail: "user@example.com",
+      });
 
-    // email gateway should still be called, without clerkOrgId or runId
-    const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
-
-    expect(body.clerkOrgId).toBeUndefined();
-    expect(body.runId).toBeUndefined();
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
+    expect(res.body.details.fieldErrors).toHaveProperty("userId");
   });
 
   it("returns 400 when appId or eventType is missing", async () => {
@@ -148,6 +152,8 @@ describe("POST /send", () => {
       .set("X-API-Key", "test-service-key")
       .send({
         eventType: "welcome",
+        userId: "user_123",
+        orgId: "org_456",
         recipientEmail: "user@example.com",
       });
 
@@ -160,6 +166,8 @@ describe("POST /send", () => {
       .set("X-API-Key", "test-service-key")
       .send({
         appId: "mcpfactory",
+        userId: "user_123",
+        orgId: "org_456",
         recipientEmail: "user@example.com",
       });
 
@@ -176,6 +184,7 @@ describe("POST /send", () => {
         appId: "mcpfactory",
         eventType: "user_active",
         userId: "user_123",
+        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -197,6 +206,8 @@ describe("POST /send", () => {
         eventType: "campaign_created",
         brandId: "brand_abc",
         campaignId: "campaign_def",
+        userId: "user_123",
+        orgId: "org_456",
         recipientEmail: "user@example.com",
         metadata: { campaignName: "Test Campaign" },
       });
@@ -219,6 +230,7 @@ describe("POST /send", () => {
         appId: "mcpfactory",
         eventType: "user_active",
         userId: "user_123",
+        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -243,6 +255,7 @@ describe("POST /send", () => {
         appId: "mcpfactory",
         eventType: "user_active",
         userId: "user_123",
+        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -261,6 +274,8 @@ describe("POST /send", () => {
       .send({
         appId: "unknown-app",
         eventType: "welcome",
+        userId: "user_123",
+        orgId: "org_456",
         recipientEmail: "user@example.com",
       });
 
@@ -277,6 +292,8 @@ describe("POST /send", () => {
       .send({
         appId: "mcpfactory",
         eventType: "nonexistent_event",
+        userId: "user_123",
+        orgId: "org_456",
         recipientEmail: "user@example.com",
       });
 
@@ -299,6 +316,8 @@ describe("POST /send", () => {
       .send({
         appId: "mcpfactory",
         eventType: "campaign_created",
+        userId: "user_123",
+        orgId: "org_456",
         recipientEmail: "user@example.com",
         metadata: { campaignName: "Test" },
       });

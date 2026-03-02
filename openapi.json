@@ -99,11 +99,11 @@
           },
           "userId": {
             "type": "string",
-            "description": "User ID — used to resolve recipient email via client-service and as dedup identifier"
+            "description": "Internal user ID (client-service UUID) — used to resolve recipient email and for run/cost tracking"
           },
           "orgId": {
             "type": "string",
-            "description": "Org ID — for tracking purposes"
+            "description": "Internal org ID (client-service UUID) — used for run/cost tracking"
           },
           "recipientEmail": {
             "type": "string",
@@ -120,7 +120,9 @@
         },
         "required": [
           "appId",
-          "eventType"
+          "eventType",
+          "userId",
+          "orgId"
         ]
       },
       "StatsResponse": {

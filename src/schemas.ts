@@ -24,8 +24,8 @@ export const SendRequestSchema = z
     brandId: z.string().optional().openapi({ description: "Brand ID for tracking" }),
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
     productId: z.string().optional().openapi({ description: "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)" }),
-    userId: z.string().optional().openapi({ description: "User ID — used to resolve recipient email via client-service and as dedup identifier" }),
-    orgId: z.string().optional().openapi({ description: "Org ID — for tracking purposes" }),
+    userId: z.string().openapi({ description: "Internal user ID (client-service UUID) — used to resolve recipient email and for run/cost tracking" }),
+    orgId: z.string().openapi({ description: "Internal org ID (client-service UUID) — used for run/cost tracking" }),
     recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (fallback when no userId provided)" }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
