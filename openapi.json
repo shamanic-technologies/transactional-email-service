@@ -1,0 +1,482 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Transactional Email Service",
+    "description": "Transactional email service with templating, deduplication, and recipient resolution",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000"
+    }
+  ],
+  "security": [],
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service"
+        ]
+      },
+      "SendResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendResult"
+            }
+          }
+        },
+        "required": [
+          "results"
+        ]
+      },
+      "SendResult": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "sent": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "sent"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "details": {
+            "nullable": true
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "SendRequest": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "description": "App identifier (e.g. 'mcpfactory'). Must match a registered template app."
+          },
+          "eventType": {
+            "type": "string",
+            "description": "Event type determining which template to use and which dedup strategy applies. Once-only events (waitlist, welcome, signup_notification): sent at most once per recipient. Daily events (user_active): sent at most once per recipient per day. Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Any other event type has NO dedup and will send every time."
+          },
+          "brandId": {
+            "type": "string",
+            "description": "Brand ID for tracking"
+          },
+          "campaignId": {
+            "type": "string",
+            "description": "Campaign ID for tracking"
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)"
+          },
+          "userId": {
+            "type": "string",
+            "description": "User ID — used to resolve recipient email via client-service and as dedup identifier"
+          },
+          "orgId": {
+            "type": "string",
+            "description": "Org ID — for tracking purposes"
+          },
+          "recipientEmail": {
+            "type": "string",
+            "format": "email",
+            "description": "Direct recipient email (fallback when no userId provided)"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Template variables for {{variable}} interpolation"
+          }
+        },
+        "required": [
+          "appId",
+          "eventType"
+        ]
+      },
+      "StatsResponse": {
+        "type": "object",
+        "properties": {
+          "stats": {
+            "type": "object",
+            "properties": {
+              "totalEmails": {
+                "type": "number"
+              },
+              "sent": {
+                "type": "number"
+              },
+              "failed": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "totalEmails",
+              "sent",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "stats"
+        ]
+      },
+      "StatsRequest": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string"
+          },
+          "orgId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          }
+        }
+      },
+      "DeployTemplatesResponse": {
+        "type": "object",
+        "properties": {
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeployTemplateResult"
+            }
+          }
+        },
+        "required": [
+          "templates"
+        ]
+      },
+      "DeployTemplateResult": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "action"
+        ]
+      },
+      "DeployTemplatesRequest": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateItem"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "appId",
+          "templates"
+        ]
+      },
+      "TemplateItem": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "htmlBody": {
+            "type": "string",
+            "minLength": 1
+          },
+          "textBody": {
+            "type": "string",
+            "default": ""
+          },
+          "from": {
+            "type": "string",
+            "description": "Sender address for this template, e.g. \"Display Name <email@domain.com>\". If omitted, the email gateway default is used."
+          },
+          "messageStream": {
+            "type": "string",
+            "description": "Postmark message stream ID, e.g. \"outbound\" or \"broadcast\". If omitted, the email gateway default is used."
+          }
+        },
+        "required": [
+          "name",
+          "subject",
+          "htmlBody"
+        ]
+      }
+    },
+    "parameters": {},
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Returns service health status",
+        "tags": [
+          "Health"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/send": {
+      "post": {
+        "summary": "Send a lifecycle email",
+        "description": "Send a templated lifecycle email. Resolves recipients via user ID (client-service) or direct email. One of userId or recipientEmail is required.\n\n**Deduplication:** The dedup strategy depends on eventType:\n- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{appId}:{eventType}:{userId or recipientEmail}`.\n- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{appId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{appId}:{eventType}:{recipientEmail}:{productId}`.\n- **No dedup** (all other event types): sends every time with no dedup.\n\nDuplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
+        "tags": [
+          "Email"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email send results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "post": {
+        "summary": "Get aggregated stats",
+        "description": "Get aggregated email event stats filtered by appId, orgId, userId, and/or eventType. At least one filter required.",
+        "tags": [
+          "Stats"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Aggregated stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or missing filters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates": {
+      "put": {
+        "summary": "Deploy (upsert) email templates",
+        "description": "Idempotent: creates new templates or updates existing ones matched by (appId + name). Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.",
+        "tags": [
+          "Templates"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeployTemplatesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Templates deployed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployTemplatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI specification",
+        "description": "Returns the OpenAPI spec for this service",
+        "tags": [
+          "Docs"
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI JSON document"
+          },
+          "404": {
+            "description": "Spec not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
