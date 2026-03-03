@@ -293,7 +293,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Caller's run ID — used as parentRunId when creating this service's own run"
+            "description": "Caller's run ID"
           }
         ],
         "requestBody": {
@@ -378,7 +378,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Caller's run ID — used as parentRunId when creating this service's own run"
+            "description": "Caller's run ID"
           }
         ],
         "requestBody": {
@@ -463,7 +463,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Caller's run ID — used as parentRunId when creating this service's own run"
+            "description": "Caller's run ID"
           }
         ],
         "requestBody": {

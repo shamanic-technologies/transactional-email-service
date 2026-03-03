@@ -8,7 +8,7 @@ All protected endpoints require these headers:
 - `x-api-key` — service API key
 - `x-org-id` — internal org UUID from client-service
 - `x-user-id` — internal user UUID from client-service
-- `x-run-id` — caller's run ID (used as parentRunId when creating this service's own run in runs-service)
+- `x-run-id` — caller's run ID
 
 ### `POST /send`
 

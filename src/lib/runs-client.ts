@@ -39,9 +39,9 @@ export interface CreateRunParams {
 
 async function runsRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown; orgId?: string; userId?: string } = {}
+  options: { method?: string; body?: unknown; orgId?: string; userId?: string; runId?: string } = {}
 ): Promise<T> {
-  const { method = "GET", body, orgId, userId } = options;
+  const { method = "GET", body, orgId, userId, runId } = options;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -49,6 +49,7 @@ async function runsRequest<T>(
   };
   if (orgId) headers["x-org-id"] = orgId;
   if (userId) headers["x-user-id"] = userId;
+  if (runId) headers["x-run-id"] = runId;
 
   const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
     method,
@@ -74,6 +75,7 @@ export async function createRun(params: CreateRunParams): Promise<Run> {
     body: params,
     orgId: params.orgId,
     userId: params.userId,
+    runId: params.parentRunId,
   });
 }
 
@@ -84,5 +86,6 @@ export async function updateRun(
   return runsRequest<Run>(`/v1/runs/${runId}`, {
     method: "PATCH",
     body: { status },
+    runId,
   });
 }

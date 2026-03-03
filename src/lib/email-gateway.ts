@@ -24,6 +24,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": EMAIL_GATEWAY_SERVICE_API_KEY,
+      "x-run-id": params.runId,
     },
     body: JSON.stringify({
       type: "transactional",

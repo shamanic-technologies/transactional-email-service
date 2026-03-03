@@ -140,7 +140,7 @@ const runIdHeader = {
   in: "header" as const,
   required: true,
   schema: { type: "string" as const },
-  description: "Caller's run ID — used as parentRunId when creating this service's own run",
+  description: "Caller's run ID",
 };
 
 // --- Register endpoints ---
