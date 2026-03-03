@@ -285,7 +285,7 @@ describe("recipient resolution", () => {
       .set("x-api-key", API_KEY)
       .set(HEADERS)
       .send({ eventType: "signup_notification", ...BASE });
-    expect(res.body.results[0].email).toBe("kevin@mcpfactory.org");
+    expect(res.body.results[0].email).toBe("kevin@distribute.you");
     expect(res.body.results[0].sent).toBe(true);
   });
 });

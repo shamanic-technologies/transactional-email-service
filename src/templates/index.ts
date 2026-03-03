@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
-import * as mcpfactory from "./mcpfactory/index.js";
+import * as distribute from "./distribute/index.js";
 import * as generic from "./generic/index.js";
 
 export interface TemplateResult {
@@ -14,7 +14,7 @@ export interface TemplateResult {
 type TemplateFn = (metadata?: Record<string, unknown>) => TemplateResult;
 
 const hardcodedRegistry: Record<string, TemplateFn> = {
-  ...mcpfactory.templates,
+  ...distribute.templates,
   ...generic.templates,
 };
 

@@ -14,15 +14,15 @@ export function campaignCreated(metadata?: Record<string, unknown>): TemplateRes
       </p>
       
       <p style="color: #4a4a4a; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
-        <a href="https://dashboard.mcpfactory.org" style="color: #6366f1;">View in dashboard</a>
+        <a href="https://dashboard.distribute.you" style="color: #6366f1;">View in dashboard</a>
       </p>
     `),
     textBody: `Campaign created: ${campaignName}
 
 Your campaign "${campaignName}" has been created and is now live.
 
-View in dashboard: https://dashboard.mcpfactory.org
+View in dashboard: https://dashboard.distribute.you
 
-MCP Factory - The DFY, BYOK MCP Platform`,
+Distribute`,
   };
 }
