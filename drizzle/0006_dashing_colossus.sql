@@ -1,5 +1,7 @@
 DROP INDEX IF EXISTS "idx_email_events_app_type";--> statement-breakpoint
 DROP INDEX IF EXISTS "idx_email_templates_app_name";--> statement-breakpoint
+UPDATE "email_events" SET "user_id" = 'legacy' WHERE "user_id" IS NULL;--> statement-breakpoint
+UPDATE "email_events" SET "org_id" = 'legacy' WHERE "org_id" IS NULL;--> statement-breakpoint
 ALTER TABLE "email_events" ALTER COLUMN "user_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "email_events" ALTER COLUMN "org_id" SET NOT NULL;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_email_events_org_type" ON "email_events" USING btree ("org_id","event_type");--> statement-breakpoint
