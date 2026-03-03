@@ -24,7 +24,6 @@ export const SendRequestSchema = z
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
     productId: z.string().optional().openapi({ description: "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)" }),
     recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (overrides client-service resolution if provided)" }),
-    parentRunId: z.string().optional().openapi({ description: "Parent run ID for creating child runs in runs-service" }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
   .openapi("SendRequest");
@@ -136,6 +135,14 @@ const userIdHeader = {
   description: "Internal user UUID from client-service",
 };
 
+const runIdHeader = {
+  name: "x-run-id",
+  in: "header" as const,
+  required: true,
+  schema: { type: "string" as const },
+  description: "Caller's run ID — used as parentRunId when creating this service's own run",
+};
+
 // --- Register endpoints ---
 
 registry.registerPath({
@@ -159,7 +166,7 @@ registry.registerPath({
   description:
     "Send a templated lifecycle email. Resolves recipients via user ID (client-service) or direct email. " +
     "One of userId (from x-user-id header) or recipientEmail is required.\n\n" +
-    "**Required headers:** `x-org-id`, `x-user-id`\n\n" +
+    "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`\n\n" +
     "**Deduplication:** The dedup strategy depends on eventType:\n" +
     "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{orgId}:{eventType}:{userId or recipientEmail}`.\n" +
     "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
@@ -168,7 +175,7 @@ registry.registerPath({
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader],
   request: {
     body: {
       required: true,
@@ -197,10 +204,10 @@ registry.registerPath({
   summary: "Get aggregated stats",
   description:
     "Get aggregated email event stats scoped by the caller's org (from x-org-id header), with optional eventType filter.\n\n" +
-    "**Required headers:** `x-org-id`, `x-user-id`",
+    "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Stats"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader],
   request: {
     body: {
       required: true,
@@ -229,10 +236,10 @@ registry.registerPath({
   summary: "Deploy (upsert) email templates",
   description:
     "Idempotent: creates new templates or updates existing ones matched by name. Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.\n\n" +
-    "**Required headers:** `x-org-id`, `x-user-id`",
+    "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Templates"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader],
   request: {
     body: {
       required: true,

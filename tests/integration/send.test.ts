@@ -26,7 +26,7 @@ import { resolveUserEmail } from "../../src/lib/client-service.js";
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 
 // Identity headers required by every request
-const HEADERS = { "x-org-id": "org_test", "x-user-id": "user_test" };
+const HEADERS = { "x-org-id": "org_test", "x-user-id": "user_test", "x-run-id": "run_test" };
 
 // Base fields for request body
 const BASE = { brandId: "brand_test", campaignId: "campaign_test" };
@@ -151,7 +151,7 @@ describe("daily dedup", () => {
   });
 
   it("blocks duplicate user_active for same user on same day", async () => {
-    const headers = { "x-org-id": "org_test", "x-user-id": "user_789" };
+    const headers = { "x-org-id": "org_test", "x-user-id": "user_789", "x-run-id": "run_dedup" };
     const payload = { eventType: "user_active", ...BASE };
 
     await request(app).post("/send").set("x-api-key", API_KEY).set(headers).send(payload);

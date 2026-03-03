@@ -65,7 +65,7 @@ app.use(express.json());
 app.use(sendRoutes);
 
 // Identity headers applied to all requests
-const HEADERS = { "x-org-id": "org_456", "x-user-id": "user_123" };
+const HEADERS = { "x-org-id": "org_456", "x-user-id": "user_123", "x-run-id": "run_caller_001" };
 
 beforeEach(() => {
   fetchSpy = vi.fn().mockResolvedValue({ ok: true });
@@ -120,6 +120,7 @@ describe("POST /send", () => {
       .post("/send")
       .set("X-API-Key", "test-service-key")
       .set("x-user-id", "user_123")
+      .set("x-run-id", "run_001")
       .send({
         eventType: "user_active",
       });
@@ -133,6 +134,21 @@ describe("POST /send", () => {
       .post("/send")
       .set("X-API-Key", "test-service-key")
       .set("x-org-id", "org_456")
+      .set("x-run-id", "run_001")
+      .send({
+        eventType: "user_active",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
+  });
+
+  it("returns 400 when x-run-id header is missing", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .set("x-user-id", "user_123")
       .send({
         eventType: "user_active",
       });
@@ -277,21 +293,22 @@ describe("POST /send", () => {
     );
   });
 
-  it("accepts parentRunId and forwards to run creation", async () => {
+  it("uses x-run-id header as parentRunId when creating runs", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set("x-org-id", "org_456")
+      .set("x-user-id", "user_123")
+      .set("x-run-id", "caller-run-789")
       .send({
         eventType: "user_active",
-        parentRunId: "parent-run-789",
       });
 
     expect(res.status).toBe(200);
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
-      expect.objectContaining({ parentRunId: "parent-run-789" })
+      expect.objectContaining({ parentRunId: "caller-run-789" })
     );
   });
 });

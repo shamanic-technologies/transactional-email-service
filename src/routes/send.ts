@@ -70,7 +70,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     }
 
     const body = parsed.data;
-    const { orgId, userId } = res.locals as IdentityLocals;
+    const { orgId, userId, runId } = res.locals as IdentityLocals;
 
     // Resolve recipient emails
     let recipientEmails: string[];
@@ -125,7 +125,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           taskName: `email-${body.eventType}`,
           brandId: body.brandId,
           campaignId: body.campaignId,
-          parentRunId: body.parentRunId,
+          parentRunId: runId,
         });
       } catch (runErr: any) {
         console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
