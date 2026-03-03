@@ -147,7 +147,7 @@ Returns `{ "status": "ok" }`. No authentication required.
 
 Returns the OpenAPI spec for this service. No authentication required. Used by the [API Registry Service](https://github.com/shamanic-technologies/api-registry-service) to discover and index endpoints.
 
-## Event Types (mcpfactory)
+## Event Types (distribute)
 
 | Event               | Dedup Strategy | Recipient |
 | ------------------- | -------------- | --------- |
@@ -198,7 +198,7 @@ npm run dev             # start dev server on PORT
 | -------- | ----------- |
 | `TRANSACTIONAL_EMAIL_SERVICE_DATABASE_URL` | PostgreSQL connection string |
 | `TRANSACTIONAL_EMAIL_SERVICE_API_KEY` | API key for authenticating requests |
-| `EMAIL_GATEWAY_SERVICE_URL` | Email Gateway endpoint (default: https://email-gateway.mcpfactory.org) |
+| `EMAIL_GATEWAY_SERVICE_URL` | Email Gateway endpoint (default: https://email-gateway.distribute.you) |
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
@@ -244,7 +244,7 @@ src/
     templates.ts        # PUT /templates endpoint for template registration
   templates/
     index.ts            # Template registry (DB-first lookup with hardcoded fallback)
-    mcpfactory/         # MCP Factory app templates (hardcoded)
+    distribute/         # Distribute app templates (hardcoded)
       layout.ts         # Shared HTML layout
       waitlist.ts
       welcome.ts

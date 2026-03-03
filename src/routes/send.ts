@@ -21,7 +21,7 @@ const DAILY_DEDUP_EVENTS = new Set(["user_active"]);
 const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_2", "j_minus_1", "j_day"]);
 
 // Events where recipient is hardcoded to admin
-const ADMIN_EMAIL = "kevin@mcpfactory.org";
+const ADMIN_EMAIL = "kevin@distribute.you";
 const ADMIN_NOTIFICATION_EVENTS = new Set(["signup_notification", "signin_notification", "user_active"]);
 
 

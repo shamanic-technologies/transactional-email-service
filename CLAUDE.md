@@ -27,7 +27,7 @@ Transactional email service that sends event-triggered emails. Resolves recipien
 - `src/lib/runs-client.ts` — Runs service client (create/update runs)
 - `src/db/schema.ts` — Drizzle schema (`email_events` table)
 - `src/db/index.ts` — Database connection
-- `src/templates/` — Email templates (HTML + text), organized by app (`mcpfactory/`)
+- `src/templates/` — Email templates (HTML + text), organized by app (`distribute/`)
 - `scripts/generate-openapi.ts` — OpenAPI spec generation script
 - `tests/` — Test files (`*.test.ts`)
 - `openapi.json` — Auto-generated, do NOT edit manually
