@@ -43,6 +43,13 @@
       "when": 1772438200294,
       "tag": "0005_abandoned_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772499205801,
+      "tag": "0006_dashing_colossus",
+      "breakpoints": true
     }
   ]
 }

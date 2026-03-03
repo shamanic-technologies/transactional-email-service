@@ -9,7 +9,6 @@ interface SendEmailParams {
   tag: string;
   orgId: string;
   runId: string;
-  appId: string;
   brandId?: string;
   campaignId?: string;
   from?: string | null;
@@ -28,7 +27,6 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     },
     body: JSON.stringify({
       type: "transactional",
-      appId: params.appId,
       ...(params.brandId && { brandId: params.brandId }),
       ...(params.campaignId && { campaignId: params.campaignId }),
       runId: params.runId,

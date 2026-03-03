@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { requireApiKey } from "../middleware/auth.js";
+import { requireApiKey, requireIdentityHeaders } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
 import { DeployTemplatesRequestSchema } from "../schemas.js";
 
 const router = Router();
 
-router.put("/templates", requireApiKey, async (req, res) => {
+router.put("/templates", requireApiKey, requireIdentityHeaders, async (req, res) => {
   try {
     const parsed = DeployTemplatesRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -14,14 +14,13 @@ router.put("/templates", requireApiKey, async (req, res) => {
       return;
     }
 
-    const { appId, templates } = parsed.data;
+    const { templates } = parsed.data;
     const results: Array<{ name: string; action: "created" | "updated" }> = [];
 
     for (const tpl of templates) {
       const [row] = await db
         .insert(emailTemplates)
         .values({
-          appId,
           name: tpl.name,
           subject: tpl.subject,
           htmlBody: tpl.htmlBody,
@@ -29,7 +28,7 @@ router.put("/templates", requireApiKey, async (req, res) => {
           fromAddress: tpl.from ?? null,
         })
         .onConflictDoUpdate({
-          target: [emailTemplates.appId, emailTemplates.name],
+          target: [emailTemplates.name],
           set: {
             subject: tpl.subject,
             htmlBody: tpl.htmlBody,

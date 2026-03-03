@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
-import { requireApiKey } from "../middleware/auth.js";
+import { requireApiKey, requireIdentityHeaders, type IdentityLocals } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { emailEvents } from "../db/schema.js";
 import { getTemplate } from "../templates/index.js";
@@ -29,11 +29,11 @@ function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
-function buildDedupKey(appId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string }): string | null {
+function buildDedupKey(orgId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string }): string | null {
   // Product-scoped dedup: one per recipient per product instance
   if (PRODUCT_SCOPED_EVENTS.has(eventType)) {
     if (req.recipientEmail && req.productId) {
-      return `${appId}:${eventType}:${req.recipientEmail}:${req.productId}`;
+      return `${orgId}:${eventType}:${req.recipientEmail}:${req.productId}`;
     }
     return null; // missing required fields, skip dedup
   }
@@ -41,27 +41,27 @@ function buildDedupKey(appId: string, eventType: string, req: { userId?: string;
   // Daily dedup: one per user per day
   if (DAILY_DEDUP_EVENTS.has(eventType)) {
     const identifier = req.userId || req.recipientEmail || "unknown";
-    return `${appId}:${eventType}:${identifier}:${getTodayDate()}`;
+    return `${orgId}:${eventType}:${identifier}:${getTodayDate()}`;
   }
 
   // Once-only dedup
   if (ONCE_ONLY_EVENTS.has(eventType)) {
     if (eventType === "waitlist" && req.recipientEmail) {
-      return `${appId}:waitlist:${req.recipientEmail}`;
+      return `${orgId}:waitlist:${req.recipientEmail}`;
     }
     if (req.userId) {
-      return `${appId}:${eventType}:${req.userId}`;
+      return `${orgId}:${eventType}:${req.userId}`;
     }
     // Anonymous fallback: dedup on email for once-only events
     if (req.recipientEmail) {
-      return `${appId}:${eventType}:${req.recipientEmail}`;
+      return `${orgId}:${eventType}:${req.recipientEmail}`;
     }
   }
 
   return null; // repeatable event, no dedup
 }
 
-router.post("/send", requireApiKey, async (req, res) => {
+router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => {
   try {
     const parsed = SendRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -70,6 +70,7 @@ router.post("/send", requireApiKey, async (req, res) => {
     }
 
     const body = parsed.data;
+    const { orgId, userId } = res.locals as IdentityLocals;
 
     // Resolve recipient emails
     let recipientEmails: string[];
@@ -79,15 +80,15 @@ router.post("/send", requireApiKey, async (req, res) => {
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
-      const email = await resolveUserEmail(body.userId);
+      const email = await resolveUserEmail(userId);
       recipientEmails = [email];
     }
 
     // For admin notifications, enrich metadata with the user's email
     const metadata = { ...body.metadata };
-    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && body.userId && !metadata.email) {
+    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && !metadata.email) {
       try {
-        const userEmail = await resolveUserEmail(body.userId);
+        const userEmail = await resolveUserEmail(userId);
         metadata.email = userEmail;
       } catch {
         // Continue without email in metadata
@@ -97,14 +98,14 @@ router.post("/send", requireApiKey, async (req, res) => {
     // Get template
     let templateFn: Awaited<ReturnType<typeof getTemplate>>;
     try {
-      templateFn = await getTemplate(body.appId, body.eventType);
+      templateFn = await getTemplate(body.eventType);
     } catch (err: any) {
       res.status(404).json({ error: err.message });
       return;
     }
     const template = templateFn(metadata as Record<string, unknown>);
 
-    const dedupKey = buildDedupKey(body.appId, body.eventType, body);
+    const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
 
     for (const email of recipientEmails) {
@@ -118,13 +119,13 @@ router.post("/send", requireApiKey, async (req, res) => {
 
       try {
         run = await createRun({
-          orgId: body.orgId,
-          appId: body.appId,
+          orgId,
+          userId,
           serviceName: "transactional-email-service",
           taskName: `email-${body.eventType}`,
-          userId: body.userId,
           brandId: body.brandId,
           campaignId: body.campaignId,
+          parentRunId: body.parentRunId,
         });
       } catch (runErr: any) {
         console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
@@ -140,12 +141,11 @@ router.post("/send", requireApiKey, async (req, res) => {
           const inserted = await db
             .insert(emailEvents)
             .values({
-              appId: body.appId,
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: recipientDedupKey,
-              userId: body.userId,
-              orgId: body.orgId,
+              userId,
+              orgId,
               status: "pending",
               metadata: metadata || null,
             })
@@ -164,12 +164,11 @@ router.post("/send", requireApiKey, async (req, res) => {
           const [inserted] = await db
             .insert(emailEvents)
             .values({
-              appId: body.appId,
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: null,
-              userId: body.userId,
-              orgId: body.orgId,
+              userId,
+              orgId,
               status: "pending",
               metadata: metadata || null,
             })
@@ -184,10 +183,9 @@ router.post("/send", requireApiKey, async (req, res) => {
           subject: template.subject,
           htmlBody: template.htmlBody,
           textBody: template.textBody,
-          tag: `${body.appId}-${body.eventType}`,
-          orgId: body.orgId,
+          tag: body.eventType,
+          orgId,
           runId: run.id,
-          appId: body.appId,
           brandId: body.brandId,
           campaignId: body.campaignId,
           from: template.from,

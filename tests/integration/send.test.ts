@@ -25,8 +25,11 @@ import { resolveUserEmail } from "../../src/lib/client-service.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 
-// Base fields required by every request
-const BASE = { userId: "user_test", orgId: "org_test", brandId: "brand_test", campaignId: "campaign_test" };
+// Identity headers required by every request
+const HEADERS = { "x-org-id": "org_test", "x-user-id": "user_test" };
+
+// Base fields for request body
+const BASE = { brandId: "brand_test", campaignId: "campaign_test" };
 
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
@@ -49,7 +52,8 @@ describe("authentication", () => {
   it("rejects request without API key", async () => {
     const res = await request(app)
       .post("/send")
-      .send({ appId: "mcpfactory", eventType: "waitlist", ...BASE, recipientEmail: "a@b.com" });
+      .set(HEADERS)
+      .send({ eventType: "waitlist", ...BASE, recipientEmail: "a@b.com" });
     expect(res.status).toBe(401);
   });
 
@@ -57,7 +61,8 @@ describe("authentication", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", "wrong-key")
-      .send({ appId: "mcpfactory", eventType: "waitlist", ...BASE, recipientEmail: "a@b.com" });
+      .set(HEADERS)
+      .send({ eventType: "waitlist", ...BASE, recipientEmail: "a@b.com" });
     expect(res.status).toBe(401);
   });
 });
@@ -65,51 +70,32 @@ describe("authentication", () => {
 // --- Validation ---
 
 describe("validation", () => {
-  it("rejects missing appId", async () => {
+  it("rejects missing identity headers", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
       .send({ eventType: "waitlist", ...BASE, recipientEmail: "a@b.com" });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
-    expect(res.body.details.fieldErrors).toHaveProperty("appId");
+    expect(res.body.error).toContain("Missing required headers");
   });
 
   it("rejects missing eventType", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", ...BASE, recipientEmail: "a@b.com" });
+      .set(HEADERS)
+      .send({ ...BASE, recipientEmail: "a@b.com" });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("Invalid request");
     expect(res.body.details.fieldErrors).toHaveProperty("eventType");
-  });
-
-  it("rejects missing userId", async () => {
-    const res = await request(app)
-      .post("/send")
-      .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", orgId: "org_test", recipientEmail: "a@b.com" });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
-    expect(res.body.details.fieldErrors).toHaveProperty("userId");
-  });
-
-  it("rejects missing orgId", async () => {
-    const res = await request(app)
-      .post("/send")
-      .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", userId: "user_test", recipientEmail: "a@b.com" });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
-    expect(res.body.details.fieldErrors).toHaveProperty("orgId");
   });
 
   it("succeeds without brandId or campaignId", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", userId: "user_test", orgId: "org_test", recipientEmail: "a@b.com" });
+      .set(HEADERS)
+      .send({ eventType: "waitlist", recipientEmail: "a@b.com" });
     expect(res.status).toBe(200);
   });
 });
@@ -121,17 +107,18 @@ describe("once-only dedup", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", ...BASE, recipientEmail: "new@example.com" });
+      .set(HEADERS)
+      .send({ eventType: "waitlist", ...BASE, recipientEmail: "new@example.com" });
     expect(res.status).toBe(200);
     expect(res.body.results[0].sent).toBe(true);
     expect(vi.mocked(sendEmail)).toHaveBeenCalledOnce();
   });
 
   it("blocks duplicate waitlist for same email", async () => {
-    const payload = { appId: "mcpfactory", eventType: "waitlist", ...BASE, recipientEmail: "dup@example.com" };
+    const payload = { eventType: "waitlist", ...BASE, recipientEmail: "dup@example.com" };
 
-    await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-    const res = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
+    const res = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
 
     expect(res.status).toBe(200);
     expect(res.body.results[0].sent).toBe(false);
@@ -139,12 +126,12 @@ describe("once-only dedup", () => {
   });
 
   it("sends welcome email and blocks duplicate", async () => {
-    const payload = { appId: "mcpfactory", eventType: "welcome", ...BASE };
+    const payload = { eventType: "welcome", ...BASE };
 
-    const first = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    const first = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
     expect(first.body.results[0].sent).toBe(true);
 
-    const second = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    const second = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
     expect(second.body.results[0].sent).toBe(false);
     expect(second.body.results[0].reason).toBe("duplicate");
   });
@@ -157,16 +144,18 @@ describe("daily dedup", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "user_active", ...BASE });
+      .set(HEADERS)
+      .send({ eventType: "user_active", ...BASE });
     expect(res.status).toBe(200);
     expect(res.body.results[0].sent).toBe(true);
   });
 
   it("blocks duplicate user_active for same user on same day", async () => {
-    const payload = { appId: "mcpfactory", eventType: "user_active", ...BASE, userId: "user_789" };
+    const headers = { "x-org-id": "org_test", "x-user-id": "user_789" };
+    const payload = { eventType: "user_active", ...BASE };
 
-    await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-    const res = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    await request(app).post("/send").set("x-api-key", API_KEY).set(headers).send(payload);
+    const res = await request(app).post("/send").set("x-api-key", API_KEY).set(headers).send(payload);
 
     expect(res.body.results[0].sent).toBe(false);
     expect(res.body.results[0].reason).toBe("duplicate");
@@ -180,8 +169,8 @@ describe("product-scoped dedup", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
+      .set(HEADERS)
       .send({
-        appId: "generic",
         eventType: "webinar_welcome",
         ...BASE,
         recipientEmail: "marie@test.com",
@@ -195,7 +184,6 @@ describe("product-scoped dedup", () => {
 
   it("blocks duplicate webinar_welcome for same user + product", async () => {
     const payload = {
-      appId: "generic",
       eventType: "webinar_welcome",
       ...BASE,
       recipientEmail: "marie@test.com",
@@ -203,8 +191,8 @@ describe("product-scoped dedup", () => {
       metadata: { productName: "Launch Webinar" },
     };
 
-    await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-    const res = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
+    const res = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
 
     expect(res.body.results[0].sent).toBe(false);
     expect(res.body.results[0].reason).toBe("duplicate");
@@ -212,7 +200,6 @@ describe("product-scoped dedup", () => {
 
   it("allows same user for different products", async () => {
     const base = {
-      appId: "generic",
       eventType: "webinar_welcome",
       ...BASE,
       recipientEmail: "marie@test.com",
@@ -222,10 +209,12 @@ describe("product-scoped dedup", () => {
     const first = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
+      .set(HEADERS)
       .send({ ...base, productId: "webinar-A" });
     const second = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
+      .set(HEADERS)
       .send({ ...base, productId: "webinar-B" });
 
     expect(first.body.results[0].sent).toBe(true);
@@ -235,7 +224,6 @@ describe("product-scoped dedup", () => {
 
   it("deduplicates j_minus_3 per user x product", async () => {
     const payload = {
-      appId: "generic",
       eventType: "j_minus_3",
       ...BASE,
       recipientEmail: "bob@test.com",
@@ -243,8 +231,8 @@ describe("product-scoped dedup", () => {
       metadata: { productName: "AI Workshop" },
     };
 
-    const first = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-    const second = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    const first = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
+    const second = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
 
     expect(first.body.results[0].sent).toBe(true);
     expect(second.body.results[0].sent).toBe(false);
@@ -256,10 +244,10 @@ describe("product-scoped dedup", () => {
 
 describe("repeatable events", () => {
   it("allows multiple sends for campaign_created", async () => {
-    const payload = { appId: "mcpfactory", eventType: "campaign_created", ...BASE, recipientEmail: "user@test.com" };
+    const payload = { eventType: "campaign_created", ...BASE, recipientEmail: "user@test.com" };
 
-    const first = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
-    const second = await request(app).post("/send").set("x-api-key", API_KEY).send(payload);
+    const first = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
+    const second = await request(app).post("/send").set("x-api-key", API_KEY).set(HEADERS).send(payload);
 
     expect(first.body.results[0].sent).toBe(true);
     expect(second.body.results[0].sent).toBe(true);
@@ -274,7 +262,8 @@ describe("recipient resolution", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE, recipientEmail: "direct@test.com" });
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", ...BASE, recipientEmail: "direct@test.com" });
     expect(res.body.results[0].email).toBe("direct@test.com");
     expect(res.body.results[0].sent).toBe(true);
   });
@@ -283,7 +272,8 @@ describe("recipient resolution", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE });
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", ...BASE });
     expect(vi.mocked(resolveUserEmail)).toHaveBeenCalledWith("user_test");
     expect(res.body.results[0].email).toBe("user@test.com");
     expect(res.body.results[0].sent).toBe(true);
@@ -293,7 +283,8 @@ describe("recipient resolution", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "signup_notification", ...BASE });
+      .set(HEADERS)
+      .send({ eventType: "signup_notification", ...BASE });
     expect(res.body.results[0].email).toBe("kevin@mcpfactory.org");
     expect(res.body.results[0].sent).toBe(true);
   });
@@ -306,7 +297,8 @@ describe("database records", () => {
     await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "campaign_created", ...BASE, recipientEmail: "db@test.com", metadata: { foo: "bar" } });
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", ...BASE, recipientEmail: "db@test.com", metadata: { foo: "bar" } });
 
     const rows = await db
       .select()
@@ -314,7 +306,6 @@ describe("database records", () => {
       .where(eq(emailEvents.recipientEmail, "db@test.com"));
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].appId).toBe("mcpfactory");
     expect(rows[0].eventType).toBe("campaign_created");
     expect(rows[0].status).toBe("sent");
     expect(rows[0].orgId).toBe("org_test");
@@ -328,7 +319,8 @@ describe("database records", () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
-      .send({ appId: "mcpfactory", eventType: "waitlist", ...BASE, recipientEmail: "fail@test.com" });
+      .set(HEADERS)
+      .send({ eventType: "waitlist", ...BASE, recipientEmail: "fail@test.com" });
 
     expect(res.body.results[0].sent).toBe(false);
     expect(res.body.results[0].reason).toBe("email sending down");

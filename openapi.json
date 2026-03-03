@@ -77,10 +77,6 @@
       "SendRequest": {
         "type": "object",
         "properties": {
-          "appId": {
-            "type": "string",
-            "description": "App identifier (e.g. 'mcpfactory'). Must match a registered template app."
-          },
           "eventType": {
             "type": "string",
             "description": "Event type determining which template to use and which dedup strategy applies. Once-only events (waitlist, welcome, signup_notification): sent at most once per recipient. Daily events (user_active): sent at most once per recipient per day. Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Any other event type has NO dedup and will send every time."
@@ -97,18 +93,14 @@
             "type": "string",
             "description": "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)"
           },
-          "userId": {
-            "type": "string",
-            "description": "Internal user ID (client-service UUID) — used to resolve recipient email and for run/cost tracking"
-          },
-          "orgId": {
-            "type": "string",
-            "description": "Internal org ID (client-service UUID) — used for run/cost tracking"
-          },
           "recipientEmail": {
             "type": "string",
             "format": "email",
-            "description": "Direct recipient email (fallback when no userId provided)"
+            "description": "Direct recipient email (overrides client-service resolution if provided)"
+          },
+          "parentRunId": {
+            "type": "string",
+            "description": "Parent run ID for creating child runs in runs-service"
           },
           "metadata": {
             "type": "object",
@@ -119,10 +111,7 @@
           }
         },
         "required": [
-          "appId",
-          "eventType",
-          "userId",
-          "orgId"
+          "eventType"
         ]
       },
       "StatsResponse": {
@@ -155,15 +144,6 @@
       "StatsRequest": {
         "type": "object",
         "properties": {
-          "appId": {
-            "type": "string"
-          },
-          "orgId": {
-            "type": "string"
-          },
-          "userId": {
-            "type": "string"
-          },
           "eventType": {
             "type": "string"
           }
@@ -205,10 +185,6 @@
       "DeployTemplatesRequest": {
         "type": "object",
         "properties": {
-          "appId": {
-            "type": "string",
-            "minLength": 1
-          },
           "templates": {
             "type": "array",
             "items": {
@@ -218,7 +194,6 @@
           }
         },
         "required": [
-          "appId",
           "templates"
         ]
       },
@@ -287,13 +262,33 @@
     "/send": {
       "post": {
         "summary": "Send a lifecycle email",
-        "description": "Send a templated lifecycle email. Resolves recipients via user ID (client-service) or direct email. One of userId or recipientEmail is required.\n\n**Deduplication:** The dedup strategy depends on eventType:\n- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{appId}:{eventType}:{userId or recipientEmail}`.\n- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{appId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{appId}:{eventType}:{recipientEmail}:{productId}`.\n- **No dedup** (all other event types): sends every time with no dedup.\n\nDuplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
+        "description": "Send a templated lifecycle email. Resolves recipients via user ID (client-service) or direct email. One of userId (from x-user-id header) or recipientEmail is required.\n\n**Required headers:** `x-org-id`, `x-user-id`\n\n**Deduplication:** The dedup strategy depends on eventType:\n- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{orgId}:{eventType}:{userId or recipientEmail}`.\n- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n- **No dedup** (all other event types): sends every time with no dedup.\n\nDuplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
         "tags": [
           "Email"
         ],
         "security": [
           {
             "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID from client-service"
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID from client-service"
           }
         ],
         "requestBody": {
@@ -318,7 +313,7 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error or missing identity headers",
             "content": {
               "application/json": {
                 "schema": {
@@ -343,13 +338,33 @@
     "/stats": {
       "post": {
         "summary": "Get aggregated stats",
-        "description": "Get aggregated email event stats filtered by appId, orgId, userId, and/or eventType. At least one filter required.",
+        "description": "Get aggregated email event stats scoped by the caller's org (from x-org-id header), with optional eventType filter.\n\n**Required headers:** `x-org-id`, `x-user-id`",
         "tags": [
           "Stats"
         ],
         "security": [
           {
             "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID from client-service"
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID from client-service"
           }
         ],
         "requestBody": {
@@ -374,7 +389,7 @@
             }
           },
           "400": {
-            "description": "Validation error or missing filters",
+            "description": "Validation error or missing identity headers",
             "content": {
               "application/json": {
                 "schema": {
@@ -399,13 +414,33 @@
     "/templates": {
       "put": {
         "summary": "Deploy (upsert) email templates",
-        "description": "Idempotent: creates new templates or updates existing ones matched by (appId + name). Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.",
+        "description": "Idempotent: creates new templates or updates existing ones matched by name. Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.\n\n**Required headers:** `x-org-id`, `x-user-id`",
         "tags": [
           "Templates"
         ],
         "security": [
           {
             "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID from client-service"
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID from client-service"
           }
         ],
         "requestBody": {
@@ -430,7 +465,7 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error or missing identity headers",
             "content": {
               "application/json": {
                 "schema": {

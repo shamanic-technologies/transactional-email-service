@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
 import * as mcpfactory from "./mcpfactory/index.js";
@@ -13,9 +13,9 @@ export interface TemplateResult {
 
 type TemplateFn = (metadata?: Record<string, unknown>) => TemplateResult;
 
-const hardcodedRegistry: Record<string, Record<string, TemplateFn>> = {
-  mcpfactory: mcpfactory.templates,
-  generic: generic.templates,
+const hardcodedRegistry: Record<string, TemplateFn> = {
+  ...mcpfactory.templates,
+  ...generic.templates,
 };
 
 /**
@@ -29,12 +29,12 @@ export function interpolate(template: string, metadata?: Record<string, unknown>
   });
 }
 
-export async function getTemplate(appId: string, eventType: string): Promise<TemplateFn> {
+export async function getTemplate(eventType: string): Promise<TemplateFn> {
   // Check DB-registered templates first
   const rows = await db
     .select()
     .from(emailTemplates)
-    .where(and(eq(emailTemplates.appId, appId), eq(emailTemplates.name, eventType)))
+    .where(eq(emailTemplates.name, eventType))
     .limit(1);
 
   if (rows.length > 0) {
@@ -48,13 +48,9 @@ export async function getTemplate(appId: string, eventType: string): Promise<Tem
   }
 
   // Fall back to hardcoded templates
-  const appTemplates = hardcodedRegistry[appId];
-  if (!appTemplates) {
-    throw new Error(`No templates registered for app: ${appId}`);
-  }
-  const template = appTemplates[eventType];
+  const template = hardcodedRegistry[eventType];
   if (!template) {
-    throw new Error(`No template for event '${eventType}' in app '${appId}'`);
+    throw new Error(`No template for event '${eventType}'`);
   }
   return template;
 }

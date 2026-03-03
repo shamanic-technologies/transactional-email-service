@@ -14,7 +14,6 @@ export interface Run {
   parentRunId: string | null;
   organizationId: string;
   userId: string | null;
-  appId: string;
   brandId: string | null;
   campaignId: string | null;
   serviceName: string;
@@ -28,10 +27,9 @@ export interface Run {
 
 export interface CreateRunParams {
   orgId: string;
-  appId: string;
+  userId: string;
   serviceName: string;
   taskName: string;
-  userId?: string;
   brandId?: string;
   campaignId?: string;
   parentRunId?: string;
@@ -41,14 +39,16 @@ export interface CreateRunParams {
 
 async function runsRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {}
+  options: { method?: string; body?: unknown; orgId?: string; userId?: string } = {}
 ): Promise<T> {
-  const { method = "GET", body } = options;
+  const { method = "GET", body, orgId, userId } = options;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-API-Key": RUNS_SERVICE_API_KEY,
   };
+  if (orgId) headers["x-org-id"] = orgId;
+  if (userId) headers["x-user-id"] = userId;
 
   const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
     method,
@@ -72,6 +72,8 @@ export async function createRun(params: CreateRunParams): Promise<Run> {
   return runsRequest<Run>("/v1/runs", {
     method: "POST",
     body: params,
+    orgId: params.orgId,
+    userId: params.userId,
   });
 }
 

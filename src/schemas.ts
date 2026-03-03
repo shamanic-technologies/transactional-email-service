@@ -12,7 +12,6 @@ export const registry = new OpenAPIRegistry();
 
 export const SendRequestSchema = z
   .object({
-    appId: z.string().openapi({ description: "App identifier (e.g. 'mcpfactory'). Must match a registered template app." }),
     eventType: z.string().openapi({
       description:
         "Event type determining which template to use and which dedup strategy applies. " +
@@ -24,9 +23,8 @@ export const SendRequestSchema = z
     brandId: z.string().optional().openapi({ description: "Brand ID for tracking" }),
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
     productId: z.string().optional().openapi({ description: "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)" }),
-    userId: z.string().openapi({ description: "Internal user ID (client-service UUID) — used to resolve recipient email and for run/cost tracking" }),
-    orgId: z.string().openapi({ description: "Internal org ID (client-service UUID) — used for run/cost tracking" }),
-    recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (fallback when no userId provided)" }),
+    recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (overrides client-service resolution if provided)" }),
+    parentRunId: z.string().optional().openapi({ description: "Parent run ID for creating child runs in runs-service" }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
   .openapi("SendRequest");
@@ -71,9 +69,6 @@ export const ErrorResponseSchema = z
 
 export const StatsRequestSchema = z
   .object({
-    appId: z.string().optional(),
-    orgId: z.string().optional(),
-    userId: z.string().optional(),
     eventType: z.string().optional(),
   })
   .openapi("StatsRequest");
@@ -104,7 +99,6 @@ export const TemplateItemSchema = z
 
 export const DeployTemplatesRequestSchema = z
   .object({
-    appId: z.string().min(1),
     templates: z.array(TemplateItemSchema).min(1),
   })
   .openapi("DeployTemplatesRequest");
@@ -123,6 +117,24 @@ export const DeployTemplatesResponseSchema = z
     templates: z.array(DeployTemplateResultSchema),
   })
   .openapi("DeployTemplatesResponse");
+
+// --- Shared header parameters ---
+
+const orgIdHeader = {
+  name: "x-org-id",
+  in: "header" as const,
+  required: true,
+  schema: { type: "string" as const },
+  description: "Internal org UUID from client-service",
+};
+
+const userIdHeader = {
+  name: "x-user-id",
+  in: "header" as const,
+  required: true,
+  schema: { type: "string" as const },
+  description: "Internal user UUID from client-service",
+};
 
 // --- Register endpoints ---
 
@@ -146,15 +158,17 @@ registry.registerPath({
   summary: "Send a lifecycle email",
   description:
     "Send a templated lifecycle email. Resolves recipients via user ID (client-service) or direct email. " +
-    "One of userId or recipientEmail is required.\n\n" +
+    "One of userId (from x-user-id header) or recipientEmail is required.\n\n" +
+    "**Required headers:** `x-org-id`, `x-user-id`\n\n" +
     "**Deduplication:** The dedup strategy depends on eventType:\n" +
-    "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{appId}:{eventType}:{userId or recipientEmail}`.\n" +
-    "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{appId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
-    "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{appId}:{eventType}:{recipientEmail}:{productId}`.\n" +
+    "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{orgId}:{eventType}:{userId or recipientEmail}`.\n" +
+    "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
+    "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n" +
     "- **No dedup** (all other event types): sends every time with no dedup.\n\n" +
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
   security: [{ apiKey: [] }],
+  parameters: [orgIdHeader, userIdHeader],
   request: {
     body: {
       required: true,
@@ -167,7 +181,7 @@ registry.registerPath({
       content: { "application/json": { schema: SendResponseSchema } },
     },
     400: {
-      description: "Validation error",
+      description: "Validation error or missing identity headers",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     401: {
@@ -182,9 +196,11 @@ registry.registerPath({
   path: "/stats",
   summary: "Get aggregated stats",
   description:
-    "Get aggregated email event stats filtered by appId, orgId, userId, and/or eventType. At least one filter required.",
+    "Get aggregated email event stats scoped by the caller's org (from x-org-id header), with optional eventType filter.\n\n" +
+    "**Required headers:** `x-org-id`, `x-user-id`",
   tags: ["Stats"],
   security: [{ apiKey: [] }],
+  parameters: [orgIdHeader, userIdHeader],
   request: {
     body: {
       required: true,
@@ -197,7 +213,7 @@ registry.registerPath({
       content: { "application/json": { schema: StatsResponseSchema } },
     },
     400: {
-      description: "Validation error or missing filters",
+      description: "Validation error or missing identity headers",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     401: {
@@ -212,9 +228,11 @@ registry.registerPath({
   path: "/templates",
   summary: "Deploy (upsert) email templates",
   description:
-    "Idempotent: creates new templates or updates existing ones matched by (appId + name). Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.",
+    "Idempotent: creates new templates or updates existing ones matched by name. Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.\n\n" +
+    "**Required headers:** `x-org-id`, `x-user-id`",
   tags: ["Templates"],
   security: [{ apiKey: [] }],
+  parameters: [orgIdHeader, userIdHeader],
   request: {
     body: {
       required: true,
@@ -227,7 +245,7 @@ registry.registerPath({
       content: { "application/json": { schema: DeployTemplatesResponseSchema } },
     },
     400: {
-      description: "Validation error",
+      description: "Validation error or missing identity headers",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     401: {
