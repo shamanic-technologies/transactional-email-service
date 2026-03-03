@@ -293,7 +293,7 @@ describe("POST /send", () => {
     );
   });
 
-  it("uses x-run-id header as parentRunId when creating runs", async () => {
+  it("passes x-run-id header to createRun as parentRunId for runs-service", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
     const res = await request(app)
