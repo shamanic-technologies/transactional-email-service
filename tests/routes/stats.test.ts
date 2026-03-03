@@ -45,6 +45,8 @@ const app = express();
 app.use(express.json());
 app.use(statsRoutes);
 
+const HEADERS = { "x-org-id": "org_123", "x-user-id": "user_123" };
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -53,26 +55,28 @@ describe("POST /stats", () => {
   it("returns 401 without api key", async () => {
     const res = await request(app)
       .post("/stats")
-      .send({ appId: "mcpfactory" });
+      .set(HEADERS)
+      .send({});
 
     expect(res.status).toBe(401);
   });
 
-  it("returns 400 when no filters provided", async () => {
+  it("returns 400 when identity headers are missing", async () => {
     const res = await request(app)
       .post("/stats")
       .set("X-API-Key", "test-service-key")
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain("At least one filter");
+    expect(res.body.error).toContain("Missing required headers");
   });
 
-  it("returns aggregated stats filtered by appId", async () => {
+  it("returns aggregated stats scoped by org from headers", async () => {
     const res = await request(app)
       .post("/stats")
       .set("X-API-Key", "test-service-key")
-      .send({ appId: "mcpfactory" });
+      .set(HEADERS)
+      .send({});
 
     expect(res.status).toBe(200);
     expect(res.body.stats).toEqual({
@@ -83,20 +87,11 @@ describe("POST /stats", () => {
     });
   });
 
-  it("returns stats filtered by orgId", async () => {
-    const res = await request(app)
-      .post("/stats")
-      .set("X-API-Key", "test-service-key")
-      .send({ orgId: "org_123" });
-
-    expect(res.status).toBe(200);
-    expect(res.body.stats.totalEmails).toBe(12);
-  });
-
   it("returns stats filtered by eventType", async () => {
     const res = await request(app)
       .post("/stats")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({ eventType: "welcome" });
 
     expect(res.status).toBe(200);

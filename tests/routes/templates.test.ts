@@ -28,6 +28,8 @@ const app = express();
 app.use(express.json());
 app.use(templatesRoutes);
 
+const HEADERS = { "x-org-id": "org_123", "x-user-id": "user_123" };
+
 beforeEach(() => {
   vi.clearAllMocks();
   // Default: created (timestamps equal)
@@ -41,8 +43,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "my-app",
         templates: [
           {
             name: "welcome",
@@ -65,8 +67,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "my-app",
         templates: [
           {
             name: "welcome",
@@ -86,8 +88,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "polaritycourse",
         templates: [
           {
             name: "webinar-registration-welcome",
@@ -115,8 +117,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "my-app",
         templates: [
           { name: "welcome", subject: "Welcome!", htmlBody: "<h1>Hi</h1>" },
           { name: "reset", subject: "Reset", htmlBody: "<h1>Reset</h1>" },
@@ -133,8 +135,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "growthagency",
         templates: [
           {
             name: "checkout_success",
@@ -160,8 +162,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "growthagency",
         templates: [
           {
             name: "welcome",
@@ -200,8 +202,8 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "my-app",
         templates: [
           {
             name: "welcome",
@@ -220,7 +222,7 @@ describe("PUT /templates", () => {
     );
   });
 
-  it("returns 400 for missing appId", async () => {
+  it("returns 400 for missing identity headers", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
@@ -229,15 +231,15 @@ describe("PUT /templates", () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
+    expect(res.body.error).toContain("Missing required headers");
   });
 
   it("returns 400 for empty templates array", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "my-app",
         templates: [],
       });
 
@@ -248,8 +250,8 @@ describe("PUT /templates", () => {
   it("returns 401 without API key", async () => {
     const res = await request(app)
       .put("/templates")
+      .set(HEADERS)
       .send({
-        appId: "my-app",
         templates: [{ name: "welcome", subject: "Hi", htmlBody: "<h1>Hi</h1>" }],
       });
 

@@ -4,67 +4,58 @@ Transactional email service that sends event-triggered emails. Resolves recipien
 
 ## API
 
-### `POST /send`
+All protected endpoints require these headers:
+- `x-api-key` — service API key
+- `x-org-id` — internal org UUID from client-service
+- `x-user-id` — internal user UUID from client-service
 
-Requires `x-api-key` header.
+### `POST /send`
 
 **Request body:**
 
 ```json
 {
-  "appId": "mcpfactory",
   "eventType": "welcome",
-  "userId": "uuid-xxx",
-  "orgId": "uuid-xxx",
   "brandId": "brand_xxx",
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
+  "parentRunId": "run_xxx",
   "metadata": { "name": "Alice" }
 }
 ```
 
 | Field            | Required | Description                              |
 | ---------------- | -------- | ---------------------------------------- |
-| `appId`          | Yes      | App identifier (e.g. `mcpfactory`)       |
 | `eventType`      | Yes      | Event type (see below)                   |
-| `userId`         | Yes      | Internal user ID (client-service UUID) — used for email resolution, dedup, and run tracking |
-| `orgId`          | Yes      | Internal org ID (client-service UUID) — used for run/cost tracking |
 | `brandId`        | No       | Brand ID (UUID) for tracking; omitted if not provided |
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
+| `parentRunId`    | No       | Parent run ID for creating child runs in runs-service |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
 
 | Status | Condition |
 | ------ | --------- |
-| 400    | Missing required fields (`appId`, `eventType`, `userId`, or `orgId`) |
-| 404    | No templates registered for the given `appId` or `eventType` |
+| 400    | Missing required headers (`x-org-id`, `x-user-id`) or missing `eventType` |
+| 404    | No template found for the given `eventType` |
 
 ### `POST /stats`
 
-Requires `x-api-key` header.
+Returns aggregated email stats scoped to the caller's org (from `x-org-id` header).
 
 **Request body:**
 
 ```json
 {
-  "appId": "mcpfactory",
-  "orgId": "uuid-xxx",
-  "userId": "uuid-xxx",
   "eventType": "welcome"
 }
 ```
 
 | Field          | Required | Description                              |
 | -------------- | -------- | ---------------------------------------- |
-| `appId`        | No       | Filter by app ID                         |
-| `orgId`        | No       | Filter by org ID                         |
-| `userId`       | No       | Filter by user ID                        |
 | `eventType`    | No       | Filter by event type                     |
-
-At least one filter is required.
 
 **Response:**
 
@@ -83,15 +74,12 @@ Email status lifecycle: `pending` → `sent` (after gateway confirms delivery) o
 
 ### `PUT /templates`
 
-Deploy (upsert) email templates. Idempotent: creates new templates or updates existing ones matched by `(appId + name)`. Call this at app startup to register all your email templates. Templates support `{{variable}}` interpolation from metadata passed at send time.
-
-Requires `x-api-key` header.
+Deploy (upsert) email templates. Idempotent: creates new templates or updates existing ones matched by `name`. Call this at app startup to register all your email templates. Templates support `{{variable}}` interpolation from metadata passed at send time.
 
 **Request body:**
 
 ```json
 {
-  "appId": "growthagency",
   "templates": [
     {
       "name": "welcome",
@@ -106,7 +94,6 @@ Requires `x-api-key` header.
 
 | Field      | Required | Description                              |
 | ---------- | -------- | ---------------------------------------- |
-| `appId`    | Yes      | App identifier                           |
 | `templates`| Yes      | Array of templates (at least one)        |
 | `templates[].name` | Yes | Template name (matches `eventType` in `/send`) |
 | `templates[].subject` | Yes | Email subject (supports `{{var}}` interpolation) |
@@ -131,9 +118,13 @@ Requires `x-api-key` header.
 export async function register() {
   await fetch(`${process.env.TRANSACTIONAL_EMAIL_SERVICE_URL}/templates`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", "x-api-key": process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY! },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!,
+      "x-org-id": orgId,
+      "x-user-id": userId,
+    },
     body: JSON.stringify({
-      appId: "my-app",
       templates: [
         {
           name: "welcome",
@@ -150,11 +141,11 @@ export async function register() {
 
 ### `GET /health`
 
-Returns `{ "status": "ok" }`.
+Returns `{ "status": "ok" }`. No authentication required.
 
 ### `GET /openapi.json`
 
-Returns the OpenAPI spec for this service. Used by the [API Registry Service](https://github.com/shamanic-technologies/api-registry-service) to discover and index endpoints.
+Returns the OpenAPI spec for this service. No authentication required. Used by the [API Registry Service](https://github.com/shamanic-technologies/api-registry-service) to discover and index endpoints.
 
 ## Event Types (mcpfactory)
 
@@ -180,7 +171,7 @@ Product-scoped events for webinar/event transactional emails. Require `productId
 | `j_minus_1`         | Once per email × product    | User      |
 | `j_day`             | Once per email × product    | User      |
 
-Dedup key format: `{appId}:{eventType}:{recipientEmail}:{productId}`
+Dedup key format: `{orgId}:{eventType}:{recipientEmail}:{productId}`
 
 ## Tech Stack
 
@@ -238,13 +229,13 @@ src/
   schemas.ts            # Zod schemas + OpenAPI registry (single source of truth)
   db/
     index.ts            # Database connection
-    schema.ts           # Drizzle schema (email_events + email_templates tables, incl. sender config)
+    schema.ts           # Drizzle schema (email_events + email_templates tables)
   lib/
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
-    runs-client.ts      # Runs service client (create/update runs, skipped when no orgId)
+    runs-client.ts      # Runs service client (create/update runs)
   middleware/
-    auth.ts             # API key authentication
+    auth.ts             # API key + identity header authentication
   routes/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint

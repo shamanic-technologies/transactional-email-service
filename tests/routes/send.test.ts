@@ -64,6 +64,9 @@ const app = express();
 app.use(express.json());
 app.use(sendRoutes);
 
+// Identity headers applied to all requests
+const HEADERS = { "x-org-id": "org_456", "x-user-id": "user_123" };
+
 beforeEach(() => {
   fetchSpy = vi.fn().mockResolvedValue({ ok: true });
   vi.stubGlobal("fetch", fetchSpy);
@@ -90,13 +93,11 @@ describe("POST /send", () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "mcpfactory",
         eventType: "user_active",
         brandId: "brand_abc",
         campaignId: "campaign_def",
-        userId: "user_123",
-        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -110,81 +111,55 @@ describe("POST /send", () => {
     expect(body.runId).toBe("run-456");
     expect(body.to).toBeDefined();
     expect(body.subject).toBeDefined();
-    expect(body.appId).toBe("mcpfactory");
     expect(body.brandId).toBe("brand_abc");
     expect(body.campaignId).toBe("campaign_def");
   });
 
-  it("returns 400 when orgId is missing", async () => {
+  it("returns 400 when x-org-id header is missing", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set("x-user-id", "user_123")
       .send({
-        appId: "mcpfactory",
         eventType: "user_active",
-        userId: "user_789",
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
-    expect(res.body.details.fieldErrors).toHaveProperty("orgId");
+    expect(res.body.error).toContain("Missing required headers");
   });
 
-  it("returns 400 when userId is missing", async () => {
+  it("returns 400 when x-user-id header is missing", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
       .send({
-        appId: "mcpfactory",
         eventType: "user_active",
-        orgId: "org_456",
-        recipientEmail: "user@example.com",
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Invalid request");
-    expect(res.body.details.fieldErrors).toHaveProperty("userId");
+    expect(res.body.error).toContain("Missing required headers");
   });
 
-  it("returns 400 when appId or eventType is missing", async () => {
-    const res1 = await request(app)
+  it("returns 400 when eventType is missing", async () => {
+    const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
-      .send({
-        eventType: "welcome",
-        userId: "user_123",
-        orgId: "org_456",
-        recipientEmail: "user@example.com",
-      });
+      .set(HEADERS)
+      .send({});
 
-    expect(res1.status).toBe(400);
-    expect(res1.body.error).toBe("Invalid request");
-    expect(res1.body.details.fieldErrors).toHaveProperty("appId");
-
-    const res2 = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .send({
-        appId: "mcpfactory",
-        userId: "user_123",
-        orgId: "org_456",
-        recipientEmail: "user@example.com",
-      });
-
-    expect(res2.status).toBe(400);
-    expect(res2.body.error).toBe("Invalid request");
-    expect(res2.body.details.fieldErrors).toHaveProperty("eventType");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
+    expect(res.body.details.fieldErrors).toHaveProperty("eventType");
   });
 
   it("succeeds without brandId/campaignId and omits them from request", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "mcpfactory",
         eventType: "user_active",
-        userId: "user_123",
-        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -201,13 +176,11 @@ describe("POST /send", () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "mcpfactory",
         eventType: "campaign_created",
         brandId: "brand_abc",
         campaignId: "campaign_def",
-        userId: "user_123",
-        orgId: "org_456",
         recipientEmail: "user@example.com",
         metadata: { campaignName: "Test Campaign" },
       });
@@ -217,7 +190,6 @@ describe("POST /send", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.appId).toBe("mcpfactory");
     expect(body.brandId).toBe("brand_abc");
     expect(body.campaignId).toBe("campaign_def");
   });
@@ -226,11 +198,9 @@ describe("POST /send", () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "mcpfactory",
         eventType: "user_active",
-        userId: "user_123",
-        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -251,11 +221,9 @@ describe("POST /send", () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "mcpfactory",
         eventType: "user_active",
-        userId: "user_123",
-        orgId: "org_456",
       });
 
     expect(res.status).toBe(200);
@@ -267,33 +235,13 @@ describe("POST /send", () => {
     );
   });
 
-  it("returns 404 when app has no templates registered", async () => {
+  it("returns 404 when event type has no template", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "unknown-app",
-        eventType: "welcome",
-        userId: "user_123",
-        orgId: "org_456",
-        recipientEmail: "user@example.com",
-      });
-
-    expect(res.status).toBe(404);
-    expect(res.body.error).toContain("No templates registered for app: unknown-app");
-    // Should NOT have attempted to send email or create a run
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("returns 404 when event type has no template in known app", async () => {
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .send({
-        appId: "mcpfactory",
         eventType: "nonexistent_event",
-        userId: "user_123",
-        orgId: "org_456",
         recipientEmail: "user@example.com",
       });
 
@@ -313,11 +261,9 @@ describe("POST /send", () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
       .send({
-        appId: "mcpfactory",
         eventType: "campaign_created",
-        userId: "user_123",
-        orgId: "org_456",
         recipientEmail: "user@example.com",
         metadata: { campaignName: "Test" },
       });
@@ -328,6 +274,24 @@ describe("POST /send", () => {
     // Should still update the event to "failed" even without a dedup key
     expect(mockSet).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
+    );
+  });
+
+  it("accepts parentRunId and forwards to run creation", async () => {
+    const { createRun } = await import("../../src/lib/runs-client.js");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "user_active",
+        parentRunId: "parent-run-789",
+      });
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({ parentRunId: "parent-run-789" })
     );
   });
 });

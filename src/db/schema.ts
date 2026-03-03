@@ -4,12 +4,11 @@ export const emailEvents = pgTable(
   "email_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    appId: text("app_id").notNull(),
     eventType: text("event_type").notNull(),
     recipientEmail: text("recipient_email").notNull(),
     dedupKey: text("dedup_key"),
-    userId: text("user_id"),
-    orgId: text("org_id"),
+    userId: text("user_id").notNull(),
+    orgId: text("org_id").notNull(),
     status: text("status").notNull().default("pending"),
     errorMessage: text("error_message"),
     metadata: jsonb("metadata"),
@@ -17,7 +16,7 @@ export const emailEvents = pgTable(
   },
   (table) => [
     uniqueIndex("idx_email_events_dedup").on(table.dedupKey),
-    index("idx_email_events_app_type").on(table.appId, table.eventType),
+    index("idx_email_events_org_type").on(table.orgId, table.eventType),
     index("idx_email_events_recipient").on(table.recipientEmail),
   ]
 );
@@ -29,7 +28,6 @@ export const emailTemplates = pgTable(
   "email_templates",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    appId: text("app_id").notNull(),
     name: text("name").notNull(),
     subject: text("subject").notNull(),
     htmlBody: text("html_body").notNull(),
@@ -39,7 +37,7 @@ export const emailTemplates = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_email_templates_app_name").on(table.appId, table.name),
+    uniqueIndex("idx_email_templates_name").on(table.name),
   ]
 );
 
