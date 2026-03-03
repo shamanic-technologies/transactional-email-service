@@ -45,7 +45,7 @@ const app = express();
 app.use(express.json());
 app.use(statsRoutes);
 
-const HEADERS = { "x-org-id": "org_123", "x-user-id": "user_123" };
+const HEADERS = { "x-org-id": "org_123", "x-user-id": "user_123", "x-run-id": "run_001" };
 
 beforeEach(() => {
   vi.clearAllMocks();

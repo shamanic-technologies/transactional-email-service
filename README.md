@@ -8,6 +8,7 @@ All protected endpoints require these headers:
 - `x-api-key` — service API key
 - `x-org-id` — internal org UUID from client-service
 - `x-user-id` — internal user UUID from client-service
+- `x-run-id` — caller's run ID (used as parentRunId when creating this service's own run in runs-service)
 
 ### `POST /send`
 
@@ -19,7 +20,6 @@ All protected endpoints require these headers:
   "brandId": "brand_xxx",
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
-  "parentRunId": "run_xxx",
   "metadata": { "name": "Alice" }
 }
 ```
@@ -31,14 +31,13 @@ All protected endpoints require these headers:
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
-| `parentRunId`    | No       | Parent run ID for creating child runs in runs-service |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
 
 | Status | Condition |
 | ------ | --------- |
-| 400    | Missing required headers (`x-org-id`, `x-user-id`) or missing `eventType` |
+| 400    | Missing required headers (`x-org-id`, `x-user-id`, `x-run-id`) or missing `eventType` |
 | 404    | No template found for the given `eventType` |
 
 ### `POST /stats`
@@ -123,6 +122,7 @@ export async function register() {
       "x-api-key": process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!,
       "x-org-id": orgId,
       "x-user-id": userId,
+      "x-run-id": runId,
     },
     body: JSON.stringify({
       templates: [
