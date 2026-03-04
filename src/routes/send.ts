@@ -153,7 +153,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
             .returning();
 
           if (inserted.length === 0) {
-            await updateRun(run.id, "completed");
+            await updateRun(run.id, "completed", { orgId, userId });
             results.push({ email, sent: false, reason: "duplicate" });
             continue;
           }
@@ -197,14 +197,14 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           .set({ status: "sent" })
           .where(eq(emailEvents.id, insertedEventId));
 
-        await updateRun(run.id, "completed");
+        await updateRun(run.id, "completed", { orgId, userId });
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
 
         // Mark run as failed
         try {
-          await updateRun(run.id, "failed");
+          await updateRun(run.id, "failed", { orgId, userId });
         } catch {
           // Best effort
         }
