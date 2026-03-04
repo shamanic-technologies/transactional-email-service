@@ -13,12 +13,21 @@ interface ClientServiceUser {
   lastName: string | null;
 }
 
-async function clientRequest<T>(path: string): Promise<T> {
+interface IdentityContext {
+  orgId: string;
+  userId: string;
+  runId: string;
+}
+
+async function clientRequest<T>(path: string, identity: IdentityContext): Promise<T> {
   const response = await fetch(`${CLIENT_SERVICE_URL}${path}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": CLIENT_SERVICE_API_KEY,
+      "x-org-id": identity.orgId,
+      "x-user-id": identity.userId,
+      "x-run-id": identity.runId,
     },
   });
 
@@ -35,9 +44,10 @@ async function clientRequest<T>(path: string): Promise<T> {
 /**
  * Resolve a user's primary email from their internal user ID via client-service.
  */
-export async function resolveUserEmail(userId: string): Promise<string> {
+export async function resolveUserEmail(userId: string, identity: IdentityContext): Promise<string> {
   const { user } = await clientRequest<{ user: ClientServiceUser }>(
-    `/anonymous-users/${userId}`
+    `/anonymous-users/${userId}`,
+    identity
   );
   if (!user.email) {
     throw new Error(`No email found for user ${userId}`);

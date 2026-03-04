@@ -26,6 +26,7 @@ describe("sendEmail", () => {
       textBody: "Test",
       tag: "user_active",
       orgId: "org_123",
+      userId: "user_456",
       runId: "run_abc",
       brandId: "brand_123",
       campaignId: "campaign_456",
@@ -53,7 +54,7 @@ describe("sendEmail", () => {
     });
   });
 
-  it("maps orgId to clerkOrgId in the payload", async () => {
+  it("forwards x-org-id, x-user-id, and x-run-id headers", async () => {
     await sendEmail({
       to: "test@example.com",
       subject: "Test",
@@ -61,14 +62,18 @@ describe("sendEmail", () => {
       textBody: "Test",
       tag: "test-tag",
       orgId: "org_real_123",
+      userId: "user_real_456",
       runId: "run_abc",
       brandId: "lifecycle",
       campaignId: "lifecycle-test",
     });
 
     const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
+    expect(options.headers["x-org-id"]).toBe("org_real_123");
+    expect(options.headers["x-user-id"]).toBe("user_real_456");
+    expect(options.headers["x-run-id"]).toBe("run_abc");
 
+    const body = JSON.parse(options.body);
     expect(body.clerkOrgId).toBe("org_real_123");
     expect(body.runId).toBe("run_abc");
   });
@@ -81,6 +86,7 @@ describe("sendEmail", () => {
       textBody: "Test",
       tag: "test-tag",
       orgId: "org_123",
+      userId: "user_456",
       runId: "run_abc",
       from: "GrowthAgency <hello@growthagency.dev>",
     });
@@ -99,6 +105,7 @@ describe("sendEmail", () => {
       textBody: "Test",
       tag: "test-tag",
       orgId: "org_123",
+      userId: "user_456",
       runId: "run_abc",
     });
 
@@ -116,6 +123,7 @@ describe("sendEmail", () => {
       textBody: "Test",
       tag: "test-tag",
       orgId: "org_xyz",
+      userId: "user_xyz",
       runId: "run_abc",
       brandId: "brand_xyz",
       campaignId: "campaign_789",

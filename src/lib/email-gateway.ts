@@ -8,6 +8,7 @@ interface SendEmailParams {
   textBody: string;
   tag: string;
   orgId: string;
+  userId: string;
   runId: string;
   brandId?: string;
   campaignId?: string;
@@ -24,6 +25,8 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": EMAIL_GATEWAY_SERVICE_API_KEY,
+      "x-org-id": params.orgId,
+      "x-user-id": params.userId,
       "x-run-id": params.runId,
     },
     body: JSON.stringify({
