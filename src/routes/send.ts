@@ -80,7 +80,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
-      const email = await resolveUserEmail(userId);
+      const email = await resolveUserEmail(userId, { orgId, userId, runId });
       recipientEmails = [email];
     }
 
@@ -88,7 +88,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     const metadata = { ...body.metadata };
     if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && !metadata.email) {
       try {
-        const userEmail = await resolveUserEmail(userId);
+        const userEmail = await resolveUserEmail(userId, { orgId, userId, runId });
         metadata.email = userEmail;
       } catch {
         // Continue without email in metadata
@@ -185,6 +185,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           textBody: template.textBody,
           tag: body.eventType,
           orgId,
+          userId,
           runId: run.id,
           brandId: body.brandId,
           campaignId: body.campaignId,
