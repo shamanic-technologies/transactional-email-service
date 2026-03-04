@@ -293,6 +293,26 @@ describe("POST /send", () => {
     );
   });
 
+  it("passes orgId and userId to updateRun for identity headers", async () => {
+    const { updateRun } = await import("../../src/lib/runs-client.js");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "user_active",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(true);
+    expect(vi.mocked(updateRun)).toHaveBeenCalledWith(
+      "run-456",
+      "completed",
+      { orgId: "org_456", userId: "user_123" }
+    );
+  });
+
   it("passes x-run-id header to createRun as parentRunId for runs-service", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
