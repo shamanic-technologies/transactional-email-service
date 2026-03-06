@@ -8,6 +8,7 @@ const {
   mockOnConflictDoNothing,
   mockValues,
   mockInsert,
+  mockSelectLimit,
 } = vi.hoisted(() => {
   process.env.EMAIL_GATEWAY_SERVICE_API_KEY = "test-api-key";
   process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY = "test-service-key";
@@ -24,7 +25,16 @@ const {
   });
   const mockInsert = vi.fn().mockReturnValue({ values: mockValues });
 
-  return { mockWhere, mockSet, mockUpdate, mockReturning, mockOnConflictDoNothing, mockValues, mockInsert };
+  // DB template lookup — returns a generic template by default (no hardcoded templates)
+  const mockSelectLimit = vi.fn().mockResolvedValue([{
+    name: "test",
+    subject: "Test subject",
+    htmlBody: "<p>Test</p>",
+    textBody: "Test",
+    fromAddress: null,
+  }]);
+
+  return { mockWhere, mockSet, mockUpdate, mockReturning, mockOnConflictDoNothing, mockValues, mockInsert, mockSelectLimit };
 });
 
 // Mock db to avoid needing a real database
@@ -32,11 +42,10 @@ vi.mock("../../src/db/index.js", () => ({
   db: {
     insert: mockInsert,
     update: mockUpdate,
-    // getTemplate now queries DB first; return empty to fall back to hardcoded templates
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
+          limit: mockSelectLimit,
         }),
       }),
     }),
@@ -67,6 +76,14 @@ app.use(sendRoutes);
 // Identity headers applied to all requests
 const HEADERS = { "x-org-id": "org_456", "x-user-id": "user_123", "x-run-id": "run_caller_001" };
 
+const DB_TEMPLATE_ROW = {
+  name: "test",
+  subject: "Test subject",
+  htmlBody: "<p>Test</p>",
+  textBody: "Test",
+  fromAddress: null,
+};
+
 beforeEach(() => {
   fetchSpy = vi.fn().mockResolvedValue({ ok: true });
   vi.stubGlobal("fetch", fetchSpy);
@@ -82,6 +99,7 @@ beforeEach(() => {
   mockUpdate.mockReturnValue({ set: mockSet });
   mockSet.mockReturnValue({ where: mockWhere });
   mockWhere.mockResolvedValue(undefined);
+  mockSelectLimit.mockResolvedValue([DB_TEMPLATE_ROW]);
 });
 
 afterEach(() => {
@@ -250,6 +268,8 @@ describe("POST /send", () => {
   });
 
   it("returns 404 when event type has no template", async () => {
+    mockSelectLimit.mockResolvedValueOnce([]);
+
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")

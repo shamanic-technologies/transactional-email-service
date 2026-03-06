@@ -147,29 +147,19 @@ Returns `{ "status": "ok" }`. No authentication required.
 
 Returns the OpenAPI spec for this service. No authentication required. Used by the [API Registry Service](https://github.com/shamanic-technologies/api-registry-service) to discover and index endpoints.
 
-## Event Types (distribute)
+## Dedup Strategies
 
-| Event               | Dedup Strategy | Recipient |
-| ------------------- | -------------- | --------- |
-| `waitlist`          | Once per email | User      |
-| `welcome`           | Once per user/email | User  |
-| `signup_notification` | Once per user | Admin     |
-| `signin_notification` | None (repeatable) | Admin |
-| `user_active`       | Daily per user | Admin     |
+Templates are deployed by calling services at startup via `PUT /templates`. The dedup and recipient routing logic remains in this service:
 
-## Event Types (generic)
+| Strategy | Events | Key format |
+| -------- | ------ | ---------- |
+| Once per email | `waitlist` | `{orgId}:waitlist:{email}` |
+| Once per user | `welcome`, `signup_notification` | `{orgId}:{eventType}:{userId}` |
+| Daily per user | `user_active` | `{orgId}:{eventType}:{userId}:{date}` |
+| Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
+| None (repeatable) | Any event not listed above | — |
 
-Product-scoped events for webinar/event transactional emails. Require `productId` and `recipientEmail`.
-
-| Event               | Dedup Strategy              | Recipient |
-| ------------------- | --------------------------- | --------- |
-| `webinar_welcome`   | Once per email × product    | User      |
-| `j_minus_3`         | Once per email × product    | User      |
-| `j_minus_2`         | Once per email × product    | User      |
-| `j_minus_1`         | Once per email × product    | User      |
-| `j_day`             | Once per email × product    | User      |
-
-Dedup key format: `{orgId}:{eventType}:{recipientEmail}:{productId}`
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`) are always routed to the admin email regardless of the caller's identity.
 
 ## Tech Stack
 
@@ -241,21 +231,7 @@ src/
     stats.ts            # POST /stats endpoint for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
   templates/
-    index.ts            # Template registry (DB-first lookup with hardcoded fallback)
-    distribute/         # Distribute app templates (hardcoded)
-      layout.ts         # Shared HTML layout
-      waitlist.ts
-      welcome.ts
-      signup-notification.ts
-      signin-notification.ts
-      user-active.ts
-    generic/            # Generic webinar/event templates (hardcoded)
-      layout.ts         # Minimal unbranded layout
-      webinar-welcome.ts
-      j-minus-3.ts
-      j-minus-2.ts
-      j-minus-1.ts
-      j-day.ts
+    index.ts            # Template registry (DB lookup, {{var}} interpolation)
 scripts/
   generate-openapi.ts   # OpenAPI spec generation via zod-to-openapi
 ```
