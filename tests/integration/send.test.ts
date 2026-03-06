@@ -31,19 +31,24 @@ const HEADERS = { "x-org-id": "org_test", "x-user-id": "user_test", "x-run-id": 
 // Base fields for request body
 const BASE = { brandId: "brand_test", campaignId: "campaign_test" };
 
+// All templates are now DB-registered (deployed by calling services at startup).
+// For tests, we insert the templates needed by test cases.
+const TEST_TEMPLATES = [
+  { name: "waitlist", subject: "Waitlist", htmlBody: "<p>Waitlist</p>", textBody: "Waitlist" },
+  { name: "welcome", subject: "Welcome", htmlBody: "<p>Welcome</p>", textBody: "Welcome" },
+  { name: "signup_notification", subject: "New signup: {{email}}", htmlBody: "<p>Signup: {{email}} at {{timestamp}}</p>", textBody: "Signup: {{email}} at {{timestamp}}" },
+  { name: "user_active", subject: "User active: {{email}}", htmlBody: "<p>Active: {{email}}</p>", textBody: "Active: {{email}}" },
+  { name: "campaign_created", subject: "Campaign: {{campaignName}}", htmlBody: "<p>Campaign: {{campaignName}}</p>", textBody: "Campaign: {{campaignName}}" },
+  { name: "webinar_welcome", subject: "Registered: {{productName}}", htmlBody: "<p>Registered: {{productName}}</p>", textBody: "Registered: {{productName}}" },
+  { name: "j_minus_3", subject: "3 days: {{productName}}", htmlBody: "<p>3 days: {{productName}}</p>", textBody: "3 days: {{productName}}" },
+];
+
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
 
-  // Register campaign_created as a DB template (no longer hardcoded — deployed by api-service at startup)
-  await db
-    .insert(emailTemplates)
-    .values({
-      name: "campaign_created",
-      subject: "Campaign created: {{campaignName}}",
-      htmlBody: "<h1>Campaign created</h1><p>Your campaign <strong>{{campaignName}}</strong> has been created.</p>",
-      textBody: "Campaign created: {{campaignName}}",
-    })
-    .onConflictDoNothing();
+  for (const tpl of TEST_TEMPLATES) {
+    await db.insert(emailTemplates).values(tpl).onConflictDoNothing();
+  }
 }, 15000);
 
 beforeEach(async () => {
