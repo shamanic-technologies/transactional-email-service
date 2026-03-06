@@ -188,17 +188,15 @@ describe("POST /send", () => {
     expect(body.campaignId).toBeUndefined();
   });
 
-  it("passes brandId and campaignId for campaign events", async () => {
+  it("passes brandId and campaignId when provided", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
       .set(HEADERS)
       .send({
-        eventType: "campaign_created",
+        eventType: "user_active",
         brandId: "brand_abc",
         campaignId: "campaign_def",
-        recipientEmail: "user@example.com",
-        metadata: { campaignName: "Test Campaign" },
       });
 
     expect(res.status).toBe(200);
@@ -273,15 +271,13 @@ describe("POST /send", () => {
       json: () => Promise.resolve({ error: "Gateway down" }),
     });
 
-    // campaign_created is a repeatable (non-deduped) event
+    // signin_notification is a repeatable (non-deduped) event
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
       .set(HEADERS)
       .send({
-        eventType: "campaign_created",
-        recipientEmail: "user@example.com",
-        metadata: { campaignName: "Test" },
+        eventType: "signin_notification",
       });
 
     expect(res.status).toBe(200);
