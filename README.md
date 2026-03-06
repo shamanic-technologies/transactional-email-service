@@ -155,8 +155,6 @@ Returns the OpenAPI spec for this service. No authentication required. Used by t
 | `welcome`           | Once per user/email | User  |
 | `signup_notification` | Once per user | Admin     |
 | `signin_notification` | None (repeatable) | Admin |
-| `campaign_created`  | None (repeatable) | User   |
-| `campaign_stopped`  | None (repeatable) | User   |
 | `user_active`       | Daily per user | Admin     |
 
 ## Event Types (generic)
@@ -250,8 +248,6 @@ src/
       welcome.ts
       signup-notification.ts
       signin-notification.ts
-      campaign-created.ts
-      campaign-stopped.ts
       user-active.ts
     generic/            # Generic webinar/event templates (hardcoded)
       layout.ts         # Minimal unbranded layout

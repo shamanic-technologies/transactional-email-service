@@ -19,7 +19,7 @@ vi.mock("../../src/lib/runs-client.js", () => ({
 
 import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
-import { emailEvents } from "../../src/db/schema.js";
+import { emailEvents, emailTemplates } from "../../src/db/schema.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
 import { resolveUserEmail } from "../../src/lib/client-service.js";
 
@@ -33,6 +33,17 @@ const BASE = { brandId: "brand_test", campaignId: "campaign_test" };
 
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
+
+  // Register campaign_created as a DB template (no longer hardcoded — deployed by api-service at startup)
+  await db
+    .insert(emailTemplates)
+    .values({
+      name: "campaign_created",
+      subject: "Campaign created: {{campaignName}}",
+      htmlBody: "<h1>Campaign created</h1><p>Your campaign <strong>{{campaignName}}</strong> has been created.</p>",
+      textBody: "Campaign created: {{campaignName}}",
+    })
+    .onConflictDoNothing();
 }, 15000);
 
 beforeEach(async () => {
