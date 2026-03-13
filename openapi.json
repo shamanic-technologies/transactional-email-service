@@ -294,6 +294,33 @@
               "type": "string"
             },
             "description": "Caller's run ID"
+          },
+          {
+            "name": "x-campaign-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Campaign ID (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-brand-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brand ID (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-workflow-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workflow name (injected automatically by workflow-service)"
           }
         ],
         "requestBody": {
@@ -379,6 +406,33 @@
               "type": "string"
             },
             "description": "Caller's run ID"
+          },
+          {
+            "name": "x-campaign-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Campaign ID (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-brand-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brand ID (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-workflow-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workflow name (injected automatically by workflow-service)"
           }
         ],
         "requestBody": {
@@ -464,6 +518,33 @@
               "type": "string"
             },
             "description": "Caller's run ID"
+          },
+          {
+            "name": "x-campaign-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Campaign ID (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-brand-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Brand ID (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-workflow-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workflow name (injected automatically by workflow-service)"
           }
         ],
         "requestBody": {

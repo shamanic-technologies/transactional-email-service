@@ -10,6 +10,13 @@ All protected endpoints require these headers:
 - `x-user-id` — internal user UUID from client-service
 - `x-run-id` — caller's run ID
 
+Optional workflow tracking headers (injected automatically by workflow-service):
+- `x-campaign-id` — campaign ID
+- `x-brand-id` — brand ID
+- `x-workflow-name` — workflow name
+
+When present, these are stored in the `email_events` table and forwarded to all downstream services.
+
 ### `POST /send`
 
 **Request body:**

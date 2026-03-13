@@ -143,6 +143,30 @@ const runIdHeader = {
   description: "Caller's run ID",
 };
 
+const campaignIdHeader = {
+  name: "x-campaign-id",
+  in: "header" as const,
+  required: false,
+  schema: { type: "string" as const },
+  description: "Campaign ID (injected automatically by workflow-service)",
+};
+
+const brandIdHeader = {
+  name: "x-brand-id",
+  in: "header" as const,
+  required: false,
+  schema: { type: "string" as const },
+  description: "Brand ID (injected automatically by workflow-service)",
+};
+
+const workflowNameHeader = {
+  name: "x-workflow-name",
+  in: "header" as const,
+  required: false,
+  schema: { type: "string" as const },
+  description: "Workflow name (injected automatically by workflow-service)",
+};
+
 // --- Register endpoints ---
 
 registry.registerPath({
@@ -175,7 +199,7 @@ registry.registerPath({
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader, runIdHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader],
   request: {
     body: {
       required: true,
@@ -207,7 +231,7 @@ registry.registerPath({
     "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Stats"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader, runIdHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader],
   request: {
     body: {
       required: true,
@@ -239,7 +263,7 @@ registry.registerPath({
     "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Templates"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader, runIdHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader],
   request: {
     body: {
       required: true,

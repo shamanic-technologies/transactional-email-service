@@ -13,6 +13,9 @@ export interface IdentityLocals {
   orgId: string;
   userId: string;
   runId: string;
+  campaignId?: string;
+  brandId?: string;
+  workflowName?: string;
 }
 
 export function requireIdentityHeaders(req: Request, res: Response, next: NextFunction) {
@@ -28,5 +31,14 @@ export function requireIdentityHeaders(req: Request, res: Response, next: NextFu
   res.locals.orgId = orgId;
   res.locals.userId = userId;
   res.locals.runId = runId;
+
+  // Optional workflow tracking headers
+  const campaignId = req.headers["x-campaign-id"] as string | undefined;
+  const brandId = req.headers["x-brand-id"] as string | undefined;
+  const workflowName = req.headers["x-workflow-name"] as string | undefined;
+  if (campaignId) res.locals.campaignId = campaignId;
+  if (brandId) res.locals.brandId = brandId;
+  if (workflowName) res.locals.workflowName = workflowName;
+
   next();
 }

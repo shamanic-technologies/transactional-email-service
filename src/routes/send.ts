@@ -70,7 +70,11 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     }
 
     const body = parsed.data;
-    const { orgId, userId, runId } = res.locals as IdentityLocals;
+    const { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandId, workflowName } = res.locals as IdentityLocals;
+
+    // Headers take precedence over body for campaign/brand tracking
+    const effectiveCampaignId = headerCampaignId || body.campaignId;
+    const effectiveBrandId = headerBrandId || body.brandId;
 
     // Resolve recipient emails
     let recipientEmails: string[];
@@ -80,7 +84,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
-      const email = await resolveUserEmail(userId, { orgId, userId, runId });
+      const email = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandId, workflowName });
       recipientEmails = [email];
     }
 
@@ -88,7 +92,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     const metadata = { ...body.metadata };
     if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && !metadata.email) {
       try {
-        const userEmail = await resolveUserEmail(userId, { orgId, userId, runId });
+        const userEmail = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandId, workflowName });
         metadata.email = userEmail;
       } catch {
         // Continue without email in metadata
@@ -123,9 +127,10 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           userId,
           serviceName: "transactional-email-service",
           taskName: `email-${body.eventType}`,
-          brandId: body.brandId,
-          campaignId: body.campaignId,
+          brandId: effectiveBrandId,
+          campaignId: effectiveCampaignId,
           parentRunId: runId,
+          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandId, workflowName },
         });
       } catch (runErr: any) {
         console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
@@ -148,12 +153,15 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
               orgId,
               status: "pending",
               metadata: metadata || null,
+              campaignId: effectiveCampaignId || null,
+              brandId: effectiveBrandId || null,
+              workflowName: workflowName || null,
             })
             .onConflictDoNothing({ target: emailEvents.dedupKey })
             .returning();
 
           if (inserted.length === 0) {
-            await updateRun(run.id, "completed", { orgId, userId });
+            await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandId, workflowName });
             results.push({ email, sent: false, reason: "duplicate" });
             continue;
           }
@@ -171,6 +179,9 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
               orgId,
               status: "pending",
               metadata: metadata || null,
+              campaignId: effectiveCampaignId || null,
+              brandId: effectiveBrandId || null,
+              workflowName: workflowName || null,
             })
             .returning();
 
@@ -187,9 +198,10 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           orgId,
           userId,
           runId: run.id,
-          brandId: body.brandId,
-          campaignId: body.campaignId,
+          brandId: effectiveBrandId,
+          campaignId: effectiveCampaignId,
           from: template.from,
+          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandId, workflowName },
         });
 
         // Mark as sent only after successful delivery
@@ -198,14 +210,14 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           .set({ status: "sent" })
           .where(eq(emailEvents.id, insertedEventId));
 
-        await updateRun(run.id, "completed", { orgId, userId });
+        await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandId, workflowName });
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
 
         // Mark run as failed
         try {
-          await updateRun(run.id, "failed", { orgId, userId });
+          await updateRun(run.id, "failed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandId, workflowName });
         } catch {
           // Best effort
         }
