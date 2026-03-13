@@ -239,6 +239,9 @@ src/
     templates.ts        # PUT /templates endpoint for template registration
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
+tests/
+  migrations.test.ts    # Validates migration files use idempotent patterns
+  ...
 scripts/
   generate-openapi.ts   # OpenAPI spec generation via zod-to-openapi
 ```
