@@ -47,21 +47,17 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | 400    | Missing required headers (`x-org-id`, `x-user-id`, `x-run-id`) or missing `eventType` |
 | 404    | No template found for the given `eventType` |
 
-### `POST /stats`
+### `GET /stats`
 
 Returns aggregated email stats scoped to the caller's org (from `x-org-id` header).
 
-**Request body:**
+**Query parameters:**
 
-```json
-{
-  "eventType": "welcome"
-}
-```
-
-| Field          | Required | Description                              |
+| Parameter      | Required | Description                              |
 | -------------- | -------- | ---------------------------------------- |
 | `eventType`    | No       | Filter by event type                     |
+
+**Example:** `GET /stats?eventType=welcome`
 
 **Response:**
 
@@ -77,6 +73,10 @@ Returns aggregated email stats scoped to the caller's org (from `x-org-id` heade
 ```
 
 Email status lifecycle: `pending` → `sent` (after gateway confirms delivery) or `failed` (if gateway errors).
+
+### `POST /stats` *(deprecated)*
+
+Same as `GET /stats` but accepts filters in the request body. Kept for backwards compatibility — migrate to `GET /stats` with query params.
 
 ### `PUT /templates`
 
@@ -235,7 +235,7 @@ src/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint
     send.ts             # POST /send endpoint with dedup logic
-    stats.ts            # POST /stats endpoint for aggregated email stats
+    stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)

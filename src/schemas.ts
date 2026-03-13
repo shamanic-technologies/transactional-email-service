@@ -64,7 +64,7 @@ export const ErrorResponseSchema = z
   })
   .openapi("ErrorResponse");
 
-// --- POST /stats ---
+// --- Stats ---
 
 export const StatsRequestSchema = z
   .object({
@@ -73,6 +73,14 @@ export const StatsRequestSchema = z
   .openapi("StatsRequest");
 
 export type StatsRequest = z.infer<typeof StatsRequestSchema>;
+
+export const StatsQuerySchema = z
+  .object({
+    eventType: z.string().optional(),
+  })
+  .openapi("StatsQuery");
+
+export type StatsQuery = z.infer<typeof StatsQuerySchema>;
 
 export const StatsResponseSchema = z
   .object({
@@ -223,10 +231,45 @@ registry.registerPath({
 });
 
 registry.registerPath({
-  method: "post",
+  method: "get",
   path: "/stats",
   summary: "Get aggregated stats",
   description:
+    "Get aggregated email event stats scoped by the caller's org (from x-org-id header), with optional eventType filter as query param.\n\n" +
+    "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
+  tags: ["Stats"],
+  security: [{ apiKey: [] }],
+  parameters: [
+    orgIdHeader,
+    userIdHeader,
+    runIdHeader,
+    campaignIdHeader,
+    brandIdHeader,
+    workflowNameHeader,
+    { name: "eventType", in: "query", required: false, schema: { type: "string" } },
+  ],
+  responses: {
+    200: {
+      description: "Aggregated stats",
+      content: { "application/json": { schema: StatsResponseSchema } },
+    },
+    400: {
+      description: "Validation error or missing identity headers",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    401: {
+      description: "Unauthorized - invalid or missing API key",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/stats",
+  summary: "Get aggregated stats (deprecated, use GET)",
+  description:
+    "**Deprecated: use GET /stats instead.**\n\n" +
     "Get aggregated email event stats scoped by the caller's org (from x-org-id header), with optional eventType filter.\n\n" +
     "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Stats"],
