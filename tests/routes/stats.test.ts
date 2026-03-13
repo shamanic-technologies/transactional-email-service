@@ -95,50 +95,14 @@ describe("GET /stats", () => {
   });
 });
 
-describe("POST /stats (deprecated)", () => {
-  it("returns 401 without api key", async () => {
-    const res = await request(app)
-      .post("/stats")
-      .set(HEADERS)
-      .send({});
-
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 400 when identity headers are missing", async () => {
-    const res = await request(app)
-      .post("/stats")
-      .set("X-API-Key", "test-service-key")
-      .send({});
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("Missing required headers");
-  });
-
-  it("returns aggregated stats scoped by org from headers", async () => {
+describe("POST /stats (removed)", () => {
+  it("returns 404 — POST /stats no longer exists", async () => {
     const res = await request(app)
       .post("/stats")
       .set("X-API-Key", "test-service-key")
       .set(HEADERS)
       .send({});
 
-    expect(res.status).toBe(200);
-    expect(res.body.stats).toEqual({
-      totalEmails: 12,
-      sent: 10,
-      failed: 2,
-      pending: 0,
-    });
-  });
-
-  it("returns stats filtered by eventType", async () => {
-    const res = await request(app)
-      .post("/stats")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send({ eventType: "welcome" });
-
-    expect(res.status).toBe(200);
-    expect(res.body.stats).toBeDefined();
+    expect(res.status).toBe(404);
   });
 });

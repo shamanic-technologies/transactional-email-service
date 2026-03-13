@@ -137,14 +137,6 @@
           "stats"
         ]
       },
-      "StatsRequest": {
-        "type": "object",
-        "properties": {
-          "eventType": {
-            "type": "string"
-          }
-        }
-      },
       "DeployTemplatesResponse": {
         "type": "object",
         "properties": {
@@ -443,116 +435,6 @@
             }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "Aggregated stats",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error or missing identity headers",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized - invalid or missing API key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "Get aggregated stats (deprecated, use GET)",
-        "description": "**Deprecated: use GET /stats instead.**\n\nGet aggregated email event stats scoped by the caller's org (from x-org-id header), with optional eventType filter.\n\n**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
-        "tags": [
-          "Stats"
-        ],
-        "security": [
-          {
-            "apiKey": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-org-id",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Internal org UUID from client-service"
-          },
-          {
-            "name": "x-user-id",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Internal user UUID from client-service"
-          },
-          {
-            "name": "x-run-id",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Caller's run ID"
-          },
-          {
-            "name": "x-campaign-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Campaign ID (injected automatically by workflow-service)"
-          },
-          {
-            "name": "x-brand-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Brand ID (injected automatically by workflow-service)"
-          },
-          {
-            "name": "x-workflow-name",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Workflow name (injected automatically by workflow-service)"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StatsRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Aggregated stats",

@@ -74,9 +74,6 @@ Returns aggregated email stats scoped to the caller's org (from `x-org-id` heade
 
 Email status lifecycle: `pending` → `sent` (after gateway confirms delivery) or `failed` (if gateway errors).
 
-### `POST /stats` *(deprecated)*
-
-Same as `GET /stats` but accepts filters in the request body. Kept for backwards compatibility — migrate to `GET /stats` with query params.
 
 ### `PUT /templates`
 
