@@ -325,7 +325,8 @@ describe("POST /send", () => {
     expect(vi.mocked(updateRun)).toHaveBeenCalledWith(
       "run-456",
       "completed",
-      { orgId: "org_456", userId: "user_123" }
+      { orgId: "org_456", userId: "user_123" },
+      { campaignId: undefined, brandId: undefined, workflowName: undefined }
     );
   });
 
@@ -345,6 +346,99 @@ describe("POST /send", () => {
     expect(res.status).toBe(200);
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({ parentRunId: "caller-run-789" })
+    );
+  });
+
+  it("forwards workflow tracking headers to downstream services", async () => {
+    const { createRun, updateRun } = await import("../../src/lib/runs-client.js");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .set("x-user-id", "user_123")
+      .set("x-run-id", "run-789")
+      .set("x-campaign-id", "camp_123")
+      .set("x-brand-id", "brand_456")
+      .set("x-workflow-name", "onboarding-flow")
+      .send({
+        eventType: "user_active",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(true);
+
+    // Workflow headers forwarded to createRun
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow" },
+      })
+    );
+
+    // Workflow headers forwarded to email gateway via fetch
+    const gatewayCall = fetchSpy.mock.calls.find((c: any[]) => String(c[0]).includes("/send"));
+    expect(gatewayCall).toBeDefined();
+    const gatewayHeaders = gatewayCall![1].headers;
+    expect(gatewayHeaders["x-campaign-id"]).toBe("camp_123");
+    expect(gatewayHeaders["x-brand-id"]).toBe("brand_456");
+    expect(gatewayHeaders["x-workflow-name"]).toBe("onboarding-flow");
+
+    // Workflow headers forwarded to updateRun
+    expect(vi.mocked(updateRun)).toHaveBeenCalledWith(
+      "run-456",
+      "completed",
+      { orgId: "org_456", userId: "user_123" },
+      { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow" }
+    );
+  });
+
+  it("uses header campaign/brand IDs over body values", async () => {
+    const { createRun } = await import("../../src/lib/runs-client.js");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .set("x-user-id", "user_123")
+      .set("x-run-id", "run-789")
+      .set("x-campaign-id", "header_campaign")
+      .set("x-brand-id", "header_brand")
+      .send({
+        eventType: "user_active",
+        campaignId: "body_campaign",
+        brandId: "body_brand",
+      });
+
+    expect(res.status).toBe(200);
+
+    // Header values take precedence over body values
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: "header_campaign",
+        brandId: "header_brand",
+      })
+    );
+  });
+
+  it("works without workflow headers (backward compatible)", async () => {
+    const { createRun } = await import("../../src/lib/runs-client.js");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "user_active",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(true);
+
+    // No workflow headers = undefined values, no crash
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowHeaders: { campaignId: undefined, brandId: undefined, workflowName: undefined },
+      })
     );
   });
 });

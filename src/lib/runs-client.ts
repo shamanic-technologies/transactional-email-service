@@ -33,15 +33,22 @@ export interface CreateRunParams {
   brandId?: string;
   campaignId?: string;
   parentRunId?: string;
+  workflowHeaders?: WorkflowHeaders;
 }
 
 // ─── HTTP helpers ────────────────────────────────────────────────────────────
 
+export interface WorkflowHeaders {
+  campaignId?: string;
+  brandId?: string;
+  workflowName?: string;
+}
+
 async function runsRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown; orgId?: string; userId?: string; runId?: string } = {}
+  options: { method?: string; body?: unknown; orgId?: string; userId?: string; runId?: string; workflowHeaders?: WorkflowHeaders } = {}
 ): Promise<T> {
-  const { method = "GET", body, orgId, userId, runId } = options;
+  const { method = "GET", body, orgId, userId, runId, workflowHeaders } = options;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -50,6 +57,9 @@ async function runsRequest<T>(
   if (orgId) headers["x-org-id"] = orgId;
   if (userId) headers["x-user-id"] = userId;
   if (runId) headers["x-run-id"] = runId;
+  if (workflowHeaders?.campaignId) headers["x-campaign-id"] = workflowHeaders.campaignId;
+  if (workflowHeaders?.brandId) headers["x-brand-id"] = workflowHeaders.brandId;
+  if (workflowHeaders?.workflowName) headers["x-workflow-name"] = workflowHeaders.workflowName;
 
   const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
     method,
@@ -70,19 +80,22 @@ async function runsRequest<T>(
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export async function createRun(params: CreateRunParams): Promise<Run> {
+  const { workflowHeaders, ...body } = params;
   return runsRequest<Run>("/v1/runs", {
     method: "POST",
-    body: params,
+    body,
     orgId: params.orgId,
     userId: params.userId,
     runId: params.parentRunId,
+    workflowHeaders,
   });
 }
 
 export async function updateRun(
   runId: string,
   status: "completed" | "failed",
-  identity: { orgId: string; userId: string }
+  identity: { orgId: string; userId: string },
+  workflowHeaders?: WorkflowHeaders
 ): Promise<Run> {
   return runsRequest<Run>(`/v1/runs/${runId}`, {
     method: "PATCH",
@@ -90,5 +103,6 @@ export async function updateRun(
     orgId: identity.orgId,
     userId: identity.userId,
     runId,
+    workflowHeaders,
   });
 }
