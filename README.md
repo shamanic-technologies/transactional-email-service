@@ -159,7 +159,7 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | -------- | ------ | ---------- |
 | Once per email | `waitlist` | `{orgId}:waitlist:{email}` |
 | Once per user | `welcome`, `signup_notification` | `{orgId}:{eventType}:{userId}` |
-| Daily per user | `user_active`, `credits_depleted`, `credits_reload_failed` | `{orgId}:{eventType}:{userId}:{date}` |
+| Daily per user | `user_active` | `{orgId}:{eventType}:{userId}:{date}` |
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | None (repeatable) | Any event not listed above | — |
 
