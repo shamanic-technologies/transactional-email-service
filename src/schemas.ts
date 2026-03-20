@@ -64,14 +64,6 @@ export const ErrorResponseSchema = z
   })
   .openapi("ErrorResponse");
 
-export const InsufficientCreditsResponseSchema = z
-  .object({
-    error: z.string(),
-    balance_cents: z.number().nullable(),
-    required_cents: z.number(),
-  })
-  .openapi("InsufficientCreditsResponse");
-
 // --- Stats ---
 
 export const StatsQuerySchema = z
@@ -225,14 +217,6 @@ registry.registerPath({
     },
     401: {
       description: "Unauthorized - invalid or missing API key",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    402: {
-      description: "Insufficient credits — org balance too low to send email",
-      content: { "application/json": { schema: InsufficientCreditsResponseSchema } },
-    },
-    502: {
-      description: "Billing service unavailable",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },

@@ -7,7 +7,6 @@ import { getTemplate } from "../templates/index.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
-import { authorizeCredits, EMAIL_COST_NAME, EMAIL_COST_QUANTITY } from "../lib/billing-client.js";
 import { SendRequestSchema } from "../schemas.js";
 
 const router = Router();
@@ -137,33 +136,6 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
         console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
         results.push({ email, sent: false, reason: `Run creation failed: ${runErr.message}` });
         continue;
-      }
-
-      // Authorize credits before sending (platform cost)
-      try {
-        const auth = await authorizeCredits({
-          items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
-          description: `transactional-email — ${body.eventType}`,
-          orgId,
-          userId,
-          runId: run.id,
-          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandId, workflowName },
-        });
-
-        if (!auth.sufficient) {
-          await updateRun(run.id, "failed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandId, workflowName });
-          res.status(402).json({
-            error: "Insufficient credits",
-            balance_cents: auth.balance_cents,
-            required_cents: auth.required_cents,
-          });
-          return;
-        }
-      } catch (billingErr: any) {
-        console.error(`Billing authorization failed for ${body.eventType}:`, billingErr.message);
-        await updateRun(run.id, "failed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandId, workflowName }).catch(() => {});
-        res.status(502).json({ error: `Billing authorization failed: ${billingErr.message}` });
-        return;
       }
 
       let insertedEventId: string | null = null;
