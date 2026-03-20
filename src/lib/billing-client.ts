@@ -9,11 +9,17 @@ const BILLING_SERVICE_URL =
   process.env.BILLING_SERVICE_URL || "http://localhost:3012";
 const BILLING_SERVICE_API_KEY = process.env.BILLING_SERVICE_API_KEY || "";
 
-// Fixed cost per transactional email in USD cents
-export const EMAIL_COST_CENTS = 1;
+// Cost item for a single transactional email send
+export const EMAIL_COST_NAME = "postmark-email-send";
+export const EMAIL_COST_QUANTITY = 1;
+
+export interface CostItem {
+  costName: string;
+  quantity: number;
+}
 
 export interface AuthorizeParams {
-  requiredCents: number;
+  items: CostItem[];
   description: string;
   orgId: string;
   userId: string;
@@ -24,13 +30,14 @@ export interface AuthorizeParams {
 export interface AuthorizeResponse {
   sufficient: boolean;
   balance_cents: number | null;
+  required_cents: number | null;
   billing_mode: "trial" | "byok" | "payg";
 }
 
 export async function authorizeCredits(
   params: AuthorizeParams
 ): Promise<AuthorizeResponse> {
-  const { requiredCents, description, orgId, userId, runId, workflowHeaders } =
+  const { items, description, orgId, userId, runId, workflowHeaders } =
     params;
 
   const headers: Record<string, string> = {
@@ -53,7 +60,7 @@ export async function authorizeCredits(
       method: "POST",
       headers,
       body: JSON.stringify({
-        required_cents: requiredCents,
+        items,
         description,
       }),
     }
