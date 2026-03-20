@@ -65,8 +65,9 @@ vi.mock("../../src/lib/runs-client.js", () => ({
 
 // Mock billing-client to avoid external calls
 vi.mock("../../src/lib/billing-client.js", () => ({
-  authorizeCredits: vi.fn().mockResolvedValue({ sufficient: true, balance_cents: 500, billing_mode: "payg" }),
-  EMAIL_COST_CENTS: 1,
+  authorizeCredits: vi.fn().mockResolvedValue({ sufficient: true, balance_cents: 500, required_cents: 1, billing_mode: "payg" }),
+  EMAIL_COST_NAME: "postmark-email-send",
+  EMAIL_COST_QUANTITY: 1,
 }));
 
 import request from "supertest";
@@ -453,6 +454,7 @@ describe("POST /send", () => {
     vi.mocked(authorizeCredits).mockResolvedValueOnce({
       sufficient: false,
       balance_cents: 0,
+      required_cents: 1,
       billing_mode: "trial",
     });
 
@@ -513,7 +515,7 @@ describe("POST /send", () => {
     expect(res.status).toBe(200);
     expect(vi.mocked(authorizeCredits)).toHaveBeenCalledWith(
       expect.objectContaining({
-        requiredCents: 1,
+        items: [{ costName: "postmark-email-send", quantity: 1 }],
         description: "transactional-email — user_active",
         orgId: "org_456",
         userId: "user_123",
@@ -529,6 +531,7 @@ describe("POST /send", () => {
     vi.mocked(authorizeCredits).mockResolvedValueOnce({
       sufficient: false,
       balance_cents: 0,
+      required_cents: 1,
       billing_mode: "trial",
     });
 

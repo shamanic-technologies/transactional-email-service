@@ -7,7 +7,7 @@ import { getTemplate } from "../templates/index.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
-import { authorizeCredits, EMAIL_COST_CENTS } from "../lib/billing-client.js";
+import { authorizeCredits, EMAIL_COST_NAME, EMAIL_COST_QUANTITY } from "../lib/billing-client.js";
 import { SendRequestSchema } from "../schemas.js";
 
 const router = Router();
@@ -142,7 +142,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
       // Authorize credits before sending (platform cost)
       try {
         const auth = await authorizeCredits({
-          requiredCents: EMAIL_COST_CENTS,
+          items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
           description: `transactional-email — ${body.eventType}`,
           orgId,
           userId,
@@ -155,7 +155,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           res.status(402).json({
             error: "Insufficient credits",
             balance_cents: auth.balance_cents,
-            required_cents: EMAIL_COST_CENTS,
+            required_cents: auth.required_cents,
           });
           return;
         }
