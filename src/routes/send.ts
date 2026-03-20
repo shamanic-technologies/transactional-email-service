@@ -15,7 +15,7 @@ const router = Router();
 const ONCE_ONLY_EVENTS = new Set(["waitlist", "welcome", "signup_notification"]);
 
 // Event types deduped per day (one per user per day)
-const DAILY_DEDUP_EVENTS = new Set(["user_active"]);
+const DAILY_DEDUP_EVENTS = new Set(["user_active", "credits_depleted", "credits_reload_failed"]);
 
 // Event types deduped per user × product (one per recipient per product instance)
 const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_2", "j_minus_1", "j_day"]);

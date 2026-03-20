@@ -420,6 +420,51 @@ describe("POST /send", () => {
     );
   });
 
+  it("deduplicates credits_depleted events daily per user", async () => {
+    // First send should succeed
+    const res1 = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "credits_depleted", recipientEmail: "admin@example.com" });
+
+    expect(res1.status).toBe(200);
+    expect(res1.body.results[0].sent).toBe(true);
+
+    // Verify dedup key includes date (daily dedup pattern)
+    const insertCall = mockValues.mock.calls[0][0];
+    expect(insertCall.dedupKey).toMatch(/^org_456:credits_depleted:user_123:\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("deduplicates credits_reload_failed events daily per user", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "credits_reload_failed", recipientEmail: "admin@example.com" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(true);
+
+    const insertCall = mockValues.mock.calls[0][0];
+    expect(insertCall.dedupKey).toMatch(/^org_456:credits_reload_failed:user_123:\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("returns duplicate when credits_depleted already sent today", async () => {
+    // Simulate dedup conflict: onConflictDoNothing returns empty array
+    mockReturning.mockResolvedValueOnce([]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "credits_depleted", recipientEmail: "admin@example.com" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(false);
+    expect(res.body.results[0].reason).toBe("duplicate");
+  });
+
   it("works without workflow headers (backward compatible)", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
