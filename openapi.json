@@ -74,26 +74,6 @@
           "error"
         ]
       },
-      "InsufficientCreditsResponse": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "balance_cents": {
-            "type": "number",
-            "nullable": true
-          },
-          "required_cents": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "error",
-          "balance_cents",
-          "required_cents"
-        ]
-      },
       "SendRequest": {
         "type": "object",
         "properties": {
@@ -368,26 +348,6 @@
           },
           "401": {
             "description": "Unauthorized - invalid or missing API key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Insufficient credits — org balance too low to send email",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InsufficientCreditsResponse"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Billing service unavailable",
             "content": {
               "application/json": {
                 "schema": {

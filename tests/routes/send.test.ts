@@ -63,12 +63,6 @@ vi.mock("../../src/lib/runs-client.js", () => ({
   updateRun: vi.fn().mockResolvedValue({}),
 }));
 
-// Mock billing-client to avoid external calls
-vi.mock("../../src/lib/billing-client.js", () => ({
-  authorizeCredits: vi.fn().mockResolvedValue({ sufficient: true, balance_cents: 500, billing_mode: "payg" }),
-  EMAIL_COST_CENTS: 1,
-}));
-
 import request from "supertest";
 import express from "express";
 import sendRoutes from "../../src/routes/send.js";
@@ -445,106 +439,6 @@ describe("POST /send", () => {
       expect.objectContaining({
         workflowHeaders: { campaignId: undefined, brandId: undefined, workflowName: undefined },
       })
-    );
-  });
-
-  it("returns 402 when billing authorization returns insufficient credits", async () => {
-    const { authorizeCredits } = await import("../../src/lib/billing-client.js");
-    vi.mocked(authorizeCredits).mockResolvedValueOnce({
-      sufficient: false,
-      balance_cents: 0,
-      billing_mode: "trial",
-    });
-
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send({
-        eventType: "user_active",
-      });
-
-    expect(res.status).toBe(402);
-    expect(res.body.error).toBe("Insufficient credits");
-    expect(res.body.balance_cents).toBe(0);
-    expect(res.body.required_cents).toBe(1);
-
-    // Should NOT call email gateway
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("returns 502 when billing-service is unreachable", async () => {
-    const { authorizeCredits } = await import("../../src/lib/billing-client.js");
-    vi.mocked(authorizeCredits).mockRejectedValueOnce(
-      new Error("billing-service POST /v1/credits/authorize failed: 500 - Internal Server Error")
-    );
-
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send({
-        eventType: "user_active",
-      });
-
-    expect(res.status).toBe(502);
-    expect(res.body.error).toContain("Billing authorization failed");
-
-    // Should NOT call email gateway
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("calls authorizeCredits with correct params including workflow headers", async () => {
-    const { authorizeCredits } = await import("../../src/lib/billing-client.js");
-
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set("x-org-id", "org_456")
-      .set("x-user-id", "user_123")
-      .set("x-run-id", "run-789")
-      .set("x-campaign-id", "camp_123")
-      .set("x-brand-id", "brand_456")
-      .set("x-workflow-name", "onboarding-flow")
-      .send({
-        eventType: "user_active",
-      });
-
-    expect(res.status).toBe(200);
-    expect(vi.mocked(authorizeCredits)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requiredCents: 1,
-        description: "transactional-email — user_active",
-        orgId: "org_456",
-        userId: "user_123",
-        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow" },
-      })
-    );
-  });
-
-  it("marks run as failed when credits are insufficient", async () => {
-    const { authorizeCredits } = await import("../../src/lib/billing-client.js");
-    const { updateRun } = await import("../../src/lib/runs-client.js");
-
-    vi.mocked(authorizeCredits).mockResolvedValueOnce({
-      sufficient: false,
-      balance_cents: 0,
-      billing_mode: "trial",
-    });
-
-    await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send({
-        eventType: "user_active",
-      });
-
-    expect(vi.mocked(updateRun)).toHaveBeenCalledWith(
-      "run-456",
-      "failed",
-      { orgId: "org_456", userId: "user_123" },
-      expect.any(Object)
     );
   });
 });

@@ -45,9 +45,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | Status | Condition |
 | ------ | --------- |
 | 400    | Missing required headers (`x-org-id`, `x-user-id`, `x-run-id`) or missing `eventType` |
-| 402    | Insufficient credits — org balance too low to send email. Returns `{ error, balance_cents, required_cents }` |
 | 404    | No template found for the given `eventType` |
-| 502    | Billing service unavailable |
 
 ### `GET /stats`
 
@@ -196,8 +194,6 @@ npm run dev             # start dev server on PORT
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
-| `BILLING_SERVICE_URL` | Billing service endpoint (default: http://localhost:3012) |
-| `BILLING_SERVICE_API_KEY` | Billing service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |
 | `CLIENT_SERVICE_API_KEY` | Client service API key |
 | `SERVICE_URL` | Public URL used in OpenAPI spec (default: http://localhost:3000) |
@@ -229,7 +225,6 @@ src/
   lib/
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
-    billing-client.ts   # Billing service client (credit authorization)
     runs-client.ts      # Runs service client (create/update runs)
   middleware/
     auth.ts             # API key + identity header authentication
