@@ -4,7 +4,7 @@ vi.hoisted(() => {
   process.env.BILLING_SERVICE_API_KEY = "test-billing-key";
 });
 
-import { authorizeCredits, EMAIL_COST_NAME, EMAIL_COST_QUANTITY } from "../../src/lib/billing-client.js";
+import { authorizeCredits, EMAIL_COST_CENTS } from "../../src/lib/billing-client.js";
 
 let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -21,11 +21,11 @@ describe("authorizeCredits", () => {
   it("returns sufficient: true when balance is enough", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ sufficient: true, balance_cents: 500, required_cents: 1, billing_mode: "payg" }),
+      json: () => Promise.resolve({ sufficient: true, balance_cents: 500, billing_mode: "payg" }),
     });
 
     const result = await authorizeCredits({
-      items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
+      requiredCents: EMAIL_COST_CENTS,
       description: "transactional-email — welcome",
       orgId: "org_123",
       userId: "user_456",
@@ -40,7 +40,7 @@ describe("authorizeCredits", () => {
     expect(options.method).toBe("POST");
 
     const body = JSON.parse(options.body);
-    expect(body.items).toEqual([{ costName: "postmark-email-send", quantity: 1 }]);
+    expect(body.required_cents).toBe(EMAIL_COST_CENTS);
     expect(body.description).toBe("transactional-email — welcome");
 
     expect(options.headers["X-API-Key"]).toBe("test-billing-key");
@@ -52,11 +52,11 @@ describe("authorizeCredits", () => {
   it("returns sufficient: false when balance is insufficient", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ sufficient: false, balance_cents: 0, required_cents: 1, billing_mode: "trial" }),
+      json: () => Promise.resolve({ sufficient: false, balance_cents: 0, billing_mode: "trial" }),
     });
 
     const result = await authorizeCredits({
-      items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
+      requiredCents: EMAIL_COST_CENTS,
       description: "transactional-email — welcome",
       orgId: "org_123",
       userId: "user_456",
@@ -76,7 +76,7 @@ describe("authorizeCredits", () => {
 
     await expect(
       authorizeCredits({
-        items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
+        requiredCents: EMAIL_COST_CENTS,
         description: "transactional-email — welcome",
         orgId: "org_123",
         userId: "user_456",
@@ -88,11 +88,11 @@ describe("authorizeCredits", () => {
   it("forwards workflow headers when provided", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ sufficient: true, balance_cents: 100, required_cents: 1, billing_mode: "payg" }),
+      json: () => Promise.resolve({ sufficient: true, balance_cents: 100, billing_mode: "payg" }),
     });
 
     await authorizeCredits({
-      items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
+      requiredCents: EMAIL_COST_CENTS,
       description: "transactional-email — welcome",
       orgId: "org_123",
       userId: "user_456",
@@ -113,11 +113,11 @@ describe("authorizeCredits", () => {
   it("omits workflow headers when not provided", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ sufficient: true, balance_cents: 100, required_cents: 1, billing_mode: "payg" }),
+      json: () => Promise.resolve({ sufficient: true, balance_cents: 100, billing_mode: "payg" }),
     });
 
     await authorizeCredits({
-      items: [{ costName: EMAIL_COST_NAME, quantity: EMAIL_COST_QUANTITY }],
+      requiredCents: EMAIL_COST_CENTS,
       description: "transactional-email — welcome",
       orgId: "org_123",
       userId: "user_456",
