@@ -313,6 +313,15 @@
               "type": "string"
             },
             "description": "Workflow name (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-feature-slug",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Feature slug for tracking which feature triggered the request"
           }
         ],
         "requestBody": {
@@ -535,6 +544,15 @@
               "type": "string"
             },
             "description": "Workflow name (injected automatically by workflow-service)"
+          },
+          {
+            "name": "x-feature-slug",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Feature slug for tracking which feature triggered the request"
           }
         ],
         "requestBody": {

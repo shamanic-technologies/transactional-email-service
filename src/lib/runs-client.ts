@@ -42,6 +42,7 @@ export interface WorkflowHeaders {
   campaignId?: string;
   brandId?: string;
   workflowName?: string;
+  featureSlug?: string;
 }
 
 async function runsRequest<T>(
@@ -60,6 +61,7 @@ async function runsRequest<T>(
   if (workflowHeaders?.campaignId) headers["x-campaign-id"] = workflowHeaders.campaignId;
   if (workflowHeaders?.brandId) headers["x-brand-id"] = workflowHeaders.brandId;
   if (workflowHeaders?.workflowName) headers["x-workflow-name"] = workflowHeaders.workflowName;
+  if (workflowHeaders?.featureSlug) headers["x-feature-slug"] = workflowHeaders.featureSlug;
 
   const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
     method,
