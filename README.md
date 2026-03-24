@@ -14,6 +14,7 @@ Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-campaign-id` — campaign ID
 - `x-brand-id` — brand ID
 - `x-workflow-name` — workflow name
+- `x-feature-slug` — feature slug for tracking which feature triggered the request
 
 When present, these are stored in the `email_events` table and forwarded to all downstream services.
 

@@ -167,6 +167,14 @@ const workflowNameHeader = {
   description: "Workflow name (injected automatically by workflow-service)",
 };
 
+const featureSlugHeader = {
+  name: "x-feature-slug",
+  in: "header" as const,
+  required: false,
+  schema: { type: "string" as const },
+  description: "Feature slug for tracking which feature triggered the request",
+};
+
 // --- Register endpoints ---
 
 registry.registerPath({
@@ -199,7 +207,7 @@ registry.registerPath({
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader, featureSlugHeader],
   request: {
     body: {
       required: true,
@@ -265,7 +273,7 @@ registry.registerPath({
     "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Templates"],
   security: [{ apiKey: [] }],
-  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader],
+  parameters: [orgIdHeader, userIdHeader, runIdHeader, campaignIdHeader, brandIdHeader, workflowNameHeader, featureSlugHeader],
   request: {
     body: {
       required: true,

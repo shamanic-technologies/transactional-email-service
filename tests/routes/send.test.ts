@@ -326,7 +326,7 @@ describe("POST /send", () => {
       "run-456",
       "completed",
       { orgId: "org_456", userId: "user_123" },
-      { campaignId: undefined, brandId: undefined, workflowName: undefined }
+      { campaignId: undefined, brandId: undefined, workflowName: undefined, featureSlug: undefined }
     );
   });
 
@@ -361,6 +361,7 @@ describe("POST /send", () => {
       .set("x-campaign-id", "camp_123")
       .set("x-brand-id", "brand_456")
       .set("x-workflow-name", "onboarding-flow")
+      .set("x-feature-slug", "feat_abc")
       .send({
         eventType: "user_active",
       });
@@ -371,7 +372,7 @@ describe("POST /send", () => {
     // Workflow headers forwarded to createRun
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow" },
+        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow", featureSlug: "feat_abc" },
       })
     );
 
@@ -382,13 +383,14 @@ describe("POST /send", () => {
     expect(gatewayHeaders["x-campaign-id"]).toBe("camp_123");
     expect(gatewayHeaders["x-brand-id"]).toBe("brand_456");
     expect(gatewayHeaders["x-workflow-name"]).toBe("onboarding-flow");
+    expect(gatewayHeaders["x-feature-slug"]).toBe("feat_abc");
 
     // Workflow headers forwarded to updateRun
     expect(vi.mocked(updateRun)).toHaveBeenCalledWith(
       "run-456",
       "completed",
       { orgId: "org_456", userId: "user_123" },
-      { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow" }
+      { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow", featureSlug: "feat_abc" }
     );
   });
 
@@ -420,6 +422,23 @@ describe("POST /send", () => {
     );
   });
 
+  it("stores feature_slug in email_events when x-feature-slug header is present", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-feature-slug", "my-feature")
+      .send({
+        eventType: "user_active",
+      });
+
+    expect(res.status).toBe(200);
+
+    // Check that db.insert was called with featureSlug
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.featureSlug).toBe("my-feature");
+  });
+
   it("works without workflow headers (backward compatible)", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
@@ -437,7 +456,7 @@ describe("POST /send", () => {
     // No workflow headers = undefined values, no crash
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflowHeaders: { campaignId: undefined, brandId: undefined, workflowName: undefined },
+        workflowHeaders: { campaignId: undefined, brandId: undefined, workflowName: undefined, featureSlug: undefined },
       })
     );
   });
