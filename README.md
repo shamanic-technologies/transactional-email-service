@@ -4,15 +4,13 @@ Transactional email service that sends event-triggered emails. Resolves recipien
 
 ## API
 
-All protected endpoints require this header:
+All protected endpoints require these headers:
 - `x-api-key` — service API key
-
-Most endpoints also require identity headers:
 - `x-org-id` — internal org UUID from client-service
 - `x-user-id` — internal user UUID from client-service
 - `x-run-id` — caller's run ID
 
-**Exception:** `PUT /templates` only requires `x-api-key` (no identity headers) since it's designed for cold-start deployment without a user session.
+**Platform endpoints** (`/platform-*`) only require `x-api-key` — no identity headers. Use these for cold-start deployment without a user session.
 
 Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-campaign-id` — campaign ID

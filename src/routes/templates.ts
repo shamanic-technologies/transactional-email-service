@@ -1,12 +1,12 @@
-import { Router } from "express";
-import { requireApiKey } from "../middleware/auth.js";
+import { Router, Request, Response } from "express";
+import { requireApiKey, requireIdentityHeaders } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
 import { DeployTemplatesRequestSchema } from "../schemas.js";
 
 const router = Router();
 
-router.put("/templates", requireApiKey, async (req, res) => {
+async function deployTemplates(req: Request, res: Response) {
   try {
     const parsed = DeployTemplatesRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -48,6 +48,12 @@ router.put("/templates", requireApiKey, async (req, res) => {
     console.error("Deploy templates error:", error);
     res.status(500).json({ error: error.message || "Failed to deploy templates" });
   }
-});
+}
+
+// Authenticated route — requires identity headers
+router.put("/templates", requireApiKey, requireIdentityHeaders, deployTemplates);
+
+// Platform route — API key only, for cold-start template deployment without user session
+router.put("/platform-templates", requireApiKey, deployTemplates);
 
 export default router;
