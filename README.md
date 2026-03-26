@@ -4,11 +4,15 @@ Transactional email service that sends event-triggered emails. Resolves recipien
 
 ## API
 
-All protected endpoints require these headers:
+All protected endpoints require this header:
 - `x-api-key` — service API key
+
+Most endpoints also require identity headers:
 - `x-org-id` — internal org UUID from client-service
 - `x-user-id` — internal user UUID from client-service
 - `x-run-id` — caller's run ID
+
+**Exception:** `PUT /templates` only requires `x-api-key` (no identity headers) since it's designed for cold-start deployment without a user session.
 
 Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-campaign-id` — campaign ID
@@ -125,9 +129,6 @@ export async function register() {
     headers: {
       "Content-Type": "application/json",
       "x-api-key": process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!,
-      "x-org-id": orgId,
-      "x-user-id": userId,
-      "x-run-id": runId,
     },
     body: JSON.stringify({
       templates: [
