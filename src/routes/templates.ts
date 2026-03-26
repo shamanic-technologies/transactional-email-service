@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { requireApiKey, requireIdentityHeaders } from "../middleware/auth.js";
+import { requireApiKey } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
 import { DeployTemplatesRequestSchema } from "../schemas.js";
 
 const router = Router();
 
-router.put("/templates", requireApiKey, requireIdentityHeaders, async (req, res) => {
+router.put("/templates", requireApiKey, async (req, res) => {
   try {
     const parsed = DeployTemplatesRequestSchema.safeParse(req.body);
     if (!parsed.success) {

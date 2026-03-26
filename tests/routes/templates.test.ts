@@ -28,7 +28,7 @@ const app = express();
 app.use(express.json());
 app.use(templatesRoutes);
 
-const HEADERS = { "x-org-id": "org_123", "x-user-id": "user_123", "x-run-id": "run_001" };
+const IDENTITY_HEADERS = { "x-org-id": "org_123", "x-user-id": "user_123", "x-run-id": "run_001" };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,7 +43,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           {
@@ -67,7 +67,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           {
@@ -88,7 +88,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           {
@@ -117,7 +117,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           { name: "welcome", subject: "Welcome!", htmlBody: "<h1>Hi</h1>" },
@@ -135,7 +135,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           {
@@ -162,7 +162,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           {
@@ -202,7 +202,7 @@ describe("PUT /templates", () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [
           {
@@ -222,7 +222,7 @@ describe("PUT /templates", () => {
     );
   });
 
-  it("returns 400 for missing identity headers", async () => {
+  it("succeeds without identity headers (cold-start deployment)", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
@@ -230,15 +230,15 @@ describe("PUT /templates", () => {
         templates: [{ name: "welcome", subject: "Hi", htmlBody: "<h1>Hi</h1>" }],
       });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("Missing required headers");
+    expect(res.status).toBe(200);
+    expect(res.body.templates).toEqual([{ name: "welcome", action: "created" }]);
   });
 
   it("returns 400 for empty templates array", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [],
       });
@@ -250,7 +250,7 @@ describe("PUT /templates", () => {
   it("returns 401 without API key", async () => {
     const res = await request(app)
       .put("/templates")
-      .set(HEADERS)
+      .set(IDENTITY_HEADERS)
       .send({
         templates: [{ name: "welcome", subject: "Hi", htmlBody: "<h1>Hi</h1>" }],
       });
