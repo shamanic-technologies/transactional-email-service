@@ -222,7 +222,7 @@ describe("PUT /templates", () => {
     );
   });
 
-  it("succeeds without identity headers (cold-start deployment)", async () => {
+  it("returns 400 for missing identity headers", async () => {
     const res = await request(app)
       .put("/templates")
       .set("X-API-Key", "test-service-key")
@@ -230,8 +230,8 @@ describe("PUT /templates", () => {
         templates: [{ name: "welcome", subject: "Hi", htmlBody: "<h1>Hi</h1>" }],
       });
 
-    expect(res.status).toBe(200);
-    expect(res.body.templates).toEqual([{ name: "welcome", action: "created" }]);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
   });
 
   it("returns 400 for empty templates array", async () => {
@@ -256,5 +256,63 @@ describe("PUT /templates", () => {
       });
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe("PUT /platform-templates", () => {
+  it("deploys templates without identity headers", async () => {
+    const res = await request(app)
+      .put("/platform-templates")
+      .set("X-API-Key", "test-service-key")
+      .send({
+        templates: [
+          {
+            name: "welcome",
+            subject: "Welcome!",
+            htmlBody: "<h1>Welcome</h1>",
+            textBody: "Welcome",
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.templates).toEqual([{ name: "welcome", action: "created" }]);
+  });
+
+  it("returns 401 without API key", async () => {
+    const res = await request(app)
+      .put("/platform-templates")
+      .send({
+        templates: [{ name: "welcome", subject: "Hi", htmlBody: "<h1>Hi</h1>" }],
+      });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 for invalid body", async () => {
+    const res = await request(app)
+      .put("/platform-templates")
+      .set("X-API-Key", "test-service-key")
+      .send({
+        templates: [],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid request");
+  });
+
+  it("handles multiple templates in one request", async () => {
+    const res = await request(app)
+      .put("/platform-templates")
+      .set("X-API-Key", "test-service-key")
+      .send({
+        templates: [
+          { name: "welcome", subject: "Welcome!", htmlBody: "<h1>Hi</h1>" },
+          { name: "reset", subject: "Reset", htmlBody: "<h1>Reset</h1>" },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.templates).toHaveLength(2);
   });
 });
