@@ -21,7 +21,7 @@ interface IdentityContext {
   runId: string;
   campaignId?: string;
   brandId?: string;
-  workflowName?: string;
+  workflowSlug?: string;
   featureSlug?: string;
 }
 
@@ -35,7 +35,7 @@ async function clientRequest<T>(path: string, identity: IdentityContext): Promis
   };
   if (identity.campaignId) headers["x-campaign-id"] = identity.campaignId;
   if (identity.brandId) headers["x-brand-id"] = identity.brandId;
-  if (identity.workflowName) headers["x-workflow-name"] = identity.workflowName;
+  if (identity.workflowSlug) headers["x-workflow-slug"] = identity.workflowSlug;
   if (identity.featureSlug) headers["x-feature-slug"] = identity.featureSlug;
 
   const response = await fetch(`${CLIENT_SERVICE_URL}${path}`, {

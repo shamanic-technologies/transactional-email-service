@@ -64,6 +64,13 @@
       "when": 1774318109671,
       "tag": "0008_curly_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774886400000,
+      "tag": "0009_rename_workflow_slug",
+      "breakpoints": true
     }
   ]
 }

@@ -306,13 +306,13 @@
             "description": "Brand ID (injected automatically by workflow-service)"
           },
           {
-            "name": "x-workflow-name",
+            "name": "x-workflow-slug",
             "in": "header",
             "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Workflow name (injected automatically by workflow-service)"
+            "description": "Workflow slug (injected automatically by workflow-service)"
           },
           {
             "name": "x-feature-slug",
@@ -427,13 +427,13 @@
             "description": "Brand ID (injected automatically by workflow-service)"
           },
           {
-            "name": "x-workflow-name",
+            "name": "x-workflow-slug",
             "in": "header",
             "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Workflow name (injected automatically by workflow-service)"
+            "description": "Workflow slug (injected automatically by workflow-service)"
           },
           {
             "name": "eventType",
@@ -537,13 +537,13 @@
             "description": "Brand ID (injected automatically by workflow-service)"
           },
           {
-            "name": "x-workflow-name",
+            "name": "x-workflow-slug",
             "in": "header",
             "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Workflow name (injected automatically by workflow-service)"
+            "description": "Workflow slug (injected automatically by workflow-service)"
           },
           {
             "name": "x-feature-slug",
