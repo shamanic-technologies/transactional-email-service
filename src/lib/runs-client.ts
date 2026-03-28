@@ -41,7 +41,7 @@ export interface CreateRunParams {
 export interface WorkflowHeaders {
   campaignId?: string;
   brandId?: string;
-  workflowName?: string;
+  workflowSlug?: string;
   featureSlug?: string;
 }
 
@@ -60,7 +60,7 @@ async function runsRequest<T>(
   if (runId) headers["x-run-id"] = runId;
   if (workflowHeaders?.campaignId) headers["x-campaign-id"] = workflowHeaders.campaignId;
   if (workflowHeaders?.brandId) headers["x-brand-id"] = workflowHeaders.brandId;
-  if (workflowHeaders?.workflowName) headers["x-workflow-name"] = workflowHeaders.workflowName;
+  if (workflowHeaders?.workflowSlug) headers["x-workflow-slug"] = workflowHeaders.workflowSlug;
   if (workflowHeaders?.featureSlug) headers["x-feature-slug"] = workflowHeaders.featureSlug;
 
   const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {

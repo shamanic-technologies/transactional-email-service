@@ -1,0 +1,1 @@
+ALTER TABLE "email_events" RENAME COLUMN "workflow_name" TO "workflow_slug";

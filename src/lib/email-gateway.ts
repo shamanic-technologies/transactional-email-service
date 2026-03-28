@@ -32,7 +32,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   };
   if (params.workflowHeaders?.campaignId) headers["x-campaign-id"] = params.workflowHeaders.campaignId;
   if (params.workflowHeaders?.brandId) headers["x-brand-id"] = params.workflowHeaders.brandId;
-  if (params.workflowHeaders?.workflowName) headers["x-workflow-name"] = params.workflowHeaders.workflowName;
+  if (params.workflowHeaders?.workflowSlug) headers["x-workflow-slug"] = params.workflowHeaders.workflowSlug;
   if (params.workflowHeaders?.featureSlug) headers["x-feature-slug"] = params.workflowHeaders.featureSlug;
 
   const response = await fetch(`${EMAIL_GATEWAY_SERVICE_URL}/send`, {

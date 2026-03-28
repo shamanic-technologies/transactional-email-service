@@ -153,14 +153,14 @@ describe("sendEmail", () => {
       workflowHeaders: {
         campaignId: "camp_123",
         brandId: "brand_456",
-        workflowName: "onboarding-flow",
+        workflowSlug: "onboarding-flow",
       },
     });
 
     const [, options] = fetchSpy.mock.calls[0];
     expect(options.headers["x-campaign-id"]).toBe("camp_123");
     expect(options.headers["x-brand-id"]).toBe("brand_456");
-    expect(options.headers["x-workflow-name"]).toBe("onboarding-flow");
+    expect(options.headers["x-workflow-slug"]).toBe("onboarding-flow");
   });
 
   it("omits workflow headers when not provided", async () => {
@@ -178,6 +178,6 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     expect(options.headers["x-campaign-id"]).toBeUndefined();
     expect(options.headers["x-brand-id"]).toBeUndefined();
-    expect(options.headers["x-workflow-name"]).toBeUndefined();
+    expect(options.headers["x-workflow-slug"]).toBeUndefined();
   });
 });

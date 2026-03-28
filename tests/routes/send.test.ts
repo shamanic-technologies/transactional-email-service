@@ -326,7 +326,7 @@ describe("POST /send", () => {
       "run-456",
       "completed",
       { orgId: "org_456", userId: "user_123" },
-      { campaignId: undefined, brandId: undefined, workflowName: undefined, featureSlug: undefined }
+      { campaignId: undefined, brandId: undefined, workflowSlug: undefined, featureSlug: undefined }
     );
   });
 
@@ -360,7 +360,7 @@ describe("POST /send", () => {
       .set("x-run-id", "run-789")
       .set("x-campaign-id", "camp_123")
       .set("x-brand-id", "brand_456")
-      .set("x-workflow-name", "onboarding-flow")
+      .set("x-workflow-slug", "onboarding-flow")
       .set("x-feature-slug", "feat_abc")
       .send({
         eventType: "user_active",
@@ -372,7 +372,7 @@ describe("POST /send", () => {
     // Workflow headers forwarded to createRun
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow", featureSlug: "feat_abc" },
+        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowSlug: "onboarding-flow", featureSlug: "feat_abc" },
       })
     );
 
@@ -382,7 +382,7 @@ describe("POST /send", () => {
     const gatewayHeaders = gatewayCall![1].headers;
     expect(gatewayHeaders["x-campaign-id"]).toBe("camp_123");
     expect(gatewayHeaders["x-brand-id"]).toBe("brand_456");
-    expect(gatewayHeaders["x-workflow-name"]).toBe("onboarding-flow");
+    expect(gatewayHeaders["x-workflow-slug"]).toBe("onboarding-flow");
     expect(gatewayHeaders["x-feature-slug"]).toBe("feat_abc");
 
     // Workflow headers forwarded to updateRun
@@ -390,7 +390,7 @@ describe("POST /send", () => {
       "run-456",
       "completed",
       { orgId: "org_456", userId: "user_123" },
-      { campaignId: "camp_123", brandId: "brand_456", workflowName: "onboarding-flow", featureSlug: "feat_abc" }
+      { campaignId: "camp_123", brandId: "brand_456", workflowSlug: "onboarding-flow", featureSlug: "feat_abc" }
     );
   });
 
@@ -456,7 +456,7 @@ describe("POST /send", () => {
     // No workflow headers = undefined values, no crash
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflowHeaders: { campaignId: undefined, brandId: undefined, workflowName: undefined, featureSlug: undefined },
+        workflowHeaders: { campaignId: undefined, brandId: undefined, workflowSlug: undefined, featureSlug: undefined },
       })
     );
   });
