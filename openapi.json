@@ -81,9 +81,12 @@
             "type": "string",
             "description": "Event type determining which template to use and which dedup strategy applies. Once-only events (waitlist, welcome, signup_notification): sent at most once per recipient. Daily events (user_active): sent at most once per recipient per day. Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Any other event type has NO dedup and will send every time."
           },
-          "brandId": {
-            "type": "string",
-            "description": "Brand ID for tracking"
+          "brandIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Brand IDs for tracking (one or more UUIDs)"
           },
           "campaignId": {
             "type": "string",
@@ -303,7 +306,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Brand ID (injected automatically by workflow-service)"
+            "description": "Comma-separated brand IDs (e.g. \"uuid1,uuid2,uuid3\"). Injected automatically by workflow-service. Single UUID for single-brand campaigns."
           },
           {
             "name": "x-workflow-slug",
@@ -424,7 +427,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Brand ID (injected automatically by workflow-service)"
+            "description": "Comma-separated brand IDs (e.g. \"uuid1,uuid2,uuid3\"). Injected automatically by workflow-service. Single UUID for single-brand campaigns."
           },
           {
             "name": "x-workflow-slug",
@@ -534,7 +537,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Brand ID (injected automatically by workflow-service)"
+            "description": "Comma-separated brand IDs (e.g. \"uuid1,uuid2,uuid3\"). Injected automatically by workflow-service. Single UUID for single-brand campaigns."
           },
           {
             "name": "x-workflow-slug",

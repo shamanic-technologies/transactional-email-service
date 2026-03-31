@@ -14,11 +14,11 @@ All protected endpoints require these headers:
 
 Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-campaign-id` — campaign ID
-- `x-brand-id` — brand ID
+- `x-brand-id` — comma-separated brand IDs (e.g. `uuid1,uuid2,uuid3`). Single UUID for single-brand campaigns.
 - `x-workflow-slug` — workflow slug
 - `x-feature-slug` — feature slug for tracking which feature triggered the request
 
-When present, these are stored in the `email_events` table and forwarded to all downstream services.
+When present, these are stored in the `email_events` table and forwarded to all downstream services. Brand IDs are parsed from CSV and stored as a `text[]` array in `brand_ids`.
 
 ### `POST /send`
 
@@ -27,7 +27,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 ```json
 {
   "eventType": "welcome",
-  "brandId": "brand_xxx",
+  "brandIds": ["brand_xxx"],
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
   "metadata": { "name": "Alice" }
@@ -37,7 +37,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | Field            | Required | Description                              |
 | ---------------- | -------- | ---------------------------------------- |
 | `eventType`      | Yes      | Event type (see below)                   |
-| `brandId`        | No       | Brand ID (UUID) for tracking; omitted if not provided |
+| `brandIds`       | No       | Array of brand IDs (UUIDs) for tracking; omitted if not provided |
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |

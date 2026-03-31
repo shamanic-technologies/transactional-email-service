@@ -14,7 +14,7 @@ export interface Run {
   parentRunId: string | null;
   organizationId: string;
   userId: string | null;
-  brandId: string | null;
+  brandIds: string[] | null;
   campaignId: string | null;
   serviceName: string;
   taskName: string;
@@ -30,7 +30,7 @@ export interface CreateRunParams {
   userId: string;
   serviceName: string;
   taskName: string;
-  brandId?: string;
+  brandIds?: string[];
   campaignId?: string;
   parentRunId?: string;
   workflowHeaders?: WorkflowHeaders;

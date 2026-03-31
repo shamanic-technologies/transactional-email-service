@@ -20,7 +20,7 @@ interface IdentityContext {
   userId: string;
   runId: string;
   campaignId?: string;
-  brandId?: string;
+  brandId?: string; // Raw CSV value for x-brand-id header forwarding
   workflowSlug?: string;
   featureSlug?: string;
 }

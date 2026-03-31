@@ -28,7 +28,7 @@ describe("sendEmail", () => {
       orgId: "org_123",
       userId: "user_456",
       runId: "run_abc",
-      brandId: "brand_123",
+      brandIds: ["brand_123"],
       campaignId: "campaign_456",
     });
 
@@ -43,7 +43,7 @@ describe("sendEmail", () => {
       subject: "Test subject",
       clerkOrgId: "org_123",
       runId: "run_abc",
-      brandId: "brand_123",
+      brandIds: ["brand_123"],
       campaignId: "campaign_456",
       htmlBody: "<p>Test</p>",
       textBody: "Test",
@@ -64,7 +64,7 @@ describe("sendEmail", () => {
       orgId: "org_real_123",
       userId: "user_real_456",
       runId: "run_abc",
-      brandId: "lifecycle",
+      brandIds: ["lifecycle"],
       campaignId: "lifecycle-test",
     });
 
@@ -125,7 +125,7 @@ describe("sendEmail", () => {
       orgId: "org_xyz",
       userId: "user_xyz",
       runId: "run_abc",
-      brandId: "brand_xyz",
+      brandIds: ["brand_xyz"],
       campaignId: "campaign_789",
     });
 
@@ -133,7 +133,7 @@ describe("sendEmail", () => {
     const body = JSON.parse(options.body);
 
     expect(body.type).toBe("transactional");
-    expect(body.brandId).toBe("brand_xyz");
+    expect(body.brandIds).toEqual(["brand_xyz"]);
     expect(body.campaignId).toBe("campaign_789");
     expect(body.recipientFirstName).toBe("");
     expect(body.recipientLastName).toBe("");
@@ -152,14 +152,14 @@ describe("sendEmail", () => {
       runId: "run_abc",
       workflowHeaders: {
         campaignId: "camp_123",
-        brandId: "brand_456",
+        brandId: "brand_456,brand_789",
         workflowSlug: "onboarding-flow",
       },
     });
 
     const [, options] = fetchSpy.mock.calls[0];
     expect(options.headers["x-campaign-id"]).toBe("camp_123");
-    expect(options.headers["x-brand-id"]).toBe("brand_456");
+    expect(options.headers["x-brand-id"]).toBe("brand_456,brand_789");
     expect(options.headers["x-workflow-slug"]).toBe("onboarding-flow");
   });
 

@@ -114,7 +114,7 @@ describe("POST /send", () => {
       .set(HEADERS)
       .send({
         eventType: "user_active",
-        brandId: "brand_abc",
+        brandIds: ["brand_abc"],
         campaignId: "campaign_def",
       });
 
@@ -129,7 +129,7 @@ describe("POST /send", () => {
     expect(body.runId).toBe("run-456");
     expect(body.to).toBeDefined();
     expect(body.subject).toBeDefined();
-    expect(body.brandId).toBe("brand_abc");
+    expect(body.brandIds).toEqual(["brand_abc"]);
     expect(body.campaignId).toBe("campaign_def");
   });
 
@@ -187,7 +187,7 @@ describe("POST /send", () => {
     expect(res.body.details.fieldErrors).toHaveProperty("eventType");
   });
 
-  it("succeeds without brandId/campaignId and omits them from request", async () => {
+  it("succeeds without brandIds/campaignId and omits them from request", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
@@ -202,18 +202,18 @@ describe("POST /send", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.brandId).toBeUndefined();
+    expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBeUndefined();
   });
 
-  it("passes brandId and campaignId when provided", async () => {
+  it("passes brandIds and campaignId when provided", async () => {
     const res = await request(app)
       .post("/send")
       .set("X-API-Key", "test-service-key")
       .set(HEADERS)
       .send({
         eventType: "user_active",
-        brandId: "brand_abc",
+        brandIds: ["brand_abc"],
         campaignId: "campaign_def",
       });
 
@@ -222,7 +222,7 @@ describe("POST /send", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.brandId).toBe("brand_abc");
+    expect(body.brandIds).toEqual(["brand_abc"]);
     expect(body.campaignId).toBe("campaign_def");
   });
 
@@ -326,7 +326,7 @@ describe("POST /send", () => {
       "run-456",
       "completed",
       { orgId: "org_456", userId: "user_123" },
-      { campaignId: undefined, brandId: undefined, workflowSlug: undefined, featureSlug: undefined }
+      { campaignId: undefined, brandId: undefined, workflowSlug: undefined, featureSlug: undefined },
     );
   });
 
@@ -359,7 +359,7 @@ describe("POST /send", () => {
       .set("x-user-id", "user_123")
       .set("x-run-id", "run-789")
       .set("x-campaign-id", "camp_123")
-      .set("x-brand-id", "brand_456")
+      .set("x-brand-id", "brand_456,brand_789")
       .set("x-workflow-slug", "onboarding-flow")
       .set("x-feature-slug", "feat_abc")
       .send({
@@ -369,10 +369,10 @@ describe("POST /send", () => {
     expect(res.status).toBe(200);
     expect(res.body.results[0].sent).toBe(true);
 
-    // Workflow headers forwarded to createRun
+    // Workflow headers forwarded to createRun (brandId is joined CSV for header forwarding)
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456", workflowSlug: "onboarding-flow", featureSlug: "feat_abc" },
+        workflowHeaders: { campaignId: "camp_123", brandId: "brand_456,brand_789", workflowSlug: "onboarding-flow", featureSlug: "feat_abc" },
       })
     );
 
@@ -381,7 +381,7 @@ describe("POST /send", () => {
     expect(gatewayCall).toBeDefined();
     const gatewayHeaders = gatewayCall![1].headers;
     expect(gatewayHeaders["x-campaign-id"]).toBe("camp_123");
-    expect(gatewayHeaders["x-brand-id"]).toBe("brand_456");
+    expect(gatewayHeaders["x-brand-id"]).toBe("brand_456,brand_789");
     expect(gatewayHeaders["x-workflow-slug"]).toBe("onboarding-flow");
     expect(gatewayHeaders["x-feature-slug"]).toBe("feat_abc");
 
@@ -390,11 +390,11 @@ describe("POST /send", () => {
       "run-456",
       "completed",
       { orgId: "org_456", userId: "user_123" },
-      { campaignId: "camp_123", brandId: "brand_456", workflowSlug: "onboarding-flow", featureSlug: "feat_abc" }
+      { campaignId: "camp_123", brandId: "brand_456,brand_789", workflowSlug: "onboarding-flow", featureSlug: "feat_abc" }
     );
   });
 
-  it("uses header campaign/brand IDs over body values", async () => {
+  it("uses header brand IDs over body values", async () => {
     const { createRun } = await import("../../src/lib/runs-client.js");
 
     const res = await request(app)
@@ -408,7 +408,7 @@ describe("POST /send", () => {
       .send({
         eventType: "user_active",
         campaignId: "body_campaign",
-        brandId: "body_brand",
+        brandIds: ["body_brand"],
       });
 
     expect(res.status).toBe(200);
@@ -417,7 +417,7 @@ describe("POST /send", () => {
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
         campaignId: "header_campaign",
-        brandId: "header_brand",
+        brandIds: ["header_brand"],
       })
     );
   });
@@ -457,7 +457,45 @@ describe("POST /send", () => {
     expect(vi.mocked(createRun)).toHaveBeenCalledWith(
       expect.objectContaining({
         workflowHeaders: { campaignId: undefined, brandId: undefined, workflowSlug: undefined, featureSlug: undefined },
+      }),
+    );
+  });
+
+  it("parses multi-brand CSV header into array for createRun", async () => {
+    const { createRun } = await import("../../src/lib/runs-client.js");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .set("x-user-id", "user_123")
+      .set("x-run-id", "run-789")
+      .set("x-brand-id", "brand_a, brand_b, brand_c")
+      .send({
+        eventType: "user_active",
+      });
+
+    expect(res.status).toBe(200);
+
+    // brandIds should be parsed as an array
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brandIds: ["brand_a", "brand_b", "brand_c"],
       })
     );
+  });
+
+  it("stores brandIds array in email_events insert", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_x,brand_y")
+      .send({
+        eventType: "user_active",
+      });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.brandIds).toEqual(["brand_x", "brand_y"]);
   });
 });

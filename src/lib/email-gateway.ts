@@ -12,7 +12,7 @@ interface SendEmailParams {
   orgId: string;
   userId: string;
   runId: string;
-  brandId?: string;
+  brandIds?: string[];
   campaignId?: string;
   from?: string | null;
   workflowHeaders?: WorkflowHeaders;
@@ -40,7 +40,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     headers,
     body: JSON.stringify({
       type: "transactional",
-      ...(params.brandId && { brandId: params.brandId }),
+      ...(params.brandIds?.length && { brandIds: params.brandIds }),
       ...(params.campaignId && { campaignId: params.campaignId }),
       runId: params.runId,
       clerkOrgId: params.orgId,

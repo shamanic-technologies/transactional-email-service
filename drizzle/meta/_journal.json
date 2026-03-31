@@ -71,6 +71,13 @@
       "when": 1774886400000,
       "tag": "0009_rename_workflow_slug",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775145600000,
+      "tag": "0010_multi_brand_support",
+      "breakpoints": true
     }
   ]
 }
