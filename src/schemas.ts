@@ -20,7 +20,7 @@ export const SendRequestSchema = z
         "Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. " +
         "Any other event type has NO dedup and will send every time.",
     }),
-    brandId: z.string().optional().openapi({ description: "Brand ID for tracking" }),
+    brandIds: z.array(z.string()).optional().openapi({ description: "Brand IDs for tracking (one or more UUIDs)" }),
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
     productId: z.string().optional().openapi({ description: "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)" }),
     recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (overrides client-service resolution if provided)" }),
@@ -156,7 +156,7 @@ const brandIdHeader = {
   in: "header" as const,
   required: false,
   schema: { type: "string" as const },
-  description: "Brand ID (injected automatically by workflow-service)",
+  description: "Comma-separated brand IDs (e.g. \"uuid1,uuid2,uuid3\"). Injected automatically by workflow-service. Single UUID for single-brand campaigns.",
 };
 
 const workflowSlugHeader = {

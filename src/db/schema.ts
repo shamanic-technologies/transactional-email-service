@@ -13,7 +13,7 @@ export const emailEvents = pgTable(
     errorMessage: text("error_message"),
     metadata: jsonb("metadata"),
     campaignId: text("campaign_id"),
-    brandId: text("brand_id"),
+    brandIds: text("brand_ids").array(),
     workflowSlug: text("workflow_slug"),
     featureSlug: text("feature_slug"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -22,6 +22,7 @@ export const emailEvents = pgTable(
     uniqueIndex("idx_email_events_dedup").on(table.dedupKey),
     index("idx_email_events_org_type").on(table.orgId, table.eventType),
     index("idx_email_events_recipient").on(table.recipientEmail),
+    index("idx_email_events_brand_ids").using("gin", table.brandIds),
   ]
 );
 

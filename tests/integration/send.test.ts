@@ -29,7 +29,7 @@ const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 const HEADERS = { "x-org-id": "org_test", "x-user-id": "user_test", "x-run-id": "run_test" };
 
 // Base fields for request body
-const BASE = { brandId: "brand_test", campaignId: "campaign_test" };
+const BASE = { brandIds: ["brand_test"], campaignId: "campaign_test" };
 
 // All templates are now DB-registered (deployed by calling services at startup).
 // For tests, we insert the templates needed by test cases.
@@ -106,7 +106,7 @@ describe("validation", () => {
     expect(res.body.details.fieldErrors).toHaveProperty("eventType");
   });
 
-  it("succeeds without brandId or campaignId", async () => {
+  it("succeeds without brandIds or campaignId", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
