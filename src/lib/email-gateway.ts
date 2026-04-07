@@ -35,7 +35,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   if (params.workflowHeaders?.workflowSlug) headers["x-workflow-slug"] = params.workflowHeaders.workflowSlug;
   if (params.workflowHeaders?.featureSlug) headers["x-feature-slug"] = params.workflowHeaders.featureSlug;
 
-  const response = await fetch(`${EMAIL_GATEWAY_SERVICE_URL}/send`, {
+  const response = await fetch(`${EMAIL_GATEWAY_SERVICE_URL}/orgs/send`, {
     method: "POST",
     headers,
     body: JSON.stringify({

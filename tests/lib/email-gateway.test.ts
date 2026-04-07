@@ -36,7 +36,7 @@ describe("sendEmail", () => {
     const [url, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(url).toContain("/send");
+    expect(url).toContain("/orgs/send");
     expect(body).toMatchObject({
       type: "transactional",
       to: "test@example.com",
