@@ -290,7 +290,7 @@ describe("recipient resolution", () => {
       .set("x-api-key", API_KEY)
       .set(HEADERS)
       .send({ eventType: "campaign_created", ...BASE });
-    expect(vi.mocked(resolveUserEmail)).toHaveBeenCalledWith("user_test");
+    expect(vi.mocked(resolveUserEmail)).toHaveBeenCalledWith("user_test", expect.objectContaining({ orgId: "org_test" }));
     expect(res.body.results[0].email).toBe("user@test.com");
     expect(res.body.results[0].sent).toBe(true);
   });
