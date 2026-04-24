@@ -117,6 +117,29 @@ export const DeployTemplatesResponseSchema = z
   })
   .openapi("DeployTemplatesResponse");
 
+// --- POST /internal/transfer-brand ---
+
+export const TransferBrandRequestSchema = z
+  .object({
+    brandId: z.string().uuid(),
+    sourceOrgId: z.string().uuid(),
+    targetOrgId: z.string().uuid(),
+  })
+  .openapi("TransferBrandRequest");
+
+export const TransferBrandTableResultSchema = z
+  .object({
+    tableName: z.string(),
+    count: z.number(),
+  })
+  .openapi("TransferBrandTableResult");
+
+export const TransferBrandResponseSchema = z
+  .object({
+    updatedTables: z.array(TransferBrandTableResultSchema),
+  })
+  .openapi("TransferBrandResponse");
+
 // --- Shared header parameters ---
 
 const orgIdHeader = {
@@ -287,6 +310,38 @@ registry.registerPath({
     },
     400: {
       description: "Validation error or missing identity headers",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    401: {
+      description: "Unauthorized - invalid or missing API key",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/transfer-brand",
+  summary: "Transfer brand ownership between orgs (solo-brand only)",
+  description:
+    "Re-assigns email_events rows from sourceOrgId to targetOrgId for a given brandId. " +
+    "Only updates rows where brand_ids contains exactly one element matching brandId (solo-brand). " +
+    "Rows with multiple brand IDs (co-branding) are skipped. Idempotent — running twice is a no-op.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: TransferBrandRequestSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Transfer results per table",
+      content: { "application/json": { schema: TransferBrandResponseSchema } },
+    },
+    400: {
+      description: "Validation error",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     401: {
