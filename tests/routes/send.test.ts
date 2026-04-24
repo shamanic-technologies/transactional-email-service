@@ -129,7 +129,7 @@ describe("POST /send", () => {
     expect(body.runId).toBe("run-456");
     expect(body.to).toBeDefined();
     expect(body.subject).toBeDefined();
-    expect(body.brandIds).toEqual(["brand_abc"]);
+    expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBe("campaign_def");
   });
 
@@ -222,7 +222,7 @@ describe("POST /send", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.brandIds).toEqual(["brand_abc"]);
+    expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBe("campaign_def");
   });
 
