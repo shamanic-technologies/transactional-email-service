@@ -143,6 +143,32 @@ export async function register() {
 }
 ```
 
+### `POST /internal/transfer-brand`
+
+**Internal endpoint** — requires `x-api-key` only, no identity headers.
+
+Re-assigns `email_events` rows from one org to another for a given brand. Only updates solo-brand rows (where `brand_ids` contains exactly one element matching `brandId`). Co-branding rows are skipped. Idempotent.
+
+**Request body:**
+
+```json
+{
+  "brandId": "uuid",
+  "sourceOrgId": "uuid",
+  "targetOrgId": "uuid"
+}
+```
+
+**Response:**
+
+```json
+{
+  "updatedTables": [
+    { "tableName": "email_events", "count": 42 }
+  ]
+}
+```
+
 ### `GET /health`
 
 Returns `{ "status": "ok" }`. No authentication required.
@@ -234,6 +260,7 @@ src/
     send.ts             # POST /send endpoint with dedup logic
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
+    transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
 tests/
