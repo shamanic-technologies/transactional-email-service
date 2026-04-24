@@ -6,6 +6,7 @@ import sendRoutes from "./routes/send.js";
 import statsRoutes from "./routes/stats.js";
 import openapiRoutes from "./routes/openapi.js";
 import templatesRoutes from "./routes/templates.js";
+import transferBrandRoutes from "./routes/transfer-brand.js";
 import { db } from "./db/index.js";
 
 const app = express();
@@ -18,6 +19,7 @@ app.use(healthRoutes);
 app.use(sendRoutes);
 app.use(statsRoutes);
 app.use(templatesRoutes);
+app.use(transferBrandRoutes);
 app.use(openapiRoutes);
 
 app.use((_req, res) => {
