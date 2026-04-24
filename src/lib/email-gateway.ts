@@ -40,7 +40,6 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     headers,
     body: JSON.stringify({
       type: "transactional",
-      ...(params.brandIds?.length && { brandIds: params.brandIds }),
       ...(params.campaignId && { campaignId: params.campaignId }),
       runId: params.runId,
       clerkOrgId: params.orgId,

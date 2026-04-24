@@ -43,7 +43,6 @@ describe("sendEmail", () => {
       subject: "Test subject",
       clerkOrgId: "org_123",
       runId: "run_abc",
-      brandIds: ["brand_123"],
       campaignId: "campaign_456",
       htmlBody: "<p>Test</p>",
       textBody: "Test",
@@ -52,6 +51,7 @@ describe("sendEmail", () => {
       recipientLastName: "",
       recipientCompany: "",
     });
+    expect(body.brandIds).toBeUndefined();
   });
 
   it("forwards x-org-id, x-user-id, and x-run-id headers", async () => {
@@ -133,7 +133,7 @@ describe("sendEmail", () => {
     const body = JSON.parse(options.body);
 
     expect(body.type).toBe("transactional");
-    expect(body.brandIds).toEqual(["brand_xyz"]);
+    expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBe("campaign_789");
     expect(body.recipientFirstName).toBe("");
     expect(body.recipientLastName).toBe("");
@@ -161,6 +161,32 @@ describe("sendEmail", () => {
     expect(options.headers["x-campaign-id"]).toBe("camp_123");
     expect(options.headers["x-brand-id"]).toBe("brand_456,brand_789");
     expect(options.headers["x-workflow-slug"]).toBe("onboarding-flow");
+  });
+
+  it("does not send brandIds in request body (brand goes via x-brand-id header only)", async () => {
+    await sendEmail({
+      to: "test@example.com",
+      subject: "Test",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "campaign_created",
+      orgId: "org_123",
+      userId: "user_456",
+      runId: "run_abc",
+      brandIds: ["brand_1", "brand_2"],
+      workflowHeaders: { brandId: "brand_1,brand_2" },
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    // brandIds must NOT appear in body — gateway schema doesn't accept it
+    // and downstream postmark-service rejects arrays for brandId
+    expect(body.brandIds).toBeUndefined();
+    expect(body.brandId).toBeUndefined();
+
+    // brand tracking goes via header only
+    expect(options.headers["x-brand-id"]).toBe("brand_1,brand_2");
   });
 
   it("omits workflow headers when not provided", async () => {
