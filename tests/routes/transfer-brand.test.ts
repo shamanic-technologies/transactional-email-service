@@ -4,33 +4,30 @@ vi.hoisted(() => {
   process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY = "test-service-key";
 });
 
-// Mock db
-const mockUpdate = vi.fn();
-const mockSet = vi.fn();
-const mockWhere = vi.fn();
-const mockReturning = vi.fn();
+// Mock db — tracks each update chain call separately
+const mockCalls: { set: unknown; where: unknown; returning: unknown; returnValue: unknown[] }[] = [];
+let callIndex = 0;
 
 vi.mock("../../src/db/index.js", () => ({
   db: {
-    update: (...args: unknown[]) => {
-      mockUpdate(...args);
-      return {
-        set: (...a: unknown[]) => {
-          mockSet(...a);
-          return {
-            where: (...w: unknown[]) => {
-              mockWhere(...w);
-              return {
-                returning: (...r: unknown[]) => {
-                  mockReturning(...r);
-                  return Promise.resolve(mockReturning._returnValue ?? []);
-                },
-              };
-            },
-          };
-        },
-      };
-    },
+    update: () => ({
+      set: (...a: unknown[]) => {
+        const idx = callIndex++;
+        if (!mockCalls[idx]) mockCalls[idx] = { set: null, where: null, returning: null, returnValue: [] };
+        mockCalls[idx].set = a[0];
+        return {
+          where: (...w: unknown[]) => {
+            mockCalls[idx].where = w[0];
+            return {
+              returning: (...r: unknown[]) => {
+                mockCalls[idx].returning = r[0];
+                return Promise.resolve(mockCalls[idx].returnValue);
+              },
+            };
+          },
+        };
+      },
+    }),
   },
 }));
 
@@ -44,7 +41,8 @@ app.use(transferBrandRoutes);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockReturning._returnValue = [];
+  mockCalls.length = 0;
+  callIndex = 0;
 });
 
 const VALID_BODY = {
@@ -81,28 +79,29 @@ describe("POST /internal/transfer-brand", () => {
     expect(res.status).toBe(400);
   });
 
-  it("updates matching rows and returns count", async () => {
-    mockReturning._returnValue = [
-      { id: "aaa" },
-      { id: "bbb" },
-      { id: "ccc" },
-    ];
+  it("moves matching rows and returns count (no targetBrandId)", async () => {
+    mockCalls.push({ set: null, where: null, returning: null, returnValue: [{ id: "aaa" }, { id: "bbb" }, { id: "ccc" }] });
 
     const res = await request(app)
       .post("/internal/transfer-brand")
       .set("X-API-Key", "test-service-key")
       .send(VALID_BODY);
 
+    expect(res.status).toBe(200);
     expect(res.body).toEqual({
       updatedTables: [{ tableName: "email_events", count: 3 }],
     });
-    expect(res.status).toBe(200);
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockSet).toHaveBeenCalledWith({ orgId: VALID_BODY.targetOrgId });
+    // Step 1 only: set org_id
+    expect(mockCalls[0].set).toEqual({ orgId: VALID_BODY.targetOrgId });
+    // No step 2
+    expect(mockCalls).toHaveLength(1);
   });
 
-  it("rewrites brand_ids when targetBrandId is provided", async () => {
-    mockReturning._returnValue = [{ id: "aaa" }, { id: "bbb" }];
+  it("moves rows then rewrites brand_ids when targetBrandId is provided", async () => {
+    // Step 1: move returns 2 rows
+    mockCalls.push({ set: null, where: null, returning: null, returnValue: [{ id: "aaa" }, { id: "bbb" }] });
+    // Step 2: rewrite returns 2 rows
+    mockCalls.push({ set: null, where: null, returning: null, returnValue: [{ id: "aaa" }, { id: "bbb" }] });
 
     const res = await request(app)
       .post("/internal/transfer-brand")
@@ -116,14 +115,15 @@ describe("POST /internal/transfer-brand", () => {
     expect(res.body).toEqual({
       updatedTables: [{ tableName: "email_events", count: 2 }],
     });
-    expect(mockSet).toHaveBeenCalledWith({
-      orgId: VALID_BODY.targetOrgId,
-      brandIds: ["44444444-4444-4444-a444-444444444444"],
-    });
+    // Step 1: move org
+    expect(mockCalls[0].set).toEqual({ orgId: VALID_BODY.targetOrgId });
+    // Step 2: rewrite brand (no org filter)
+    expect(mockCalls[1].set).toEqual({ brandIds: ["44444444-4444-4444-a444-444444444444"] });
+    expect(mockCalls).toHaveLength(2);
   });
 
   it("returns count 0 when no rows match (idempotent)", async () => {
-    mockReturning._returnValue = [];
+    mockCalls.push({ set: null, where: null, returning: null, returnValue: [] });
 
     const res = await request(app)
       .post("/internal/transfer-brand")
@@ -137,7 +137,7 @@ describe("POST /internal/transfer-brand", () => {
   });
 
   it("does not require org identity headers (internal endpoint)", async () => {
-    mockReturning._returnValue = [];
+    mockCalls.push({ set: null, where: null, returning: null, returnValue: [] });
 
     const res = await request(app)
       .post("/internal/transfer-brand")
