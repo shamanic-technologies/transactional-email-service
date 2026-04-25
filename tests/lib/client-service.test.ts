@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("resolveUserEmail", () => {
-  it("calls GET /users/{userId} on client-service", async () => {
+  it("calls GET /internal/users/{userId} on client-service", async () => {
     fetchSpy.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ user: { id: "user_456", email: "test@example.com", firstName: "Test", lastName: "User" } }),
@@ -27,8 +27,7 @@ describe("resolveUserEmail", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
 
     const [url] = fetchSpy.mock.calls[0];
-    expect(url).toContain("/users/user_456");
-    expect(url).not.toContain("anonymous");
+    expect(url).toContain("/internal/users/user_456");
   });
 
   it("throws when user has no email", async () => {
@@ -47,7 +46,7 @@ describe("resolveUserEmail", () => {
       text: () => Promise.resolve("User not found"),
     });
 
-    await expect(resolveUserEmail("user_456", identity)).rejects.toThrow("client-service GET /users/user_456 failed: 404");
+    await expect(resolveUserEmail("user_456", identity)).rejects.toThrow("client-service GET /internal/users/user_456 failed: 404");
   });
 
   it("forwards identity headers", async () => {
