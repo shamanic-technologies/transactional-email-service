@@ -121,9 +121,10 @@ export const DeployTemplatesResponseSchema = z
 
 export const TransferBrandRequestSchema = z
   .object({
-    brandId: z.string().uuid(),
+    sourceBrandId: z.string().uuid(),
     sourceOrgId: z.string().uuid(),
     targetOrgId: z.string().uuid(),
+    targetBrandId: z.string().uuid().optional(),
   })
   .openapi("TransferBrandRequest");
 
@@ -324,8 +325,9 @@ registry.registerPath({
   path: "/internal/transfer-brand",
   summary: "Transfer brand ownership between orgs (solo-brand only)",
   description:
-    "Re-assigns email_events rows from sourceOrgId to targetOrgId for a given brandId. " +
-    "Only updates rows where brand_ids contains exactly one element matching brandId (solo-brand). " +
+    "Re-assigns email_events rows from sourceOrgId to targetOrgId for a given sourceBrandId. " +
+    "Only updates rows where brand_ids contains exactly one element matching sourceBrandId (solo-brand). " +
+    "When targetBrandId is provided, also rewrites the brand reference to the target brand. " +
     "Rows with multiple brand IDs (co-branding) are skipped. Idempotent — running twice is a no-op.",
   tags: ["Internal"],
   security: [{ apiKey: [] }],
