@@ -234,7 +234,9 @@ npm run dev             # start dev server on PORT
 | `npm run build` | Compile TypeScript to `dist/` and generate OpenAPI spec |
 | `npm run generate:openapi` | Generate `openapi.json` from Zod schemas |
 | `npm start` | Run compiled server |
-| `npm test` | Run tests (Vitest) |
+| `npm test` | Run unit tests (Vitest, excludes integration) |
+| `npm run test:unit` | Same as `npm test` |
+| `npm run test:integration` | Run integration tests (requires database) |
 | `npm run db:generate` | Generate Drizzle migrations |
 | `npm run db:migrate` | Run migrations |
 | `npm run db:push` | Push schema directly |
