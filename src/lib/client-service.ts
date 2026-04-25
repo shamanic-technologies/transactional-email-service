@@ -58,7 +58,7 @@ async function clientRequest<T>(path: string, identity: IdentityContext): Promis
  */
 export async function resolveUserEmail(userId: string, identity: IdentityContext): Promise<string> {
   const { user } = await clientRequest<{ user: ClientServiceUser }>(
-    `/users/${userId}`,
+    `/internal/users/${userId}`,
     identity
   );
   if (!user.email) {
