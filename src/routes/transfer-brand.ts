@@ -15,22 +15,27 @@ router.post("/internal/transfer-brand", requireApiKey, async (req, res) => {
       return;
     }
 
-    const { brandId, sourceOrgId, targetOrgId } = parsed.data;
+    const { sourceBrandId, sourceOrgId, targetOrgId, targetBrandId } = parsed.data;
 
-    // Solo-brand only: brand_ids array has exactly one element and it matches brandId
+    // Solo-brand only: brand_ids array has exactly one element and it matches sourceBrandId
+    // When targetBrandId is present, also rewrite the brand reference
+    const setClause = targetBrandId
+      ? { orgId: targetOrgId, brandIds: [targetBrandId] }
+      : { orgId: targetOrgId };
+
     const updated = await db
       .update(emailEvents)
-      .set({ orgId: targetOrgId })
+      .set(setClause)
       .where(
         and(
           eq(emailEvents.orgId, sourceOrgId),
           sql`array_length(${emailEvents.brandIds}, 1) = 1`,
-          sql`${emailEvents.brandIds}[1] = ${brandId}`
+          sql`${emailEvents.brandIds}[1] = ${sourceBrandId}`
         )
       )
       .returning({ id: emailEvents.id });
 
-    console.log(`[transactional-email-service] transfer-brand: updated ${updated.length} email_events rows (brandId=${brandId}, ${sourceOrgId} -> ${targetOrgId})`);
+    console.log(`[transactional-email-service] transfer-brand: updated ${updated.length} email_events rows (sourceBrandId=${sourceBrandId}${targetBrandId ? `, targetBrandId=${targetBrandId}` : ""}, ${sourceOrgId} -> ${targetOrgId})`);
 
     res.json({
       updatedTables: [{ tableName: "email_events", count: updated.length }],
