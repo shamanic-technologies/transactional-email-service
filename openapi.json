@@ -250,7 +250,7 @@
       "TransferBrandRequest": {
         "type": "object",
         "properties": {
-          "brandId": {
+          "sourceBrandId": {
             "type": "string",
             "format": "uuid"
           },
@@ -261,10 +261,14 @@
           "targetOrgId": {
             "type": "string",
             "format": "uuid"
+          },
+          "targetBrandId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
-          "brandId",
+          "sourceBrandId",
           "sourceOrgId",
           "targetOrgId"
         ]
@@ -656,7 +660,7 @@
     "/internal/transfer-brand": {
       "post": {
         "summary": "Transfer brand ownership between orgs (solo-brand only)",
-        "description": "Re-assigns email_events rows from sourceOrgId to targetOrgId for a given brandId. Only updates rows where brand_ids contains exactly one element matching brandId (solo-brand). Rows with multiple brand IDs (co-branding) are skipped. Idempotent — running twice is a no-op.",
+        "description": "Re-assigns email_events rows from sourceOrgId to targetOrgId for a given sourceBrandId. Only updates rows where brand_ids contains exactly one element matching sourceBrandId (solo-brand). When targetBrandId is provided, also rewrites the brand reference to the target brand. Rows with multiple brand IDs (co-branding) are skipped. Idempotent — running twice is a no-op.",
         "tags": [
           "Internal"
         ],

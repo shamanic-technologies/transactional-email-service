@@ -147,15 +147,16 @@ export async function register() {
 
 **Internal endpoint** — requires `x-api-key` only, no identity headers.
 
-Re-assigns `email_events` rows from one org to another for a given brand. Only updates solo-brand rows (where `brand_ids` contains exactly one element matching `brandId`). Co-branding rows are skipped. Idempotent.
+Re-assigns `email_events` rows from one org to another for a given brand. Only updates solo-brand rows (where `brand_ids` contains exactly one element matching `sourceBrandId`). When `targetBrandId` is provided, also rewrites the brand reference. Co-branding rows are skipped. Idempotent.
 
 **Request body:**
 
 ```json
 {
-  "brandId": "uuid",
+  "sourceBrandId": "uuid",
   "sourceOrgId": "uuid",
-  "targetOrgId": "uuid"
+  "targetOrgId": "uuid",
+  "targetBrandId": "uuid (optional)"
 }
 ```
 
