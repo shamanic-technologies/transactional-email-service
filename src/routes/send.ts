@@ -7,6 +7,7 @@ import { getTemplate } from "../templates/index.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
+import { traceEvent } from "../lib/trace-event.js";
 import { SendRequestSchema } from "../schemas.js";
 
 const router = Router();
@@ -76,6 +77,16 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     const effectiveCampaignId = headerCampaignId || body.campaignId;
     const effectiveBrandIds = headerBrandIds ?? body.brandIds;
 
+    // Identity headers for tracing
+    const traceHeaders: Record<string, string | undefined> = {
+      "x-org-id": orgId,
+      "x-user-id": userId,
+      "x-brand-id": headerBrandIds?.join(","),
+      "x-campaign-id": headerCampaignId,
+      "x-workflow-slug": workflowSlug,
+      "x-feature-slug": featureSlug,
+    };
+
     // Resolve recipient emails
     let recipientEmails: string[];
 
@@ -108,6 +119,10 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
       return;
     }
     const template = templateFn(metadata as Record<string, unknown>);
+
+    if (runId) {
+      traceEvent(runId, { service: "transactional-email-service", event: "template-resolved", detail: `Template resolved for ${body.eventType}` }, traceHeaders);
+    }
 
     const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
@@ -162,6 +177,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
             .returning();
 
           if (inserted.length === 0) {
+            traceEvent(run.id, { service: "transactional-email-service", event: "send-dedup-skip", detail: `Duplicate ${body.eventType} for ${email}` }, traceHeaders);
             await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
             results.push({ email, sent: false, reason: "duplicate" });
             continue;
@@ -191,6 +207,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
         }
 
         // Send via email gateway
+        traceEvent(run.id, { service: "transactional-email-service", event: "send-start", detail: `Sending ${body.eventType} to ${email}` }, traceHeaders);
         await sendEmail({
           to: email,
           subject: template.subject,
@@ -212,10 +229,12 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           .set({ status: "sent" })
           .where(eq(emailEvents.id, insertedEventId));
 
+        traceEvent(run.id, { service: "transactional-email-service", event: "send-done", detail: `Sent ${body.eventType} to ${email}` }, traceHeaders);
         await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
+        traceEvent(run.id, { service: "transactional-email-service", event: "send-error", detail: err.message, level: "error" }, traceHeaders);
 
         // Mark run as failed
         try {
