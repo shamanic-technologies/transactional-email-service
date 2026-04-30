@@ -63,6 +63,11 @@ vi.mock("../../src/lib/runs-client.js", () => ({
   updateRun: vi.fn().mockResolvedValue({}),
 }));
 
+// Mock trace-event to avoid external calls
+vi.mock("../../src/lib/trace-event.js", () => ({
+  traceEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
 import request from "supertest";
 import express from "express";
 import sendRoutes from "../../src/routes/send.js";
