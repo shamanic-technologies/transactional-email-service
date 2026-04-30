@@ -255,6 +255,7 @@ src/
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
     runs-client.ts      # Runs service client (create/update runs)
+    trace-event.ts      # Fire-and-forget event tracing to runs-service
   middleware/
     auth.ts             # API key + identity header authentication
   routes/
