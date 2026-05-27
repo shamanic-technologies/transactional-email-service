@@ -1,6 +1,6 @@
 # Project: Transactional Email Service
 
-Transactional email service that sends event-triggered emails. Resolves recipients via Clerk, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
+Transactional email service that sends event-triggered emails. Resolves recipients via client-service, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
 
 ## Commands
 
@@ -20,14 +20,15 @@ Transactional email service that sends event-triggered emails. Resolves recipien
 
 - `src/schemas.ts` — Zod schemas (source of truth for validation + OpenAPI)
 - `src/index.ts` — Express app entry point
-- `src/routes/` — Route handlers (`send.ts`, `stats.ts`, `health.ts`, `openapi.ts`)
-- `src/middleware/auth.ts` — API key authentication
-- `src/lib/clerk.ts` — Clerk user/org email resolution
+- `src/routes/` — Route handlers (`send.ts`, `stats.ts`, `health.ts`, `openapi.ts`, `templates.ts`, `transfer-brand.ts`)
+- `src/middleware/auth.ts` — API key + identity-header authentication
+- `src/lib/client-service.ts` — client-service user email resolution
 - `src/lib/email-gateway.ts` — Email Gateway client
 - `src/lib/runs-client.ts` — Runs service client (create/update runs)
+- `src/lib/trace-event.ts` — Fire-and-forget event tracing to runs-service
 - `src/db/schema.ts` — Drizzle schema (`email_events` table)
 - `src/db/index.ts` — Database connection
-- `src/templates/` — Email templates (HTML + text), organized by app (`distribute/`)
+- `src/templates/index.ts` — Renderer + DB resolver (`{{var}}` interpolation, DB lookup by `name`). Template **content is NOT stored in this repo** — each consuming app declares its own templates and registers them at startup via `PUT /templates` (authed) or `PUT /platform-templates` (api-key only). Hardcoded templates were removed in PR #49 (commit `2eaf1d0`). To add a new template for the Distribute product, edit `distribute.you/apps/dashboard/src/instrumentation.ts` `EMAIL_TEMPLATES` array — NOT this repo.
 - `scripts/generate-openapi.ts` — OpenAPI spec generation script
 - `tests/` — Test files (`*.test.ts`)
 - `openapi.json` — Auto-generated, do NOT edit manually
