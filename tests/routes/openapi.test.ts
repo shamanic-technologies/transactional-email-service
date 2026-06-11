@@ -13,4 +13,17 @@ describe("GET /openapi.json", () => {
     expect(res.body).toHaveProperty("info");
     expect(res.body.info.title).toBe("Transactional Email Service");
   });
+
+  it("documents lifecycle blind-copy recipients", async () => {
+    const res = await request(app).get("/openapi.json");
+    const sendRequest = res.body.components.schemas.SendRequest;
+
+    expect(sendRequest.properties.bccEmails).toMatchObject({
+      type: "array",
+    });
+    expect(sendRequest.properties.bccEmails.items).toMatchObject({
+      type: "string",
+      format: "email",
+    });
+  });
 });

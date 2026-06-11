@@ -15,6 +15,7 @@ interface SendEmailParams {
   brandIds?: string[];
   campaignId?: string;
   from?: string | null;
+  bcc?: string;
   workflowHeaders?: WorkflowHeaders;
 }
 
@@ -52,6 +53,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       textBody: params.textBody,
       tag: params.tag,
       ...(params.from && { from: params.from }),
+      ...(params.bcc && { bcc: params.bcc }),
     }),
   });
 

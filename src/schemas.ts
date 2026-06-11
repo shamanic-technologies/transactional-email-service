@@ -24,6 +24,10 @@ export const SendRequestSchema = z
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
     productId: z.string().optional().openapi({ description: "Product/instance ID, required for product-scoped dedup (e.g. webinar ID)" }),
     recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (overrides client-service resolution if provided)" }),
+    bccEmails: z.array(z.string().email()).optional().openapi({
+      description:
+        "Blind-copy recipient email addresses. These are forwarded as provider-level BCC recipients and are not rendered into templates or stored in metadata.",
+    }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
   .openapi("SendRequest");
@@ -228,6 +232,7 @@ registry.registerPath({
     "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
     "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n" +
     "- **No dedup** (all other event types): sends every time with no dedup.\n\n" +
+    "`bccEmails` are delivered as provider-level BCC recipients on the primary email. They are not rendered into templates and do not affect primary-recipient deduplication.\n\n" +
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
   security: [{ apiKey: [] }],
