@@ -115,6 +115,25 @@ describe("sendEmail", () => {
     expect(body.from).toBeUndefined();
   });
 
+  it("passes bcc to email gateway when provided", async () => {
+    await sendEmail({
+      to: "test@example.com",
+      subject: "Test",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "test-tag",
+      orgId: "org_123",
+      userId: "user_456",
+      runId: "run_abc",
+      bcc: "alpha1@example.com,alpha2@example.com",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com");
+  });
+
   it("includes all required fields for email gateway", async () => {
     await sendEmail({
       to: "test@example.com",

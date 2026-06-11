@@ -30,6 +30,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
   "brandIds": ["brand_xxx"],
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
+  "bccEmails": ["ops@example.com"],
   "metadata": { "name": "Alice" }
 }
 ```
@@ -41,6 +42,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
+| `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC; not rendered into templates or stored in metadata |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
