@@ -220,6 +220,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           brandIds: effectiveBrandIds,
           campaignId: effectiveCampaignId,
           from: template.from,
+          bcc: body.bccEmails?.join(","),
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug },
         });
 

@@ -209,6 +209,64 @@ describe("POST /send", () => {
 
     expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBeUndefined();
+    expect(body.bcc).toBeUndefined();
+  });
+
+  it("forwards bccEmails to the provider payload as bcc", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "primary@example.com",
+        bccEmails: ["alpha1@example.com", "alpha2@example.com"],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "primary@example.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.to).toBe("primary@example.com");
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com");
+  });
+
+  it("does not render bccEmails into primary-recipient content or metadata", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      name: "welcome",
+      subject: "Welcome {{name}}",
+      htmlBody: "<p>Hello {{name}}</p>",
+      textBody: "Hello {{name}}",
+      fromAddress: null,
+    }]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "primary@example.com",
+        bccEmails: ["alpha-private@example.com"],
+        metadata: { name: "Primary" },
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.subject).toBe("Welcome Primary");
+    expect(body.htmlBody).toBe("<p>Hello Primary</p>");
+    expect(body.textBody).toBe("Hello Primary");
+    expect(body.subject).not.toContain("alpha-private@example.com");
+    expect(body.htmlBody).not.toContain("alpha-private@example.com");
+    expect(body.textBody).not.toContain("alpha-private@example.com");
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.metadata).toEqual({ name: "Primary" });
   });
 
   it("passes brandIds and campaignId when provided", async () => {
