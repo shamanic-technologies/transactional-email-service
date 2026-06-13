@@ -295,14 +295,15 @@ describe("recipient resolution", () => {
     expect(res.body.results[0].sent).toBe(true);
   });
 
-  it("sends admin notifications to admin email", async () => {
+  it("sends admin notifications to all admin emails", async () => {
     const res = await request(app)
       .post("/send")
       .set("x-api-key", API_KEY)
       .set(HEADERS)
       .send({ eventType: "signup_notification", ...BASE });
-    expect(res.body.results[0].email).toBe("kevin@distribute.you");
-    expect(res.body.results[0].sent).toBe(true);
+    const emails = res.body.results.map((r: { email: string }) => r.email);
+    expect(emails).toEqual(["kevin@distribute.you", "adam@distribute.you"]);
+    expect(res.body.results.every((r: { sent: boolean }) => r.sent)).toBe(true);
   });
 });
 
