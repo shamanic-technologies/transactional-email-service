@@ -124,7 +124,8 @@ describe("POST /send", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    // Admin-notification events fan out to both admin recipients
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
@@ -202,7 +203,8 @@ describe("POST /send", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    // Admin-notification events fan out to both admin recipients
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);

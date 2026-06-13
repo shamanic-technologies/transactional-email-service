@@ -192,7 +192,7 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | None (repeatable) | Any event not listed above | — |
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`) are always routed to the admin email regardless of the caller's identity.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`) are always routed to the admin emails (`kevin@distribute.you`, `adam@distribute.you`) regardless of the caller's identity.
 
 ## Tech Stack
 
