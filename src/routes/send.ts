@@ -22,7 +22,7 @@ const DAILY_DEDUP_EVENTS = new Set(["user_active"]);
 const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_2", "j_minus_1", "j_day"]);
 
 // Events where recipient is hardcoded to admin
-const ADMIN_EMAIL = "kevin@distribute.you";
+const ADMIN_EMAILS = ["kevin@distribute.you", "adam@distribute.you"];
 const ADMIN_NOTIFICATION_EVENTS = new Set(["signup_notification", "signin_notification", "user_active"]);
 
 
@@ -91,7 +91,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     let recipientEmails: string[];
 
     if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType)) {
-      recipientEmails = [ADMIN_EMAIL];
+      recipientEmails = [...ADMIN_EMAILS];
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
