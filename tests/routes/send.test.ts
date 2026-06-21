@@ -71,6 +71,7 @@ vi.mock("../../src/lib/trace-event.js", () => ({
 import request from "supertest";
 import express from "express";
 import sendRoutes from "../../src/routes/send.js";
+import { createRun } from "../../src/lib/runs-client.js";
 
 let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -562,5 +563,60 @@ describe("POST /send", () => {
 
     const insertValues = mockValues.mock.calls[0][0];
     expect(insertValues.brandIds).toEqual(["brand_x", "brand_y"]);
+  });
+
+  it("propagates inbound x-audience-id to the run, the gateway egress, and the email_events row", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-audience-id", "aud_priority_1")
+      .set("x-feature-slug", "sales-cold-email-outreach")
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "primary@example.com",
+      });
+
+    expect(res.status).toBe(200);
+
+    // 1. Run creation carries audienceId (runs-service reads x-audience-id → runs.audience_id)
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowHeaders: expect.objectContaining({ audienceId: "aud_priority_1" }),
+      })
+    );
+
+    // 2. Internal egress to email-gateway forwards the header
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(options.headers["x-audience-id"]).toBe("aud_priority_1");
+
+    // 3. Own DB row is tagged
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.audienceId).toBe("aud_priority_1");
+  });
+
+  it("omits audienceId everywhere when x-audience-id is absent (optional, no throw)", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "primary@example.com",
+      });
+
+    expect(res.status).toBe(200);
+
+    expect(vi.mocked(createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowHeaders: expect.objectContaining({ audienceId: undefined }),
+      })
+    );
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(options.headers["x-audience-id"]).toBeUndefined();
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.audienceId).toBeNull();
   });
 });

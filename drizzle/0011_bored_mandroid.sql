@@ -1,0 +1,1 @@
+ALTER TABLE "email_events" ADD COLUMN IF NOT EXISTS "audience_id" text;

@@ -17,6 +17,7 @@ Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-brand-id` — comma-separated brand IDs (e.g. `uuid1,uuid2,uuid3`). Single UUID for single-brand campaigns.
 - `x-workflow-slug` — workflow slug
 - `x-feature-slug` — feature slug for tracking which feature triggered the request
+- `x-audience-id` — audience attribution ID (the priority audience chosen by campaign-service for the run). Read into the request identity, forwarded on every internal call (client-service, email-gateway, runs-service), stored on the `email_events` row, and carried on the runs-service run so cost is attributed per audience. Absent outside campaign flows — omitted, never required.
 
 When present, these are stored in the `email_events` table and forwarded to all downstream services. Brand IDs are parsed from CSV and stored as a `text[]` array in `brand_ids`.
 
