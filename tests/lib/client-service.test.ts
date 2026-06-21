@@ -62,4 +62,28 @@ describe("resolveUserEmail", () => {
     expect(options.headers["x-user-id"]).toBe("user_456");
     expect(options.headers["x-run-id"]).toBe("run_abc");
   });
+
+  it("forwards x-audience-id header when audienceId is provided", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ user: { id: "user_456", email: "test@example.com", firstName: null, lastName: null } }),
+    });
+
+    await resolveUserEmail("user_456", { ...identity, audienceId: "aud_priority_1" });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(options.headers["x-audience-id"]).toBe("aud_priority_1");
+  });
+
+  it("omits x-audience-id header when audienceId is absent", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ user: { id: "user_456", email: "test@example.com", firstName: null, lastName: null } }),
+    });
+
+    await resolveUserEmail("user_456", identity);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(options.headers["x-audience-id"]).toBeUndefined();
+  });
 });
