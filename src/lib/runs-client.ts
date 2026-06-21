@@ -43,6 +43,7 @@ export interface WorkflowHeaders {
   brandId?: string;
   workflowSlug?: string;
   featureSlug?: string;
+  audienceId?: string;
 }
 
 async function runsRequest<T>(
@@ -62,6 +63,7 @@ async function runsRequest<T>(
   if (workflowHeaders?.brandId) headers["x-brand-id"] = workflowHeaders.brandId;
   if (workflowHeaders?.workflowSlug) headers["x-workflow-slug"] = workflowHeaders.workflowSlug;
   if (workflowHeaders?.featureSlug) headers["x-feature-slug"] = workflowHeaders.featureSlug;
+  if (workflowHeaders?.audienceId) headers["x-audience-id"] = workflowHeaders.audienceId;
 
   const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
     method,

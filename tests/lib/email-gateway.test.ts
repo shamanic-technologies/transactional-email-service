@@ -182,6 +182,23 @@ describe("sendEmail", () => {
     expect(options.headers["x-workflow-slug"]).toBe("onboarding-flow");
   });
 
+  it("forwards x-audience-id header when audienceId is provided", async () => {
+    await sendEmail({
+      to: "test@example.com",
+      subject: "Test",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "test-tag",
+      orgId: "org_123",
+      userId: "user_456",
+      runId: "run_abc",
+      workflowHeaders: { audienceId: "aud_priority_1" },
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(options.headers["x-audience-id"]).toBe("aud_priority_1");
+  });
+
   it("does not send brandIds in request body (brand goes via x-brand-id header only)", async () => {
     await sendEmail({
       to: "test@example.com",
@@ -224,5 +241,6 @@ describe("sendEmail", () => {
     expect(options.headers["x-campaign-id"]).toBeUndefined();
     expect(options.headers["x-brand-id"]).toBeUndefined();
     expect(options.headers["x-workflow-slug"]).toBeUndefined();
+    expect(options.headers["x-audience-id"]).toBeUndefined();
   });
 });

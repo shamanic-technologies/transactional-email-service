@@ -23,6 +23,7 @@ interface IdentityContext {
   brandId?: string; // Raw CSV value for x-brand-id header forwarding
   workflowSlug?: string;
   featureSlug?: string;
+  audienceId?: string;
 }
 
 async function clientRequest<T>(path: string, identity: IdentityContext): Promise<T> {
@@ -37,6 +38,7 @@ async function clientRequest<T>(path: string, identity: IdentityContext): Promis
   if (identity.brandId) headers["x-brand-id"] = identity.brandId;
   if (identity.workflowSlug) headers["x-workflow-slug"] = identity.workflowSlug;
   if (identity.featureSlug) headers["x-feature-slug"] = identity.featureSlug;
+  if (identity.audienceId) headers["x-audience-id"] = identity.audienceId;
 
   const response = await fetch(`${CLIENT_SERVICE_URL}${path}`, {
     method: "GET",

@@ -71,7 +71,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     }
 
     const body = parsed.data;
-    const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug } = res.locals as IdentityLocals;
+    const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug, audienceId } = res.locals as IdentityLocals;
 
     // Headers take precedence over body for campaign/brand tracking
     const effectiveCampaignId = headerCampaignId || body.campaignId;
@@ -85,6 +85,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
       "x-campaign-id": headerCampaignId,
       "x-workflow-slug": workflowSlug,
       "x-feature-slug": featureSlug,
+      "x-audience-id": audienceId,
     };
 
     // Resolve recipient emails
@@ -95,7 +96,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
     } else {
-      const email = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
+      const email = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
       recipientEmails = [email];
     }
 
@@ -103,7 +104,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     const metadata = { ...body.metadata };
     if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && !metadata.email) {
       try {
-        const userEmail = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
+        const userEmail = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
         metadata.email = userEmail;
       } catch {
         // Continue without email in metadata
@@ -145,7 +146,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           brandIds: effectiveBrandIds,
           campaignId: effectiveCampaignId,
           parentRunId: runId,
-          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug },
+          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
       } catch (runErr: any) {
         console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
@@ -172,13 +173,14 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
               brandIds: effectiveBrandIds?.length ? effectiveBrandIds : null,
               workflowSlug: workflowSlug || null,
               featureSlug: featureSlug || null,
+              audienceId: audienceId || null,
             })
             .onConflictDoNothing({ target: emailEvents.dedupKey })
             .returning();
 
           if (inserted.length === 0) {
             traceEvent(run.id, { service: "transactional-email-service", event: "send-dedup-skip", detail: `Duplicate ${body.eventType} for ${email}` }, traceHeaders);
-            await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
+            await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
             results.push({ email, sent: false, reason: "duplicate" });
             continue;
           }
@@ -200,6 +202,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
               brandIds: effectiveBrandIds?.length ? effectiveBrandIds : null,
               workflowSlug: workflowSlug || null,
               featureSlug: featureSlug || null,
+              audienceId: audienceId || null,
             })
             .returning();
 
@@ -221,7 +224,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           campaignId: effectiveCampaignId,
           from: template.from,
           bcc: body.bccEmails?.join(","),
-          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug },
+          workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 
         // Mark as sent only after successful delivery
@@ -231,7 +234,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
           .where(eq(emailEvents.id, insertedEventId));
 
         traceEvent(run.id, { service: "transactional-email-service", event: "send-done", detail: `Sent ${body.eventType} to ${email}` }, traceHeaders);
-        await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
+        await updateRun(run.id, "completed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
@@ -239,7 +242,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
 
         // Mark run as failed
         try {
-          await updateRun(run.id, "failed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug });
+          await updateRun(run.id, "failed", { orgId, userId }, { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
         } catch {
           // Best effort
         }

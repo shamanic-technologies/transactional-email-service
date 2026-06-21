@@ -17,6 +17,7 @@ export interface IdentityLocals {
   brandIds?: string[];
   workflowSlug?: string;
   featureSlug?: string;
+  audienceId?: string;
 }
 
 export function requireIdentityHeaders(req: Request, res: Response, next: NextFunction) {
@@ -38,10 +39,12 @@ export function requireIdentityHeaders(req: Request, res: Response, next: NextFu
   const brandIds = String(req.headers["x-brand-id"] ?? "").split(",").map(s => s.trim()).filter(Boolean);
   const workflowSlug = req.headers["x-workflow-slug"] as string | undefined;
   const featureSlug = req.headers["x-feature-slug"] as string | undefined;
+  const audienceId = req.headers["x-audience-id"] as string | undefined;
   if (campaignId) res.locals.campaignId = campaignId;
   if (brandIds.length) res.locals.brandIds = brandIds;
   if (workflowSlug) res.locals.workflowSlug = workflowSlug;
   if (featureSlug) res.locals.featureSlug = featureSlug;
+  if (audienceId) res.locals.audienceId = audienceId;
 
   next();
 }
