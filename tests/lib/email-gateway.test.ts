@@ -115,7 +115,7 @@ describe("sendEmail", () => {
     expect(body.from).toBeUndefined();
   });
 
-  it("passes bcc to email gateway when provided", async () => {
+  it("always appends hardcoded staff bcc to caller-provided bcc", async () => {
     await sendEmail({
       to: "test@example.com",
       subject: "Test",
@@ -131,59 +131,11 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com");
+    // caller addresses first, then hardcoded staff
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you,adam@distribute.you");
   });
 
-  it("adds staff bcc from TRANSACTIONAL_BCC_EMAILS when no caller bcc", async () => {
-    process.env.TRANSACTIONAL_BCC_EMAILS = "staff1@distribute.you,staff2@distribute.you";
-    try {
-      await sendEmail({
-        to: "test@example.com",
-        subject: "Test",
-        htmlBody: "<p>Test</p>",
-        textBody: "Test",
-        tag: "test-tag",
-        orgId: "org_123",
-        userId: "user_456",
-        runId: "run_abc",
-      });
-    } finally {
-      delete process.env.TRANSACTIONAL_BCC_EMAILS;
-    }
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
-
-    expect(body.bcc).toBe("staff1@distribute.you,staff2@distribute.you");
-  });
-
-  it("merges and de-dups caller bcc with TRANSACTIONAL_BCC_EMAILS", async () => {
-    process.env.TRANSACTIONAL_BCC_EMAILS = " staff@distribute.you , alpha1@example.com ";
-    try {
-      await sendEmail({
-        to: "test@example.com",
-        subject: "Test",
-        htmlBody: "<p>Test</p>",
-        textBody: "Test",
-        tag: "test-tag",
-        orgId: "org_123",
-        userId: "user_456",
-        runId: "run_abc",
-        bcc: "alpha1@example.com,alpha2@example.com",
-      });
-    } finally {
-      delete process.env.TRANSACTIONAL_BCC_EMAILS;
-    }
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
-
-    // caller addresses first, then env-only address; alpha1 not duplicated
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,staff@distribute.you");
-  });
-
-  it("omits bcc when neither caller bcc nor TRANSACTIONAL_BCC_EMAILS is set", async () => {
-    delete process.env.TRANSACTIONAL_BCC_EMAILS;
+  it("adds hardcoded staff bcc when no caller bcc", async () => {
     await sendEmail({
       to: "test@example.com",
       subject: "Test",
@@ -198,7 +150,45 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.bcc).toBeUndefined();
+    expect(body.bcc).toBe("kevin@distribute.you,adam@distribute.you");
+  });
+
+  it("de-dups caller bcc that already includes a staff address (case-insensitive)", async () => {
+    await sendEmail({
+      to: "test@example.com",
+      subject: "Test",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "test-tag",
+      orgId: "org_123",
+      userId: "user_456",
+      runId: "run_abc",
+      bcc: "alpha1@example.com,KEVIN@distribute.you",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    // caller's KEVIN@... wins first-seen; adam appended; kevin not duplicated
+    expect(body.bcc).toBe("alpha1@example.com,KEVIN@distribute.you,adam@distribute.you");
+  });
+
+  it("always sets bcc to staff even with no caller bcc", async () => {
+    await sendEmail({
+      to: "test@example.com",
+      subject: "Test",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "test-tag",
+      orgId: "org_123",
+      userId: "user_456",
+      runId: "run_abc",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.bcc).toBe("kevin@distribute.you,adam@distribute.you");
   });
 
   it("includes all required fields for email gateway", async () => {
