@@ -222,6 +222,7 @@ npm run dev             # start dev server on PORT
 | `TRANSACTIONAL_EMAIL_SERVICE_API_KEY` | API key for authenticating requests |
 | `EMAIL_GATEWAY_SERVICE_URL` | Email Gateway endpoint (default: https://email-gateway.distribute.you) |
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
+| `TRANSACTIONAL_BCC_EMAILS` | Optional comma-separated static BCC list silently added to every email sent by `sendEmail()` (staff oversight). Merged + de-duplicated with any caller-supplied `bccEmails`. Unset = no static BCC. |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |

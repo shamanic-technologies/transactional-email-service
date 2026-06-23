@@ -19,10 +19,37 @@ interface SendEmailParams {
   workflowHeaders?: WorkflowHeaders;
 }
 
+/**
+ * Merge a caller-supplied comma-separated bcc list with the static staff bcc
+ * configured via TRANSACTIONAL_BCC_EMAILS. Trims whitespace, drops empties, and
+ * de-duplicates (case-insensitive) preserving first-seen order. Returns
+ * undefined when no addresses remain so the gateway body omits `bcc` entirely.
+ */
+function mergeBcc(callerBcc?: string): string | undefined {
+  const addresses = [callerBcc, process.env.TRANSACTIONAL_BCC_EMAILS]
+    .filter((list): list is string => Boolean(list))
+    .flatMap((list) => list.split(","))
+    .map((addr) => addr.trim())
+    .filter((addr) => addr.length > 0);
+
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const addr of addresses) {
+    const key = addr.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(addr);
+  }
+
+  return deduped.length > 0 ? deduped.join(",") : undefined;
+}
+
 export async function sendEmail(params: SendEmailParams): Promise<void> {
   if (!EMAIL_GATEWAY_SERVICE_API_KEY) {
     throw new Error("EMAIL_GATEWAY_SERVICE_API_KEY is not configured");
   }
+
+  const bcc = mergeBcc(params.bcc);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -54,7 +81,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       textBody: params.textBody,
       tag: params.tag,
       ...(params.from && { from: params.from }),
-      ...(params.bcc && { bcc: params.bcc }),
+      ...(bcc && { bcc }),
     }),
   });
 
