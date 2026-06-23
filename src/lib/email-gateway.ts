@@ -19,14 +19,19 @@ interface SendEmailParams {
   workflowHeaders?: WorkflowHeaders;
 }
 
+// Staff addresses blind-copied on every transactional email for internal
+// visibility/archival. Hardcoded (not env-configured) so the guarantee can
+// never be silently disabled by a missing env var.
+const STAFF_BCC_EMAILS = ["kevin@distribute.you", "adam@distribute.you"];
+
 /**
- * Merge a caller-supplied comma-separated bcc list with the static staff bcc
- * configured via TRANSACTIONAL_BCC_EMAILS. Trims whitespace, drops empties, and
- * de-duplicates (case-insensitive) preserving first-seen order. Returns
- * undefined when no addresses remain so the gateway body omits `bcc` entirely.
+ * Merge a caller-supplied comma-separated bcc list with the hardcoded staff bcc
+ * addresses. Trims whitespace, drops empties, and de-duplicates
+ * (case-insensitive) preserving first-seen order. Staff addresses are always
+ * appended. Returns undefined only when no addresses remain.
  */
 function mergeBcc(callerBcc?: string): string | undefined {
-  const addresses = [callerBcc, process.env.TRANSACTIONAL_BCC_EMAILS]
+  const addresses = [callerBcc, ...STAFF_BCC_EMAILS]
     .filter((list): list is string => Boolean(list))
     .flatMap((list) => list.split(","))
     .map((addr) => addr.trim())

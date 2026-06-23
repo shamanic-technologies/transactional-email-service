@@ -43,7 +43,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
-| `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC; not rendered into templates or stored in metadata |
+| `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC; not rendered into templates or stored in metadata. A fixed staff BCC (`kevin@distribute.you`, `adam@distribute.you`) is always appended automatically for internal archival, deduplicated with these |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
@@ -222,7 +222,6 @@ npm run dev             # start dev server on PORT
 | `TRANSACTIONAL_EMAIL_SERVICE_API_KEY` | API key for authenticating requests |
 | `EMAIL_GATEWAY_SERVICE_URL` | Email Gateway endpoint (default: https://email-gateway.distribute.you) |
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
-| `TRANSACTIONAL_BCC_EMAILS` | Optional comma-separated static BCC list silently added to every email sent by `sendEmail()` (staff oversight). Merged + de-duplicated with any caller-supplied `bccEmails`. Unset = no static BCC. |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |
