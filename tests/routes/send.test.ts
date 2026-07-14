@@ -125,8 +125,8 @@ describe("POST /send", () => {
       });
 
     expect(res.status).toBe(200);
-    // Admin-notification events fan out to both admin recipients
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // Admin-notification events fan out to all admin recipients
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
@@ -204,8 +204,8 @@ describe("POST /send", () => {
       });
 
     expect(res.status).toBe(200);
-    // Admin-notification events fan out to both admin recipients
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // Admin-notification events fan out to all admin recipients
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
@@ -213,7 +213,7 @@ describe("POST /send", () => {
     expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBeUndefined();
     // Hardcoded staff BCC is always appended, even with no caller bccEmails
-    expect(body.bcc).toBe("kevin@distribute.you,adam@distribute.you");
+    expect(body.bcc).toBe("kevin@distribute.you");
   });
 
   it("forwards bccEmails to the provider payload as bcc", async () => {
@@ -235,7 +235,7 @@ describe("POST /send", () => {
 
     expect(body.to).toBe("primary@example.com");
     // Caller bccEmails first, then hardcoded staff appended (never affects primary `to`)
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you,adam@distribute.you");
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you");
   });
 
   it("does not render bccEmails into primary-recipient content or metadata", async () => {

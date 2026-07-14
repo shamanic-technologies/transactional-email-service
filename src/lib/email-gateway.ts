@@ -22,7 +22,7 @@ interface SendEmailParams {
 // Staff addresses blind-copied on every transactional email for internal
 // visibility/archival. Hardcoded (not env-configured) so the guarantee can
 // never be silently disabled by a missing env var.
-const STAFF_BCC_EMAILS = ["kevin@distribute.you", "adam@distribute.you"];
+const STAFF_BCC_EMAILS = ["kevin@distribute.you"];
 
 /**
  * Merge a caller-supplied comma-separated bcc list with the hardcoded staff bcc
