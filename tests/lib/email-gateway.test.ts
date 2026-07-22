@@ -132,7 +132,7 @@ describe("sendEmail", () => {
     const body = JSON.parse(options.body);
 
     // caller addresses first, then hardcoded staff
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you");
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you,kevin.lourd@gmail.com");
   });
 
   it("adds hardcoded staff bcc when no caller bcc", async () => {
@@ -150,7 +150,7 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.bcc).toBe("kevin@distribute.you");
+    expect(body.bcc).toBe("kevin@distribute.you,kevin.lourd@gmail.com");
   });
 
   it("de-dups caller bcc that already includes a staff address (case-insensitive)", async () => {
@@ -169,8 +169,8 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    // caller's KEVIN@... wins first-seen; kevin not duplicated
-    expect(body.bcc).toBe("alpha1@example.com,KEVIN@distribute.you");
+    // caller's KEVIN@... wins first-seen; kevin not duplicated; personal staff bcc appended
+    expect(body.bcc).toBe("alpha1@example.com,KEVIN@distribute.you,kevin.lourd@gmail.com");
   });
 
   it("always sets bcc to staff even with no caller bcc", async () => {
@@ -188,7 +188,7 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.bcc).toBe("kevin@distribute.you");
+    expect(body.bcc).toBe("kevin@distribute.you,kevin.lourd@gmail.com");
   });
 
   it("includes all required fields for email gateway", async () => {
