@@ -21,6 +21,9 @@ const DAILY_DEDUP_EVENTS = new Set(["user_active"]);
 // Event types deduped per user × product (one per recipient per product instance)
 const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_2", "j_minus_1", "j_day"]);
 
+// Event types deduped per org × brand × calendar month (one nudge per brand per month)
+const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
+
 // Events where recipient is hardcoded to admin
 const ADMIN_EMAILS = ["kevin@distribute.you"];
 const ADMIN_NOTIFICATION_EVENTS = new Set(["signup_notification", "signin_notification", "user_active"]);
@@ -30,7 +33,21 @@ function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
-function buildDedupKey(orgId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string }): string | null {
+function getCurrentMonth(): string {
+  return new Date().toISOString().slice(0, 7); // YYYY-MM
+}
+
+function buildDedupKey(orgId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string; brandIds?: string[] }): string | null {
+  // Monthly per-brand dedup: one send per org × brand × calendar month.
+  // Brand + month derive entirely from the existing request (x-brand-id header / brandIds body).
+  if (MONTHLY_BRAND_EVENTS.has(eventType)) {
+    if (req.brandIds && req.brandIds.length > 0) {
+      const brandKey = [...req.brandIds].sort().join(",");
+      return `${orgId}:${eventType}:${brandKey}:${getCurrentMonth()}`;
+    }
+    return null; // no brand identity, skip dedup
+  }
+
   // Product-scoped dedup: one per recipient per product instance
   if (PRODUCT_SCOPED_EVENTS.has(eventType)) {
     if (req.recipientEmail && req.productId) {
@@ -125,7 +142,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
       traceEvent(runId, { service: "transactional-email-service", event: "template-resolved", detail: `Template resolved for ${body.eventType}` }, traceHeaders);
     }
 
-    const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body });
+    const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body, brandIds: effectiveBrandIds });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
 
     for (const email of recipientEmails) {

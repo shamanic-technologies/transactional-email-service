@@ -18,6 +18,7 @@ export const SendRequestSchema = z
         "Once-only events (waitlist, welcome, signup_notification): sent at most once per recipient. " +
         "Daily events (user_active): sent at most once per recipient per day. " +
         "Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. " +
+        "Monthly per-brand events (audience_fully_contacted): sent at most once per org per brand per calendar month. " +
         "Any other event type has NO dedup and will send every time.",
     }),
     brandIds: z.array(z.string()).optional().openapi({ description: "Brand IDs for tracking (one or more UUIDs)" }),
@@ -231,6 +232,7 @@ registry.registerPath({
     "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{orgId}:{eventType}:{userId or recipientEmail}`.\n" +
     "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
     "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n" +
+    "- **Monthly per-brand** (audience_fully_contacted): sent at most once per org per brand per calendar month. Brand + month derive from the existing request (x-brand-id header / brandIds body). Dedup key: `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}`.\n" +
     "- **No dedup** (all other event types): sends every time with no dedup.\n\n" +
     "`bccEmails` are delivered as provider-level BCC recipients on the primary email. They are not rendered into templates and do not affect primary-recipient deduplication.\n\n" +
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",

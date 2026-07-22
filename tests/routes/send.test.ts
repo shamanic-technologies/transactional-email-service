@@ -622,3 +622,151 @@ describe("POST /send", () => {
     expect(insertValues.audienceId).toBeNull();
   });
 });
+
+describe("POST /send — audience_fully_contacted monthly per-brand dedup", () => {
+  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+  it("builds a per-(org, brand, month) dedup key from the x-brand-id header", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "audience_fully_contacted" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(true);
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe(`org_456:audience_fully_contacted:brand_cold:${currentMonth}`);
+  });
+
+  it("returns duplicate (not delivered) on a second send for same org+brand+month", async () => {
+    // Simulate the unique-index conflict: onConflictDoNothing returns no rows
+    mockReturning.mockResolvedValueOnce([]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "audience_fully_contacted" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "user@example.com", sent: false, reason: "duplicate" }]);
+    // No gateway delivery on a duplicate
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("keys on canonical-sorted brand set so member order does not matter", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_z,brand_a")
+      .send({ eventType: "audience_fully_contacted" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe(`org_456:audience_fully_contacted:brand_a,brand_z:${currentMonth}`);
+  });
+
+  it("produces a different key for a different brand (so a different brand goes through)", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_other")
+      .send({ eventType: "audience_fully_contacted" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe(`org_456:audience_fully_contacted:brand_other:${currentMonth}`);
+  });
+
+  it("prefers the x-brand-id header over the body brandIds for the dedup key", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "header_brand")
+      .send({ eventType: "audience_fully_contacted", brandIds: ["body_brand"] });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe(`org_456:audience_fully_contacted:header_brand:${currentMonth}`);
+  });
+
+  it("uses body brandIds when no x-brand-id header is present", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "audience_fully_contacted", brandIds: ["body_brand"] });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe(`org_456:audience_fully_contacted:body_brand:${currentMonth}`);
+  });
+
+  it("falls through to no-dedup (repeatable) when no brand identity is present", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "audience_fully_contacted" });
+
+    // No brand → null dedup key → repeatable insert path (no onConflictDoNothing)
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBeNull();
+    expect(mockOnConflictDoNothing).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /send — existing dedup cadences unchanged (regression)", () => {
+  it("once-only (welcome) keys on org+eventType+userId, no month/brand", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "welcome" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe("org_456:welcome:user_123");
+  });
+
+  it("daily (user_active) keys on org+eventType+identifier+date, unaffected by brand", async () => {
+    const today = new Date().toISOString().split("T")[0];
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "user_active" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe(`org_456:user_active:user_123:${today}`);
+  });
+
+  it("product-scoped (webinar_welcome) keys on org+eventType+email+productId", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "webinar_welcome", recipientEmail: "primary@example.com", productId: "webinar_42" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe("org_456:webinar_welcome:primary@example.com:webinar_42");
+  });
+
+  it("unknown event type still has no dedup (repeatable)", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "some_random_event", recipientEmail: "primary@example.com" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBeNull();
+    expect(mockOnConflictDoNothing).not.toHaveBeenCalled();
+  });
+});
