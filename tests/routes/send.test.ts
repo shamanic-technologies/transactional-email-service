@@ -213,7 +213,7 @@ describe("POST /send", () => {
     expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBeUndefined();
     // Hardcoded staff BCC is always appended, even with no caller bccEmails
-    expect(body.bcc).toBe("kevin@distribute.you");
+    expect(body.bcc).toBe("kevin@distribute.you,kevin.lourd@gmail.com");
   });
 
   it("forwards bccEmails to the provider payload as bcc", async () => {
@@ -235,7 +235,7 @@ describe("POST /send", () => {
 
     expect(body.to).toBe("primary@example.com");
     // Caller bccEmails first, then hardcoded staff appended (never affects primary `to`)
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you");
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you,kevin.lourd@gmail.com");
   });
 
   it("does not render bccEmails into primary-recipient content or metadata", async () => {
