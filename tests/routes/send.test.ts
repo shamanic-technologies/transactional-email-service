@@ -770,3 +770,66 @@ describe("POST /send — existing dedup cadences unchanged (regression)", () => 
     expect(mockOnConflictDoNothing).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /send — brand_daily_budget_changed staff notification", () => {
+  it("delivers to the staff recipient list, never to the customer from x-user-id", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "brand_daily_budget_changed",
+        metadata: { brandName: "Acme", previousBudget: "50", newBudget: "0" },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.to).toBe("kevin@distribute.you");
+    expect(body.to).not.toBe("customer@example.com");
+  });
+
+  it("enriches metadata with the acting user's email", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("actor@example.com");
+
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "brand_daily_budget_changed", metadata: { brandName: "Acme" } });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.metadata).toMatchObject({ brandName: "Acme", email: "actor@example.com" });
+  });
+
+  it("applies no dedup — two sends on the same day both deliver", async () => {
+    const first = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_alpha")
+      .send({ eventType: "brand_daily_budget_changed", metadata: { newBudget: "80" } });
+
+    const second = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_alpha")
+      .send({ eventType: "brand_daily_budget_changed", metadata: { newBudget: "0" } });
+
+    expect(first.body.results[0].sent).toBe(true);
+    expect(second.body.results[0].sent).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    for (const call of mockValues.mock.calls) {
+      expect(call[0].dedupKey).toBeNull();
+    }
+    expect(mockOnConflictDoNothing).not.toHaveBeenCalled();
+  });
+});

@@ -24,9 +24,16 @@ const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_
 // Event types deduped per org × brand × calendar month (one nudge per brand per month)
 const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
 
-// Events where recipient is hardcoded to admin
+// Events where recipient is hardcoded to admin.
+// brand_daily_budget_changed is emitted by billing-service on every real change to a
+// brand's daily budget. It belongs to no dedup set above, so every change notifies.
 const ADMIN_EMAILS = ["kevin@distribute.you"];
-const ADMIN_NOTIFICATION_EVENTS = new Set(["signup_notification", "signin_notification", "user_active"]);
+const ADMIN_NOTIFICATION_EVENTS = new Set([
+  "signup_notification",
+  "signin_notification",
+  "user_active",
+  "brand_daily_budget_changed",
+]);
 
 
 function getTodayDate(): string {
