@@ -192,11 +192,13 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | Daily per user | `user_active` | `{orgId}:{eventType}:{userId}:{date}` |
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | Monthly per brand | `audience_fully_contacted` | `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}` |
-| None (repeatable) | Any event not listed above | — |
+| None (repeatable) | `brand_daily_budget_changed`, and any event not listed above | — |
 
 Monthly per-brand dedup caps a send to at most once per org per brand per calendar month. Brand and month derive entirely from the existing request (`x-brand-id` header, or `brandIds` body field). A send in a new calendar month, or for a different brand, goes through; a repeat within the same brand and month returns `{ sent: false, reason: "duplicate" }`. If no brand identity is present the event falls through to no-dedup (repeatable).
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`) are always routed to the admin emails (`kevin@distribute.you`) regardless of the caller's identity.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`) are always routed to the admin emails (`kevin@distribute.you`) regardless of the caller's identity. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one.
+
+`brand_daily_budget_changed` is emitted by billing-service on every real change to a brand's daily budget. It carries no dedup, so two changes on the same day produce two notifications.
 
 ## Tech Stack
 
