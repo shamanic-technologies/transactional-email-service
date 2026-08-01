@@ -10,7 +10,7 @@ All protected endpoints require these headers:
 - `x-user-id` — internal user UUID from client-service
 - `x-run-id` — caller's run ID
 
-**Platform endpoints** (`/platform-*`) only require `x-api-key` — no identity headers. Use these for cold-start deployment without a user session.
+**Platform endpoints** (`/platform-*`) are for machine callers with no end-user session. `PUT /platform-templates` requires `x-api-key` only. `POST /platform-send` requires `x-api-key` and `x-org-id`; `x-user-id` and `x-run-id` are honoured when present but never required, and are never substituted with a placeholder when absent.
 
 Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-campaign-id` — campaign ID
@@ -51,6 +51,30 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | Status | Condition |
 | ------ | --------- |
 | 400    | Missing required headers (`x-org-id`, `x-user-id`, `x-run-id`) or missing `eventType` |
+| 404    | No template found for the given `eventType` |
+
+### `POST /platform-send`
+
+Same body, dedup, template resolution, run tracking and response shape as `POST /send`, for callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.
+
+Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`), so no request on this path can reach a customer. `recipientEmail` and `bccEmails` are rejected for the same reason.
+
+With no acting user, the `email_events` row stores `user_id = NULL`, the runs-service run is created org-only, no `x-user-id` is forwarded downstream, and no actor email is added to metadata.
+
+```bash
+curl -X POST "$TRANSACTIONAL_EMAIL_SERVICE_URL/platform-send" \
+  -H "x-api-key: $TRANSACTIONAL_EMAIL_SERVICE_API_KEY" \
+  -H "x-org-id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"eventType":"payment_method_removed","metadata":{"cardLast4":"4242","remainingChargeableCards":"0"}}'
+```
+
+**Error responses:**
+
+| Status | Condition |
+| ------ | --------- |
+| 400    | Missing `x-org-id`, missing `eventType`, a non-staff-bound `eventType`, or `recipientEmail`/`bccEmails` supplied |
+| 401    | Missing or invalid `x-api-key` |
 | 404    | No template found for the given `eventType` |
 
 ### `GET /stats`
@@ -192,13 +216,15 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | Daily per user | `user_active` | `{orgId}:{eventType}:{userId}:{date}` |
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | Monthly per brand | `audience_fully_contacted` | `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}` |
-| None (repeatable) | `brand_daily_budget_changed`, and any event not listed above | — |
+| None (repeatable) | `brand_daily_budget_changed`, `payment_method_removed`, and any event not listed above | — |
 
 Monthly per-brand dedup caps a send to at most once per org per brand per calendar month. Brand and month derive entirely from the existing request (`x-brand-id` header, or `brandIds` body field). A send in a new calendar month, or for a different brand, goes through; a repeat within the same brand and month returns `{ sent: false, reason: "duplicate" }`. If no brand identity is present the event falls through to no-dedup (repeatable).
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`) are always routed to the admin emails (`kevin@distribute.you`) regardless of the caller's identity. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`) are always routed to the admin emails (`kevin@distribute.you`) regardless of the caller's identity. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
 
 `brand_daily_budget_changed` is emitted by billing-service on every real change to a brand's daily budget. It carries no dedup, so two changes on the same day produce two notifications.
+
+`payment_method_removed` is emitted by stripe-service when a customer detaches a card in Stripe's billing portal. There is no acting user of ours, so it arrives on `POST /platform-send`. It carries no dedup: losing one of two cards and going to zero chargeable cards are different situations and staff needs both.
 
 ## Tech Stack
 
@@ -265,11 +291,11 @@ src/
     runs-client.ts      # Runs service client (create/update runs)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
   middleware/
-    auth.ts             # API key + identity header authentication
+    auth.ts             # API key + identity header authentication (full identity, or org-only for machine callers)
   routes/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint
-    send.ts             # POST /send endpoint with dedup logic
+    send.ts             # POST /send + POST /platform-send endpoints with dedup logic
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer

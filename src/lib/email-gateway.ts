@@ -10,7 +10,8 @@ interface SendEmailParams {
   textBody: string;
   tag: string;
   orgId: string;
-  userId: string;
+  /** Acting user, when there is one. Omitted for user-less machine callers. */
+  userId?: string;
   runId: string;
   brandIds?: string[];
   campaignId?: string;
@@ -60,9 +61,9 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     "Content-Type": "application/json",
     "X-API-Key": EMAIL_GATEWAY_SERVICE_API_KEY,
     "x-org-id": params.orgId,
-    "x-user-id": params.userId,
     "x-run-id": params.runId,
   };
+  if (params.userId) headers["x-user-id"] = params.userId;
   if (params.workflowHeaders?.campaignId) headers["x-campaign-id"] = params.workflowHeaders.campaignId;
   if (params.workflowHeaders?.brandId) headers["x-brand-id"] = params.workflowHeaders.brandId;
   if (params.workflowHeaders?.workflowSlug) headers["x-workflow-slug"] = params.workflowHeaders.workflowSlug;

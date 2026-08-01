@@ -7,7 +7,9 @@ export const emailEvents = pgTable(
     eventType: text("event_type").notNull(),
     recipientEmail: text("recipient_email").notNull(),
     dedupKey: text("dedup_key"),
-    userId: text("user_id").notNull(),
+    // Null when the send had no acting user (machine caller — e.g. a Stripe
+    // webhook observed outside our product). Never a placeholder id.
+    userId: text("user_id"),
     orgId: text("org_id").notNull(),
     status: text("status").notNull().default("pending"),
     errorMessage: text("error_message"),

@@ -1,6 +1,6 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
-import { requireApiKey, requireIdentityHeaders, type IdentityLocals } from "../middleware/auth.js";
+import { requireApiKey, requireIdentityHeaders, requireOrgIdOnly, type PlatformIdentityLocals } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { emailEvents } from "../db/schema.js";
 import { getTemplate } from "../templates/index.js";
@@ -27,12 +27,16 @@ const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
 // Events where recipient is hardcoded to admin.
 // brand_daily_budget_changed is emitted by billing-service on every real change to a
 // brand's daily budget. It belongs to no dedup set above, so every change notifies.
+// payment_method_removed is emitted by stripe-service when a customer detaches a card
+// inside Stripe's billing portal. It belongs to no dedup set above, so every removal
+// notifies — losing one of two cards and going to zero are different situations.
 const ADMIN_EMAILS = ["kevin@distribute.you"];
 const ADMIN_NOTIFICATION_EVENTS = new Set([
   "signup_notification",
   "signin_notification",
   "user_active",
   "brand_daily_budget_changed",
+  "payment_method_removed",
 ]);
 
 
@@ -86,7 +90,7 @@ function buildDedupKey(orgId: string, eventType: string, req: { userId?: string;
   return null; // repeatable event, no dedup
 }
 
-router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => {
+async function handleSend(req: Request, res: Response) {
   try {
     const parsed = SendRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -95,7 +99,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     }
 
     const body = parsed.data;
-    const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug, audienceId } = res.locals as IdentityLocals;
+    const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug, audienceId } = res.locals as PlatformIdentityLocals;
 
     // Headers take precedence over body for campaign/brand tracking
     const effectiveCampaignId = headerCampaignId || body.campaignId;
@@ -119,14 +123,19 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
       recipientEmails = [...ADMIN_EMAILS];
     } else if (body.recipientEmail) {
       recipientEmails = [body.recipientEmail];
-    } else {
+    } else if (userId && runId) {
       const email = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
       recipientEmails = [email];
+    } else {
+      res.status(400).json({ error: `No recipient for '${body.eventType}': supply recipientEmail or call with an acting user (x-user-id + x-run-id)` });
+      return;
     }
 
-    // For admin notifications, enrich metadata with the user's email
+    // For admin notifications, enrich metadata with the acting user's email.
+    // A machine caller (Stripe webhook, cron) has no acting user — the honest
+    // metadata is then whatever the caller supplied, never a placeholder actor.
     const metadata = { ...body.metadata };
-    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && !metadata.email) {
+    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && runId && !metadata.email) {
       try {
         const userEmail = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
         metadata.email = userEmail;
@@ -189,7 +198,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: recipientDedupKey,
-              userId,
+              userId: userId ?? null,
               orgId,
               status: "pending",
               metadata: metadata || null,
@@ -218,7 +227,7 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
               eventType: body.eventType,
               recipientEmail: email,
               dedupKey: null,
-              userId,
+              userId: userId ?? null,
               orgId,
               status: "pending",
               metadata: metadata || null,
@@ -292,6 +301,38 @@ router.post("/send", requireApiKey, requireIdentityHeaders, async (req, res) => 
     console.error("Send lifecycle email error:", error);
     res.status(500).json({ error: error.message || "Failed to send lifecycle email" });
   }
-});
+}
+
+/**
+ * Platform send — for machine callers that hold an organisation and an API key
+ * but no acting user (a Stripe webhook, a cron). Restricted to staff-bound
+ * event types so no request on this path can reach a customer.
+ */
+async function handlePlatformSend(req: Request, res: Response) {
+  const eventType = (req.body as { eventType?: unknown } | undefined)?.eventType;
+
+  if (typeof eventType !== "string" || !ADMIN_NOTIFICATION_EVENTS.has(eventType)) {
+    res.status(400).json({
+      error: `platform-send accepts staff-bound event types only: ${[...ADMIN_NOTIFICATION_EVENTS].sort().join(", ")}`,
+    });
+    return;
+  }
+
+  const body = req.body as { recipientEmail?: unknown; bccEmails?: unknown };
+  if (body.recipientEmail !== undefined || body.bccEmails !== undefined) {
+    res.status(400).json({
+      error: "platform-send does not accept recipientEmail or bccEmails: staff-bound notifications are delivered to the internal staff recipient list only",
+    });
+    return;
+  }
+
+  await handleSend(req, res);
+}
+
+// Authenticated route — requires an acting user (x-org-id, x-user-id, x-run-id)
+router.post("/send", requireApiKey, requireIdentityHeaders, handleSend);
+
+// Platform route — API key + organisation only, for callers with no end user
+router.post("/platform-send", requireApiKey, requireOrgIdOnly, handlePlatformSend);
 
 export default router;
