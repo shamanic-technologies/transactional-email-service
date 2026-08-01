@@ -833,3 +833,172 @@ describe("POST /send — brand_daily_budget_changed staff notification", () => {
     expect(mockOnConflictDoNothing).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /platform-send — payment_method_removed (no acting user)", () => {
+  const ORG_ONLY = { "x-org-id": "org_456" };
+
+  it("sends with an org and an API key but no end-user identity", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({
+        eventType: "payment_method_removed",
+        metadata: { organizationId: "org_456", cardBrand: "visa", cardLast4: "4242", remainingChargeableCards: "0" },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+  });
+
+  it("delivers to the staff recipient list, never to the customer", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242" } });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.to).toBe("kevin@distribute.you");
+    expect(resolveUserEmail).not.toHaveBeenCalled();
+  });
+
+  it("stores no user and forwards no x-user-id when there is no acting user", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242" } });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.userId).toBeNull();
+    expect(insertValues.metadata).not.toHaveProperty("email");
+
+    expect(vi.mocked(createRun).mock.calls[0][0]).toMatchObject({ orgId: "org_456" });
+    expect(vi.mocked(createRun).mock.calls[0][0].userId).toBeUndefined();
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(options.headers["x-user-id"]).toBeUndefined();
+    expect(options.headers["x-org-id"]).toBe("org_456");
+  });
+
+  it("applies no dedup — every removal sends", async () => {
+    const first = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242", remainingChargeableCards: "1" } });
+
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "1881", remainingChargeableCards: "0" } });
+
+    expect(first.body.results[0].sent).toBe(true);
+    expect(second.body.results[0].sent).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    for (const call of mockValues.mock.calls) {
+      expect(call[0].dedupKey).toBeNull();
+    }
+    expect(mockOnConflictDoNothing).not.toHaveBeenCalled();
+  });
+
+  it("honours x-user-id and x-run-id when the caller does have them", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("actor@example.com");
+
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242" } });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.userId).toBe("user_123");
+    expect(insertValues.metadata).toMatchObject({ email: "actor@example.com" });
+  });
+
+  it("rejects a request with no API key", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed" });
+
+    expect(res.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request with no x-org-id", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .send({ eventType: "payment_method_removed" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("x-org-id");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a customer-bound event type", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "welcome", recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects recipientEmail and bccEmails", async () => {
+    const withRecipient = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", recipientEmail: "customer@example.com" });
+
+    const withBcc = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", bccEmails: ["customer@example.com"] });
+
+    expect(withRecipient.status).toBe(400);
+    expect(withBcc.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /send — payment_method_removed staff routing", () => {
+  it("delivers to staff, not the customer, when called with an acting user", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+  });
+
+  it("still requires the full identity headers on /send", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .send({ eventType: "payment_method_removed" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("x-user-id");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

@@ -20,7 +20,7 @@ export const SendRequestSchema = z
         "Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. " +
         "Monthly per-brand events (audience_fully_contacted): sent at most once per org per brand per calendar month. " +
         "Any other event type has NO dedup and will send every time. " +
-        "Staff notification events (signup_notification, signin_notification, user_active, brand_daily_budget_changed) are delivered to the internal staff recipient list, never to the customer.",
+        "Staff notification events (signup_notification, signin_notification, user_active, brand_daily_budget_changed, payment_method_removed) are delivered to the internal staff recipient list, never to the customer.",
     }),
     brandIds: z.array(z.string()).optional().openapi({ description: "Brand IDs for tracking (one or more UUIDs)" }),
     campaignId: z.string().optional().openapi({ description: "Campaign ID for tracking" }),
@@ -234,8 +234,8 @@ registry.registerPath({
     "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
     "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n" +
     "- **Monthly per-brand** (audience_fully_contacted): sent at most once per org per brand per calendar month. Brand + month derive from the existing request (x-brand-id header / brandIds body). Dedup key: `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}`.\n" +
-    "- **No dedup** (all other event types, including brand_daily_budget_changed): sends every time with no dedup.\n\n" +
-    "**Staff routing:** `signup_notification`, `signin_notification`, `user_active` and `brand_daily_budget_changed` are delivered to the internal staff recipient list instead of the customer resolved from `x-user-id`. Their metadata is enriched with the acting user's email under `email` when not already supplied.\n\n" +
+    "- **No dedup** (all other event types, including brand_daily_budget_changed and payment_method_removed): sends every time with no dedup.\n\n" +
+    "**Staff routing:** `signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed` and `payment_method_removed` are delivered to the internal staff recipient list instead of the customer resolved from `x-user-id`. Their metadata is enriched with the acting user's email under `email` when not already supplied — a caller with no acting user sends no actor metadata at all.\n\n" +
     "`bccEmails` are delivered as provider-level BCC recipients on the primary email. They are not rendered into templates and do not affect primary-recipient deduplication.\n\n" +
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
@@ -254,6 +254,49 @@ registry.registerPath({
     },
     400: {
       description: "Validation error or missing identity headers",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    401: {
+      description: "Unauthorized - invalid or missing API key",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/platform-send",
+  summary: "Send a staff-bound notification without an acting user",
+  description:
+    "For machine callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.\n\n" +
+    "**Required headers:** `x-org-id`. `x-user-id` and `x-run-id` are honoured when present but never required, and are never substituted with a placeholder when absent.\n\n" +
+    "**Accepted event types:** staff-bound events only (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`). Any other event type is rejected with 400, so no request on this path can reach a customer.\n\n" +
+    "`recipientEmail` and `bccEmails` are rejected with 400: delivery is to the internal staff recipient list only.\n\n" +
+    "Dedup, template resolution, run tracking and response shape are identical to `POST /send`. `payment_method_removed` belongs to no dedup set, so every occurrence sends.",
+  tags: ["Email"],
+  security: [{ apiKey: [] }],
+  parameters: [
+    orgIdHeader,
+    { ...userIdHeader, required: false, description: "Internal user UUID from client-service. Optional on this route — omit it when there is no acting user." },
+    { ...runIdHeader, required: false, description: "Caller's run ID. Optional on this route — omit it when there is no parent run." },
+    campaignIdHeader,
+    brandIdHeader,
+    workflowSlugHeader,
+    featureSlugHeader,
+  ],
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SendRequestSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Email send results",
+      content: { "application/json": { schema: SendResponseSchema } },
+    },
+    400: {
+      description: "Validation error, missing x-org-id, non-staff event type, or recipientEmail/bccEmails supplied",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     401: {

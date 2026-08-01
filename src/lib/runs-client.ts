@@ -27,7 +27,8 @@ export interface Run {
 
 export interface CreateRunParams {
   orgId: string;
-  userId: string;
+  /** Acting user, when there is one. runs-service treats x-user-id as optional. */
+  userId?: string;
   serviceName: string;
   taskName: string;
   brandIds?: string[];
@@ -98,7 +99,7 @@ export async function createRun(params: CreateRunParams): Promise<Run> {
 export async function updateRun(
   runId: string,
   status: "completed" | "failed",
-  identity: { orgId: string; userId: string },
+  identity: { orgId: string; userId?: string },
   workflowHeaders?: WorkflowHeaders
 ): Promise<Run> {
   return runsRequest<Run>(`/v1/runs/${runId}`, {
