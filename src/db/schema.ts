@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, integer } from "drizzle-orm/pg-core";
 
 export const emailEvents = pgTable(
   "email_events",
@@ -51,3 +51,77 @@ export const emailTemplates = pgTable(
 
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
+
+/**
+ * Platform-level (staff-owned) mailing lists. Deliberately NOT org-scoped: a
+ * list such as `investors` belongs to the platform, not to a customer
+ * organisation, and its members are bare email addresses with no source
+ * resource. An organisation id still travels on the request, but only as the
+ * sending identity used downstream (Postmark key + from address resolution).
+ */
+export const mailingLists = pgTable(
+  "mailing_lists",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("idx_mailing_lists_slug").on(table.slug)]
+);
+
+export type MailingList = typeof mailingLists.$inferSelect;
+
+/**
+ * A subscriber is one bare email address on one list. Opt-out state is NOT
+ * stored here: Postmark's broadcast stream owns the suppression list, and the
+ * read path reconciles against it (via email-gateway) so the service can never
+ * display a suppressed address as subscribed.
+ */
+export const mailingListSubscribers = pgTable(
+  "mailing_list_subscribers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => mailingLists.id, { onDelete: "cascade" }),
+    // Always stored lower-cased; the parser normalises before insert.
+    email: text("email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_mailing_list_subscribers_list_email").on(table.listId, table.email),
+  ]
+);
+
+export type MailingListSubscriber = typeof mailingListSubscribers.$inferSelect;
+
+/**
+ * One written update broadcast to a list. Stores the body exactly as sent
+ * (rendered HTML) alongside the markdown the author typed, plus the outcome of
+ * every recipient send — a partial failure is recorded as `partial`, never as a
+ * clean success.
+ */
+export const mailingListUpdates = pgTable(
+  "mailing_list_updates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => mailingLists.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    /** Markdown as authored by staff. */
+    bodyMarkdown: text("body_markdown").notNull(),
+    /** Rendered HTML, byte-identical to what recipients received. */
+    htmlBody: text("html_body").notNull(),
+    /** "sent" — every recipient succeeded. "partial" — at least one failed. */
+    status: text("status").notNull(),
+    /** Recipients the send actually reached. */
+    recipientCount: integer("recipient_count").notNull(),
+    /** [{ email, reason }] for every recipient whose send failed. */
+    failures: jsonb("failures").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_mailing_list_updates_list").on(table.listId, table.sentAt)]
+);
+
+export type MailingListUpdate = typeof mailingListUpdates.$inferSelect;
