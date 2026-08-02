@@ -11,6 +11,7 @@ import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import {
   AddSubscribersRequestSchema,
+  PreviewUpdateRequestSchema,
   SendUpdateRequestSchema,
 } from "../schemas.js";
 
@@ -215,6 +216,43 @@ router.delete("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnl
     console.error("Remove subscriber error:", error);
     res.status(500).json({ error: error.message || "Failed to remove subscriber" });
   }
+});
+
+/**
+ * POST /mailing-lists/updates/preview
+ *
+ * Renders a draft the way a recipient will receive it, and does nothing else:
+ * no message goes out, no update row is written, no suppression list is read.
+ *
+ * It exists because the author of an update could not see it until it had
+ * already reached everyone. The admin console used to render its own preview,
+ * which is the failure this replaces — that second rendering drifted the moment
+ * this service grew its inline-styled renderer, so the console showed bare
+ * markup while investors received a laid-out email, and nobody noticed until
+ * someone looked at the screen. A copy of the renderer anywhere else drifts the
+ * same way, so the preview is served from the same call `renderUpdateBody` a
+ * real send makes and from nowhere else.
+ *
+ * No list slug: the body renders identically whoever receives it, and asking
+ * for a list would imply otherwise. No acting user either — nothing here
+ * resolves a provider key, sends, or spends, so requiring one would be a guard
+ * against nothing.
+ *
+ * Images no client can render are REPORTED rather than refused. A send is
+ * refused because the alternative is a broken placeholder in every inbox; a
+ * preview's whole job is to show the author what they have, and the browser
+ * renders SVG happily, which is exactly the trap. So the body still renders and
+ * the offending URLs come back beside it.
+ */
+router.post("/mailing-lists/updates/preview", requireApiKey, requireOrgIdOnly, (req, res) => {
+  const parsed = PreviewUpdateRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { htmlBody, textBody } = renderUpdateBody(parsed.data.body);
+  res.json({ htmlBody, textBody, unrenderableImages: findUnrenderableImages(parsed.data.body) });
 });
 
 /**
