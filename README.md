@@ -430,4 +430,5 @@ tests/
   ...
 scripts/
   generate-openapi.ts   # OpenAPI spec generation via zod-to-openapi
+  bench-suppression.mts # Times the subscribers read against a stand-in for key-service and Postmark
 ```
