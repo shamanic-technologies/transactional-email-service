@@ -259,6 +259,18 @@ export function findUnrenderableImages(markdown: string): string[] {
   return [...new Set(hrefs.filter((href) => UNRENDERABLE_IMAGE_RE.test(href.trim())))];
 }
 
+/**
+ * The one wording for "this body carries an image no mail client will render".
+ * The send refuses with it and the preview reports it, so an author reads the
+ * same sentence at preview time that would have stopped the send.
+ */
+export function unrenderableImageError(images: string[]): string {
+  return (
+    `Email clients do not render SVG images. Gmail, Outlook and Yahoo show the alt text instead. ` +
+    `Use a PNG or JPEG for: ${images.join(", ")}`
+  );
+}
+
 export function renderUpdateBody(markdown: string): { htmlBody: string; textBody: string } {
   const content = renderer.parse(markdown, { async: false });
 

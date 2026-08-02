@@ -116,7 +116,7 @@ import express from "express";
 import mailingListsRoutes from "../../src/routes/mailing-lists.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
 import { fetchSuppressed } from "../../src/lib/suppression.js";
-import { updateRun } from "../../src/lib/runs-client.js";
+import { createRun, updateRun } from "../../src/lib/runs-client.js";
 
 const app = express();
 app.use(express.json());
@@ -295,6 +295,117 @@ describe("DELETE /mailing-lists/:slug/subscribers", () => {
     seedList(["ada@example.com"]);
     const res = await request(app).delete("/mailing-lists/investors/subscribers").set(AUTH);
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /mailing-lists/updates/preview", () => {
+  /** Bodies that between them exercise every construct the renderer styles. */
+  const BODIES = [
+    "## Q3 update\n\nWe **shipped** the thing, and [here is why](https://distribute.you).",
+    "| Metric | Value |\n| --- | --- |\n| ARR | $1.2M |\n| Runway | 19 months |",
+    "> Investors asked for a shorter update.\n\n- One\n- Two\n\n![chart](https://cdn.example.com/chart.png)",
+    "plain prose with no markup at all",
+  ];
+
+  it("returns byte-for-byte what a real send of the same body would produce", async () => {
+    for (const body of BODIES) {
+      vi.clearAllMocks();
+      seedList(["a@example.com"]);
+      store.inserted.updates = [];
+
+      const preview = await request(app)
+        .post("/mailing-lists/updates/preview")
+        .set(AUTH)
+        .send({ body });
+
+      const send = await request(app)
+        .post("/mailing-lists/investors/updates")
+        .set(AUTH)
+        .send({ subject: "Q3 update", body });
+
+      expect(preview.status).toBe(200);
+      expect(send.status).toBe(200);
+
+      const sent = (sendEmail as any).mock.calls[0][0];
+      expect(preview.body.htmlBody).toBe(sent.htmlBody);
+      expect(preview.body.textBody).toBe(sent.textBody);
+      // And what was recorded as sent, which is what the history replays.
+      expect(preview.body.htmlBody).toBe(store.inserted.updates[0].htmlBody);
+    }
+  });
+
+  it("leaves no trace: nothing sent, nothing stored, no list or provider read", async () => {
+    seedList(["a@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ body: "## Hello" });
+
+    expect(res.status).toBe(200);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(fetchSuppressed).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+    expect(store.inserted.updates).toEqual([]);
+    expect(store.inserted.lists).toEqual([]);
+    expect(store.inserted.subscribers).toEqual([]);
+  });
+
+  it("previews a body with no list in existence at all", async () => {
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ body: "## Draft" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.htmlBody).toContain("Draft</h2>");
+  });
+
+  it("reports an SVG with the wording the send refuses it with, and still previews the rest", async () => {
+    const body = "## Q3\n\n![Logo](https://distribute.you/brand/icon.svg)";
+    seedList(["a@example.com"]);
+
+    const preview = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body });
+    const send = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3", body });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.unrenderableImages).toEqual(["https://distribute.you/brand/icon.svg"]);
+    expect(send.status).toBe(400);
+    expect(preview.body.blockingError).toBe(send.body.error);
+    // The author still reads the rest of the draft rather than an error page.
+    expect(preview.body.htmlBody).toContain("Q3</h2>");
+  });
+
+  it("reports a clean body as having nothing blocking it", async () => {
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ body: "![Logo](https://distribute.you/brand/icon.png)" });
+
+    expect(res.body.unrenderableImages).toEqual([]);
+    expect(res.body.blockingError).toBeNull();
+  });
+
+  it("rejects an empty body", async () => {
+    const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: "" });
+    expect(res.status).toBe(400);
+  });
+
+  it("is staff-only, like every other mailing-list operation", async () => {
+    const noKey = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set("x-org-id", "org_456")
+      .send({ body: "hi" });
+    expect(noKey.status).toBe(401);
+
+    const noOrg = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set("X-API-Key", "test-service-key")
+      .send({ body: "hi" });
+    expect(noOrg.status).toBe(400);
   });
 });
 

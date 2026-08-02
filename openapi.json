@@ -409,6 +409,50 @@
           "removed"
         ]
       },
+      "PreviewUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "htmlBody": {
+            "type": "string",
+            "description": "The HTML part a recipient would receive for this body, byte-for-byte. email-gateway appends its discreet unsubscribe footer downstream, so the delivered message carries that one addition."
+          },
+          "textBody": {
+            "type": "string",
+            "description": "The plain-text part a recipient would receive"
+          },
+          "unrenderableImages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Image URLs mail clients cannot render (SVG). Empty when the body is clean."
+          },
+          "blockingError": {
+            "type": "string",
+            "nullable": true,
+            "description": "The reason a real send of this body would be refused, worded exactly as the send refuses it, or null when the body would send."
+          }
+        },
+        "required": [
+          "htmlBody",
+          "textBody",
+          "unrenderableImages",
+          "blockingError"
+        ]
+      },
+      "PreviewUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The draft update body, authored as markdown — the same field `POST /mailing-lists/{slug}/updates` takes. Rendered by the code that renders a real send, so what comes back is what a recipient would receive."
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
       "SendUpdateResponse": {
         "type": "object",
         "properties": {
@@ -1404,6 +1448,73 @@
           },
           "404": {
             "description": "No such list, or the address is not on it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/updates/preview": {
+      "post": {
+        "summary": "Render an unsent update exactly as a recipient would receive it",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. Renders a draft body through the same code that renders a real send, so an author sees the message before it goes out rather than after. Nothing is sent, no update is recorded, and no list is read — the body is the whole input, so no list slug is needed. An image no mail client renders is reported in `unrenderableImages` with the refusal wording the send would use, rather than the preview failing.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The body as a recipient would receive it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
             "content": {
               "application/json": {
                 "schema": {

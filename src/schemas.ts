@@ -209,6 +209,35 @@ export const SendUpdateRequestSchema = z
   })
   .openapi("SendUpdateRequest");
 
+export const PreviewUpdateRequestSchema = z
+  .object({
+    body: z.string().min(1).openapi({
+      description:
+        "The draft update body, authored as markdown — the same field `POST /mailing-lists/{slug}/updates` takes. Rendered by the code that renders a real send, so what comes back is what a recipient would receive.",
+    }),
+  })
+  .openapi("PreviewUpdateRequest");
+
+export const PreviewUpdateResponseSchema = z
+  .object({
+    htmlBody: z.string().openapi({
+      description:
+        "The HTML part a recipient would receive for this body, byte-for-byte. email-gateway appends its discreet unsubscribe footer downstream, so the delivered message carries that one addition.",
+    }),
+    textBody: z.string().openapi({ description: "The plain-text part a recipient would receive" }),
+    unrenderableImages: z.array(z.string()).openapi({
+      description: "Image URLs mail clients cannot render (SVG). Empty when the body is clean.",
+    }),
+    blockingError: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "The reason a real send of this body would be refused, worded exactly as the send refuses it, or null when the body would send.",
+      }),
+  })
+  .openapi("PreviewUpdateResponse");
+
 export const UpdateFailureSchema = z
   .object({
     email: z.string(),
@@ -591,6 +620,28 @@ registry.registerPath({
     400: { description: "Invalid slug or missing email", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such list, or the address is not on it", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/updates/preview",
+  summary: "Render an unsent update exactly as a recipient would receive it",
+  description:
+    `${mailingListsDescription} Renders a draft body through the same code that renders a real send, so an author ` +
+    "sees the message before it goes out rather than after. Nothing is sent, no update is recorded, and no list is " +
+    "read — the body is the whole input, so no list slug is needed. An image no mail client renders is reported in " +
+    "`unrenderableImages` with the refusal wording the send would use, rather than the preview failing.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    body: { required: true, content: { "application/json": { schema: PreviewUpdateRequestSchema } } },
+  },
+  parameters: [platformOrgIdHeader],
+  responses: {
+    200: { description: "The body as a recipient would receive it", content: { "application/json": { schema: PreviewUpdateResponseSchema } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

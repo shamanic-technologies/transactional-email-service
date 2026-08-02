@@ -4,13 +4,14 @@ import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "..
 import { db } from "../db/index.js";
 import { mailingLists, mailingListSubscribers, mailingListUpdates } from "../db/schema.js";
 import { parseAddressBlob } from "../lib/address-blob.js";
-import { findUnrenderableImages, renderUpdateBody } from "../lib/mailing-list-body.js";
+import { findUnrenderableImages, renderUpdateBody, unrenderableImageError } from "../lib/mailing-list-body.js";
 import { fetchSuppressed } from "../lib/suppression.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import {
   AddSubscribersRequestSchema,
+  PreviewUpdateRequestSchema,
   SendUpdateRequestSchema,
 } from "../schemas.js";
 
@@ -218,6 +219,44 @@ router.delete("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnl
 });
 
 /**
+ * POST /mailing-lists/updates/preview
+ * Renders a draft body exactly as a recipient would receive it, so an author
+ * reads the message before it goes out instead of after.
+ *
+ * It is deliberately the same `renderUpdateBody` the send below calls: a
+ * preview rendered by a second implementation drifts away from the send the
+ * first time either changes, which is what a separate console-side preview did.
+ *
+ * Nothing is sent, no update row is written and no list is read — the body is
+ * the whole input, so this carries no slug and never touches the provider's
+ * suppression list. The acting-user header the other routes need is for
+ * key-service and billing, neither of which a pure render reaches, so this one
+ * asks only for the same API key and organisation as the rest of the group.
+ *
+ * An image no mail client renders is reported rather than raised: the send
+ * refuses it, but an author previewing a draft needs to see the rest of the
+ * message alongside the reason, not an error instead of a preview.
+ */
+router.post("/mailing-lists/updates/preview", requireApiKey, requireOrgIdOnly, (req, res) => {
+  const parsed = PreviewUpdateRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { body } = parsed.data;
+  const { htmlBody, textBody } = renderUpdateBody(body);
+  const unrenderableImages = findUnrenderableImages(body);
+
+  res.json({
+    htmlBody,
+    textBody,
+    unrenderableImages,
+    blockingError: unrenderableImages.length > 0 ? unrenderableImageError(unrenderableImages) : null,
+  });
+});
+
+/**
  * POST /mailing-lists/:slug/updates
  * Sends the update to every member the provider is not suppressing — one
  * message per recipient — and records what was sent.
@@ -240,11 +279,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
   // knowably broken.
   const unrenderable = findUnrenderableImages(body);
   if (unrenderable.length > 0) {
-    res.status(400).json({
-      error:
-        `Email clients do not render SVG images. Gmail, Outlook and Yahoo show the alt text instead. ` +
-        `Use a PNG or JPEG for: ${unrenderable.join(", ")}`,
-    });
+    res.status(400).json({ error: unrenderableImageError(unrenderable) });
     return;
   }
 

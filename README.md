@@ -245,6 +245,33 @@ The blob may be comma-, semicolon-, tab- or newline-separated, and may mix bare 
 
 Returns `{ "slug": "investors", "email": "ada@fund.com", "removed": true }`, or 404 if the address is not on the list.
 
+#### `POST /mailing-lists/updates/preview`
+
+Renders an unsent draft exactly as a recipient would receive it, so an author can read the message before it goes out. Nothing is sent, no update is recorded, and no list is read — the body is the whole input, which is why there is no slug in the path.
+
+**Request body:**
+
+```json
+{ "body": "## Q3 update\n\nRevenue **doubled**." }
+```
+
+**Response:**
+
+```json
+{
+  "htmlBody": "<!doctype html>…",
+  "textBody": "## Q3 update\n\nRevenue **doubled**.",
+  "unrenderableImages": [],
+  "blockingError": null
+}
+```
+
+`htmlBody` is byte-for-byte what `POST /mailing-lists/{slug}/updates` would hand the gateway for the same body: both call one renderer, so a preview cannot drift away from the send. email-gateway appends its discreet unsubscribe footer downstream, which is the one thing the delivered message carries that this does not.
+
+An SVG is reported rather than raised: `unrenderableImages` names each URL and `blockingError` carries the exact sentence the send refuses it with, while `htmlBody` still shows the rest of the draft. A clean body returns an empty array and a null `blockingError`.
+
+Staff-only, same as the rest of the group: API key plus `x-org-id`. No `x-user-id` — that header exists for key-service and billing, and a render reaches neither.
+
 #### `POST /mailing-lists/{slug}/updates`
 
 Sends a written update to every member Postmark is not suppressing.
@@ -391,7 +418,7 @@ src/
   routes/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint
-    mailing-lists.ts    # Staff mailing lists: subscribers CRUD, send an update, read the history
+    mailing-lists.ts    # Staff mailing lists: subscribers CRUD, preview a draft, send an update, read the history
     send.ts             # POST /send + POST /platform-send endpoints with dedup logic
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
