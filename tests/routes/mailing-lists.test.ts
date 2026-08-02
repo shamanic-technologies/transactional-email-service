@@ -211,6 +211,16 @@ describe("GET /mailing-lists/:slug/subscribers", () => {
     ]);
   });
 
+  it("asks the provider only about the addresses on the list", async () => {
+    seedList(["a@example.com", "gone@example.com"]);
+
+    await request(app).get("/mailing-lists/investors/subscribers").set(AUTH);
+
+    const [, callerPath, emails] = (fetchSuppressed as any).mock.calls[0];
+    expect(callerPath).toBe("/mailing-lists/:slug/subscribers");
+    expect(emails).toEqual(["a@example.com", "gone@example.com"]);
+  });
+
   it("fails loud when provider suppression state cannot be read", async () => {
     seedList(["a@example.com"]);
     (fetchSuppressed as any).mockRejectedValue(new Error("Postmark suppression dump failed (500): boom"));
@@ -349,6 +359,17 @@ describe("POST /mailing-lists/:slug/updates", () => {
     expect(res.body.recipientCount).toBe(1);
     expect(res.body.skippedOptedOut).toEqual(["gone@example.com"]);
     expect((sendEmail as any).mock.calls.map((c: any[]) => c[0].to)).toEqual(["a@example.com"]);
+  });
+
+  it("re-checks the provider at send time rather than accepting a cached answer", async () => {
+    seedList(["a@example.com"]);
+
+    await request(app).post("/mailing-lists/investors/updates").set(AUTH).send({ subject: "s", body: "b" });
+
+    const [, callerPath, emails, options] = (fetchSuppressed as any).mock.calls[0];
+    expect(callerPath).toBe("/mailing-lists/:slug/updates");
+    expect(emails).toEqual(["a@example.com"]);
+    expect(options).toEqual({ maxAgeMs: 0 });
   });
 
   it("reports a partial failure with the failing address and reason, and does not record a clean success", async () => {
