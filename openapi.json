@@ -280,6 +280,286 @@
           "sourceOrgId",
           "targetOrgId"
         ]
+      },
+      "MailingListSubscribersResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "subscribers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailingListSubscriber"
+            }
+          }
+        },
+        "required": [
+          "slug",
+          "count",
+          "subscribers"
+        ]
+      },
+      "MailingListSubscriber": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "optedOut": {
+            "type": "boolean",
+            "description": "True when Postmark is suppressing sends to this address — the member used the native unsubscribe, complained, or hard-bounced. Read live from the Postmark broadcast stream's suppression list on every request; this service stores no opt-out flag of its own."
+          },
+          "optedOutReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Postmark's own reason: \"ManualSuppression\" (unsubscribed), \"SpamComplaint\" or \"HardBounce\". Null when not suppressed."
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "email",
+          "optedOut",
+          "optedOutReason",
+          "addedAt"
+        ]
+      },
+      "AddSubscribersResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses newly added to the list"
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses already on the list, or repeated inside the blob"
+          },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "reason"
+              ]
+            },
+            "description": "Fragments that could not be read as an email address"
+          }
+        },
+        "required": [
+          "slug",
+          "added",
+          "skipped",
+          "rejected"
+        ]
+      },
+      "AddSubscribersRequest": {
+        "type": "object",
+        "properties": {
+          "raw": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A pasted blob of email addresses. Comma-, semicolon-, tab- or newline-separated; `Name <email@example.com>` pairs are accepted. Duplicates and existing members are skipped, so re-pasting the same blob is a no-op."
+          }
+        },
+        "required": [
+          "raw"
+        ]
+      },
+      "RemoveSubscriberResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "removed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "email",
+          "removed"
+        ]
+      },
+      "SendUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "updateId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "sent",
+              "partial"
+            ]
+          },
+          "recipientCount": {
+            "type": "number",
+            "description": "Recipients the update actually reached"
+          },
+          "skippedOptedOut": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Members not mailed because the provider is suppressing them"
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateFailure"
+            },
+            "description": "Recipients whose send failed, with the provider's reason"
+          }
+        },
+        "required": [
+          "updateId",
+          "slug",
+          "subject",
+          "status",
+          "recipientCount",
+          "skippedOptedOut",
+          "failures"
+        ]
+      },
+      "UpdateFailure": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "reason"
+        ]
+      },
+      "SendUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The update body, authored as markdown — headings, bold, links, and `![alt](https://…)` inline images. Rendered to HTML for delivery; the markdown itself is sent as the plain-text part. A discreet unsubscribe is appended downstream by email-gateway; do not add one here."
+          }
+        },
+        "required": [
+          "subject",
+          "body"
+        ]
+      },
+      "MailingListUpdatesResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "updates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailingListUpdate"
+            }
+          }
+        },
+        "required": [
+          "slug",
+          "count",
+          "updates"
+        ]
+      },
+      "MailingListUpdate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown as authored"
+          },
+          "htmlBody": {
+            "type": "string",
+            "description": "Body as sent"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "sent",
+              "partial"
+            ]
+          },
+          "recipientCount": {
+            "type": "number"
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateFailure"
+            }
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "body",
+          "htmlBody",
+          "status",
+          "recipientCount",
+          "failures",
+          "sentAt"
+        ]
       }
     },
     "parameters": {},
@@ -831,6 +1111,493 @@
           },
           "401": {
             "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/subscribers": {
+      "get": {
+        "summary": "Read a mailing list",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. Each entry states whether the provider is currently suppressing it.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscribers with live opt-out state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListSubscribersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid slug or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Provider suppression state unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add addresses in bulk from a pasted blob",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. Parses the blob leniently and reports what was added, skipped and rejected. Creates the list on first use. Re-pasting the same blob is a no-op.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSubscribersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Add results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddSubscribersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove an address from a mailing list",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "email",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveSubscriberResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid slug or missing email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list, or the address is not on it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/updates": {
+      "post": {
+        "summary": "Send a written update to a mailing list",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. The caller supplies the subject and a markdown body (inline images supported); recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Send outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, empty list, or every subscriber opted out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Read the history of updates sent to a mailing list",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. Returns every update with its subject, the body as sent, when it went out, and how many people it reached.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Update history, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListUpdatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid slug or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
             "content": {
               "application/json": {
                 "schema": {

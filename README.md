@@ -1,6 +1,6 @@
 # Transactional Email Service
 
-Transactional email service that sends event-triggered emails. Resolves recipients via client-service, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
+Transactional email service that sends event-triggered emails. Resolves recipients via client-service, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway. Also hosts staff-owned mailing lists and the written updates broadcast to them.
 
 ## API
 
@@ -197,6 +197,87 @@ Re-assigns `email_events` rows from one org to another for a given brand. Only u
 }
 ```
 
+### Mailing lists (staff-only)
+
+A mailing list is a platform-level list of bare email addresses — `investors` is the first one, a changelog or customer newsletter list is the obvious next. Lists belong to the platform, not to a customer organisation, and nothing here is filtered by org. All five routes require `x-api-key`, `x-org-id` and `x-user-id`; `x-org-id` and `x-user-id` are the **sending identity** only (key-service resolves the Postmark token and stream against them, and a send is billed to that organisation).
+
+Opt-out state is never stored here. Postmark's broadcast stream owns the suppression list — the native one-click unsubscribe, a spam complaint and a hard bounce all write to it — and both the list read and the send read it back live from Postmark, using the platform token resolved through key-service. postmark-service's own mirror is not usable for this: it is org-scoped and only covers addresses already messaged under that org, so it reports a suppressed address as subscribed.
+
+#### `GET /mailing-lists/{slug}/subscribers`
+
+```json
+{
+  "slug": "investors",
+  "count": 2,
+  "subscribers": [
+    { "email": "a@fund.com", "optedOut": false, "optedOutReason": null, "addedAt": "2026-08-02T03:23:26.301Z" },
+    { "email": "b@fund.com", "optedOut": true, "optedOutReason": "HardBounce", "addedAt": "2026-08-02T03:23:26.379Z" }
+  ]
+}
+```
+
+`optedOutReason` is Postmark's own wording: `ManualSuppression` (unsubscribed), `SpamComplaint` or `HardBounce`.
+
+#### `POST /mailing-lists/{slug}/subscribers`
+
+Adds every readable address from a pasted blob, and creates the list on first use.
+
+**Request body:** `{ "raw": "Ada <ada@fund.com>; bob@fund.com,\nnot-an-email" }`
+
+The blob may be comma-, semicolon-, tab- or newline-separated, and may mix bare addresses with `Name <email>` pairs. Addresses are lower-cased. Duplicates inside the blob and addresses already on the list are skipped, so re-pasting the same blob is a no-op.
+
+**Response:**
+
+```json
+{
+  "slug": "investors",
+  "added": ["ada@fund.com", "bob@fund.com"],
+  "skipped": [],
+  "rejected": [{ "value": "not-an-email", "reason": "not a valid email address" }]
+}
+```
+
+#### `DELETE /mailing-lists/{slug}/subscribers?email=ada@fund.com`
+
+Returns `{ "slug": "investors", "email": "ada@fund.com", "removed": true }`, or 404 if the address is not on the list.
+
+#### `POST /mailing-lists/{slug}/updates`
+
+Sends a written update to every member Postmark is not suppressing.
+
+**Request body:**
+
+```json
+{
+  "subject": "Q3 update",
+  "body": "## Q3 update\n\nRevenue **doubled**.\n\n![chart](https://cdn.example.com/q3.png)"
+}
+```
+
+`body` is markdown — headings, bold, links, and `![alt](url)` inline images. It is rendered to HTML for delivery, and the markdown itself is sent as the plain-text part. Do not add an unsubscribe link: email-gateway appends a discreet one to every transactional HTML body, and Postmark resolves it against the broadcast stream.
+
+One message is sent per recipient, in waves of 8, so no recipient ever appears in another recipient's headers. Every update is sent from `kevin@distribute.you`.
+
+**Response:**
+
+```json
+{
+  "updateId": "31382def-19eb-4810-b399-a198f3b8940a",
+  "slug": "investors",
+  "subject": "Q3 update",
+  "status": "sent",
+  "recipientCount": 12,
+  "skippedOptedOut": ["b@fund.com"],
+  "failures": []
+}
+```
+
+`status` is `partial` when at least one recipient failed, and `failures` names each one with the provider's reason. A partial send is never recorded as a clean success.
+
+#### `GET /mailing-lists/{slug}/updates`
+
+Every update sent to the list, newest first, with the subject, the markdown as authored, the HTML as sent, the timestamp and the recipient count.
+
 ### `GET /health`
 
 Returns `{ "status": "ok" }`. No authentication required.
@@ -233,6 +314,8 @@ Admin notification events (`signup_notification`, `signin_notification`, `user_a
 - **Database:** PostgreSQL via Drizzle ORM
 - **Email delivery:** Email Gateway (routes to Postmark/Instantly)
 - **User resolution:** Client Service
+- **Provider suppression:** Postmark broadcast-stream suppression list, read with the platform token from Key Service
+- **Markdown rendering:** marked (mailing-list update bodies)
 - **Validation & OpenAPI:** Zod + @asteasolutions/zod-to-openapi
 - **Deployment:** Railway (Docker)
 
@@ -257,6 +340,8 @@ npm run dev             # start dev server on PORT
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |
 | `CLIENT_SERVICE_API_KEY` | Client service API key |
+| `KEY_SERVICE_URL` | Key service endpoint (default: http://localhost:3001). Used to resolve the Postmark token and broadcast stream for mailing-list suppression reads |
+| `KEY_SERVICE_API_KEY` | Key service API key |
 | `SERVICE_URL` | Public URL used in OpenAPI spec (default: http://localhost:3000) |
 | `PORT` | Server port (default: 3008) |
 
@@ -284,10 +369,13 @@ src/
   schemas.ts            # Zod schemas + OpenAPI registry (single source of truth)
   db/
     index.ts            # Database connection
-    schema.ts           # Drizzle schema (email_events + email_templates tables)
+    schema.ts           # Drizzle schema (email_events, email_templates, mailing_lists, mailing_list_subscribers, mailing_list_updates)
   lib/
+    address-blob.ts     # Lenient parser for a pasted blob of email addresses
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
+    mailing-list-body.ts # Markdown -> HTML rendering for mailing-list updates
+    suppression.ts      # Postmark broadcast-stream suppression list, via key-service
     runs-client.ts      # Runs service client (create/update runs)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
   middleware/
@@ -295,6 +383,7 @@ src/
   routes/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint
+    mailing-lists.ts    # Staff mailing lists: subscribers CRUD, send an update, read the history
     send.ts             # POST /send + POST /platform-send endpoints with dedup logic
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
