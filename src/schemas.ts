@@ -209,6 +209,29 @@ export const SendUpdateRequestSchema = z
   })
   .openapi("SendUpdateRequest");
 
+export const PreviewUpdateRequestSchema = z
+  .object({
+    body: z.string().min(1).openapi({
+      description:
+        "The update body as markdown, exactly as it would be sent. Rendered by the same code a real send uses.",
+    }),
+  })
+  .openapi("PreviewUpdateRequest");
+
+export const PreviewUpdateResponseSchema = z
+  .object({
+    htmlBody: z.string().openapi({
+      description:
+        "The HTML a recipient would receive for this body, byte-for-byte what a send of the same body produces. email-gateway appends the unsubscribe footer at send time, so it is absent here.",
+    }),
+    textBody: z.string().openapi({ description: "The plain-text part, which is the markdown itself" }),
+    unrenderableImages: z.array(z.string()).openapi({
+      description:
+        "Image URLs no mail client renders. A send of this body would be refused with a 400 naming these; empty means the body is sendable.",
+    }),
+  })
+  .openapi("PreviewUpdateResponse");
+
 export const UpdateFailureSchema = z
   .object({
     email: z.string(),
@@ -591,6 +614,28 @@ registry.registerPath({
     400: { description: "Invalid slug or missing email", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such list, or the address is not on it", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/updates/preview",
+  summary: "Render an update body exactly as a recipient would receive it",
+  description:
+    `${mailingListsDescription} Renders a draft body and returns nothing else: no message is sent, no update is ` +
+    "recorded, no suppression state is read. The rendering is the same code path a real send uses, so an author " +
+    "approving this preview is approving what lands in the inbox. It takes no list, because the body renders the " +
+    "same whoever receives it.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    body: { required: true, content: { "application/json": { schema: PreviewUpdateRequestSchema } } },
+  },
+  parameters: [platformOrgIdHeader],
+  responses: {
+    200: { description: "The body as it would arrive", content: { "application/json": { schema: PreviewUpdateResponseSchema } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
