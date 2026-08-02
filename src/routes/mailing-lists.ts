@@ -109,9 +109,12 @@ router.get("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnly, 
       .where(eq(mailingListSubscribers.listId, list.id))
       .orderBy(mailingListSubscribers.createdAt);
 
+    // Only these members' addresses are read, and a refresh inside the cache
+    // window reuses the answer rather than asking Postmark again.
     const suppression = await fetchSuppressed(
       { orgId: identityOf(res).orgId, userId },
-      "/mailing-lists/:slug/subscribers"
+      "/mailing-lists/:slug/subscribers",
+      rows.map((r) => r.email)
     );
 
     res.json({
@@ -271,9 +274,14 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
 
     const { htmlBody, textBody } = renderUpdateBody(body);
 
+    // maxAgeMs: 0 — a send never reads a cached answer. Someone who opted out
+    // a second ago, after a page load cached them as subscribed, is still
+    // skipped here.
     const suppression = await fetchSuppressed(
       { orgId: identity.orgId, userId },
-      "/mailing-lists/:slug/updates"
+      "/mailing-lists/:slug/updates",
+      members.map((m) => m.email),
+      { maxAgeMs: 0 }
     );
     const skippedOptedOut = members.filter((m) => suppression.isSuppressed(m.email)).map((m) => m.email);
     const recipients = members.filter((m) => !suppression.isSuppressed(m.email)).map((m) => m.email);

@@ -73,9 +73,10 @@ export type MailingList = typeof mailingLists.$inferSelect;
 
 /**
  * A subscriber is one bare email address on one list. Opt-out state is NOT
- * stored here: Postmark's broadcast stream owns the suppression list, and the
- * read path reconciles against it (via email-gateway) so the service can never
- * display a suppressed address as subscribed.
+ * stored here: Postmark's broadcast stream owns the suppression list, and both
+ * the read path and the send reconcile against it — per address, so the cost
+ * tracks the list rather than total send volume — so the service can never
+ * display a suppressed address as subscribed, nor mail one.
  */
 export const mailingListSubscribers = pgTable(
   "mailing_list_subscribers",

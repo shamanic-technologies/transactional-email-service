@@ -201,7 +201,11 @@ Re-assigns `email_events` rows from one org to another for a given brand. Only u
 
 A mailing list is a platform-level list of bare email addresses — `investors` is the first one, a changelog or customer newsletter list is the obvious next. Lists belong to the platform, not to a customer organisation, and nothing here is filtered by org. All five routes require `x-api-key`, `x-org-id` and `x-user-id`; `x-org-id` and `x-user-id` are the **sending identity** only (key-service resolves the Postmark token and stream against them, and a send is billed to that organisation).
 
-Opt-out state is never stored here. Postmark's broadcast stream owns the suppression list — the native one-click unsubscribe, a spam complaint and a hard bounce all write to it — and both the list read and the send read it back live from Postmark, using the platform token resolved through key-service. postmark-service's own mirror is not usable for this: it is org-scoped and only covers addresses already messaged under that org, so it reports a suppressed address as subscribed.
+Opt-out state is never stored here. Postmark's broadcast stream owns the suppression list — the native one-click unsubscribe, a spam complaint and a hard bounce all write to it — and both the list read and the send read it back from Postmark, using the platform token resolved through key-service. postmark-service's own mirror is not usable for this: it is org-scoped and only covers addresses already messaged under that org, so it reports a suppressed address as subscribed.
+
+Two things keep that read cheap. Postmark's suppression dump takes an `EmailAddress` filter, so only the addresses on the list are read — the broadcast stream is shared with all outreach, so an unfiltered dump grows with total send volume and has nothing to do with the size of the list being read. And the resolved credentials plus each address's answer are held in process, credentials for five minutes and answers for one minute, so refreshing the page costs no provider call at all.
+
+A send never reuses a cached answer: it re-checks every recipient against Postmark at send time. Someone who opted out a second ago, after a page load had already cached them as subscribed, is still skipped by that send. A provider failure throws on both paths — an empty suppression set is never assumed.
 
 #### `GET /mailing-lists/{slug}/subscribers`
 
@@ -379,7 +383,7 @@ src/
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
     mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard
-    suppression.ts      # Postmark broadcast-stream suppression list, via key-service
+    suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
     runs-client.ts      # Runs service client (create/update runs)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
   middleware/

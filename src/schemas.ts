@@ -154,7 +154,7 @@ export const MailingListSubscriberSchema = z
     email: z.string(),
     optedOut: z.boolean().openapi({
       description:
-        "True when Postmark is suppressing sends to this address — the member used the native unsubscribe, complained, or hard-bounced. Read live from the Postmark broadcast stream's suppression list on every request; this service stores no opt-out flag of its own.",
+        "True when Postmark is suppressing sends to this address — the member used the native unsubscribe, complained, or hard-bounced. Read from the Postmark broadcast stream's suppression list, per address, and reused for up to a minute; this service stores no opt-out flag of its own. A send re-checks every recipient against Postmark and never reuses that answer.",
     }),
     optedOutReason: z.string().nullable().openapi({
       description: "Postmark's own reason: \"ManualSuppression\" (unsubscribed), \"SpamComplaint\" or \"HardBounce\". Null when not suppressed.",
@@ -532,7 +532,8 @@ const staffUserIdHeader = {
 const mailingListsDescription =
   "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. " +
   "Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, " +
-  "and every read reconciles against it through email-gateway.";
+  "and every read reconciles against it — asking Postmark only about the addresses on the list, " +
+  "and reusing an answer for at most a minute. A send reconciles with no reuse at all.";
 
 registry.registerPath({
   method: "get",
