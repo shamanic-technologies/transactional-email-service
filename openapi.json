@@ -482,7 +482,7 @@
           "body": {
             "type": "string",
             "minLength": 1,
-            "description": "The update body, authored as markdown — headings, bold, links, and `![alt](https://…)` inline images. Rendered to HTML for delivery; the markdown itself is sent as the plain-text part. A discreet unsubscribe is appended downstream by email-gateway; do not add one here."
+            "description": "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here."
           }
         },
         "required": [
@@ -1486,7 +1486,7 @@
             }
           },
           "400": {
-            "description": "Validation error, empty list, or every subscriber opted out",
+            "description": "Validation error, an SVG image no mail client renders, empty list, or every subscriber opted out",
             "content": {
               "application/json": {
                 "schema": {

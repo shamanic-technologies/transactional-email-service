@@ -4,7 +4,7 @@ import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "..
 import { db } from "../db/index.js";
 import { mailingLists, mailingListSubscribers, mailingListUpdates } from "../db/schema.js";
 import { parseAddressBlob } from "../lib/address-blob.js";
-import { renderUpdateBody } from "../lib/mailing-list-body.js";
+import { findUnrenderableImages, renderUpdateBody } from "../lib/mailing-list-body.js";
 import { fetchSuppressed } from "../lib/suppression.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
@@ -230,6 +230,21 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
   }
 
   const { subject, body } = parsed.data;
+
+  // The sender is the last place this is cheap to catch: it knows the body
+  // before it goes out, and an SVG reaches the recipient as a broken-image
+  // placeholder showing its alt text. Reject rather than send something
+  // knowably broken.
+  const unrenderable = findUnrenderableImages(body);
+  if (unrenderable.length > 0) {
+    res.status(400).json({
+      error:
+        `Email clients do not render SVG images. Gmail, Outlook and Yahoo show the alt text instead. ` +
+        `Use a PNG or JPEG for: ${unrenderable.join(", ")}`,
+    });
+    return;
+  }
+
   const userId = requireActingUser(res);
   if (!userId) return;
 
