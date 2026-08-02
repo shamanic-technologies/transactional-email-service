@@ -519,3 +519,86 @@ describe("GET /mailing-lists/:slug/updates", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("POST /mailing-lists/updates/preview", () => {
+  const BODY = "## Where we are\n\nWe **shipped**.\n\n| metric | value |\n| --- | --- |\n| ARR | 1 |";
+
+  it("returns the identical HTML a real send of the same body produces", async () => {
+    // The whole point of the endpoint. If these two ever diverge, an author is
+    // approving one thing and investors are receiving another — which is what
+    // happened while the admin console rendered its own preview.
+    const preview = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: BODY });
+
+    seedList(["a@example.com"]);
+    const sent = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3", body: BODY });
+
+    expect(preview.status).toBe(200);
+    expect(sent.status).toBe(200);
+    expect(preview.body.htmlBody).toBe(store.inserted.updates[0].htmlBody);
+  });
+
+  it("sends nothing, records nothing, and reads no suppression list", async () => {
+    seedList(["a@example.com"]);
+    const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: BODY });
+
+    expect(res.status).toBe(200);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(fetchSuppressed).not.toHaveBeenCalled();
+    expect(store.inserted.updates).toHaveLength(0);
+  });
+
+  it("carries the plain-text part, which is the markdown itself", async () => {
+    const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: BODY });
+    expect(res.body.textBody).toBe(BODY);
+  });
+
+  it("reports an image no client renders instead of refusing — a preview shows what you have", async () => {
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ body: "![logo](https://distribute.you/logo.svg)" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.unrenderableImages).toEqual(["https://distribute.you/logo.svg"]);
+    // Still rendered: the author needs to see the rest of the update.
+    expect(res.body.htmlBody).toContain("logo.svg");
+  });
+
+  it("says nothing is wrong with a body whose images are all fine", async () => {
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ body: "![chart](https://distribute.you/chart.png)" });
+    expect(res.body.unrenderableImages).toEqual([]);
+  });
+
+  it("needs no acting staff user — it resolves no provider key, sends nothing and spends nothing", async () => {
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set({ "X-API-Key": "test-service-key", "x-org-id": "org_456" })
+      .send({ body: BODY });
+    expect(res.status).toBe(200);
+  });
+
+  it("still requires the API key and an organisation", async () => {
+    const noKey = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set("x-org-id", "org_456")
+      .send({ body: BODY });
+    expect(noKey.status).toBe(401);
+
+    const noOrg = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set("X-API-Key", "test-service-key")
+      .send({ body: BODY });
+    expect(noOrg.status).toBe(400);
+  });
+
+  it("rejects an empty body", async () => {
+    const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: "" });
+    expect(res.status).toBe(400);
+  });
+});
