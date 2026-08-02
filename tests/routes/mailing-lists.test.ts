@@ -309,8 +309,11 @@ describe("POST /mailing-lists/:slug/updates", () => {
       expect(call.from).toBe("kevin@distribute.you");
       expect(call.bcc).toBeUndefined();
       expect(call.subject).toBe("Q3 update");
-      expect(call.htmlBody).toContain("<h2>Hello</h2>");
+      expect(call.htmlBody).toContain("Hello</h2>");
       expect(call.htmlBody).toContain('<img src="https://cdn.example.com/chart.png"');
+      // Styling is inlined on the elements — a <style> block would be stripped.
+      expect(call.htmlBody).toContain("max-width:600px");
+      expect(call.htmlBody).not.toMatch(/<style\b/i);
       // No other recipient anywhere in the payload.
       const other = call.to === "a@example.com" ? "b@example.com" : "a@example.com";
       expect(JSON.stringify(call)).not.toContain(other);
@@ -406,6 +409,45 @@ describe("POST /mailing-lists/:slug/updates", () => {
     const res = await request(app).post("/mailing-lists/investors/updates").set(AUTH).send({ subject: "s", body: "b" });
     expect(res.status).toBe(404);
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("refuses a body carrying an SVG no mail client renders, naming the URL", async () => {
+    seedList(["a@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3", body: "![Logo](https://distribute.you/brand/icon.svg)" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("https://distribute.you/brand/icon.svg");
+    expect(res.body.error).toMatch(/svg/i);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(store.inserted.updates).toEqual([]);
+  });
+
+  it("refuses an SVG pasted as a raw <img> tag too", async () => {
+    seedList(["a@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3", body: '<img src="https://cdn.example.com/chart.svg" alt="Chart">' });
+
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends a PNG through untouched", async () => {
+    seedList(["a@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3", body: "![Logo](https://distribute.you/brand/icon.png)" });
+
+    expect(res.status).toBe(200);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("sends to a few thousand members in bounded waves", async () => {

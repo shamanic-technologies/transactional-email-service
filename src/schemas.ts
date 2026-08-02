@@ -204,7 +204,7 @@ export const SendUpdateRequestSchema = z
     subject: z.string().min(1),
     body: z.string().min(1).openapi({
       description:
-        "The update body, authored as markdown — headings, bold, links, and `![alt](https://…)` inline images. Rendered to HTML for delivery; the markdown itself is sent as the plain-text part. A discreet unsubscribe is appended downstream by email-gateway; do not add one here.",
+        "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here.",
     }),
   })
   .openapi("SendUpdateRequest");
@@ -611,7 +611,7 @@ registry.registerPath({
   parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
   responses: {
     200: { description: "Send outcome", content: { "application/json": { schema: SendUpdateResponseSchema } } },
-    400: { description: "Validation error, empty list, or every subscriber opted out", content: { "application/json": { schema: ErrorResponseSchema } } },
+    400: { description: "Validation error, an SVG image no mail client renders, empty list, or every subscriber opted out", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
   },

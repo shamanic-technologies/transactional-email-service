@@ -254,7 +254,11 @@ Sends a written update to every member Postmark is not suppressing.
 }
 ```
 
-`body` is markdown — headings, bold, links, and `![alt](url)` inline images. It is rendered to HTML for delivery, and the markdown itself is sent as the plain-text part. Do not add an unsubscribe link: email-gateway appends a discreet one to every transactional HTML body, and Postmark resolves it against the broadcast stream.
+`body` is markdown — headings, bold, links, tables, and `![alt](url)` inline images. It is rendered to HTML for delivery, and the markdown itself is sent as the plain-text part. Do not add an unsubscribe link: email-gateway appends a discreet one to every transactional HTML body, and Postmark resolves it against the broadcast stream.
+
+The HTML carries every style inline on the element. Gmail discards `<style>` and `<head>` and Outlook's Word engine ignores most of what is left, so a stylesheet renders in a browser preview and arrives unstyled in the inbox. Layout is a centred table capped at 600px with `width:100%`, which gives a readable measure on a desktop and no horizontal scroll on a phone; images are capped at `max-width:100%` and tables are fluid and wrap. Nothing depends on flexbox, grid, custom properties or class attributes.
+
+An update carrying an **SVG image is rejected with a 400** naming the URL. Gmail, Outlook and Yahoo all refuse `image/svg+xml` and render the alt text in a broken-image placeholder instead, and the sender knows the body before it goes out. Use PNG or JPEG. Both `![alt](…​.svg)` and a raw `<img src="….svg">` are caught, including `.svgz`, a query string or fragment after the extension, and `data:image/svg+xml` URIs.
 
 One message is sent per recipient, in waves of 8, so no recipient ever appears in another recipient's headers. Every update is sent from `kevin@distribute.you`.
 
@@ -374,7 +378,7 @@ src/
     address-blob.ts     # Lenient parser for a pasted blob of email addresses
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
-    mailing-list-body.ts # Markdown -> HTML rendering for mailing-list updates
+    mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard
     suppression.ts      # Postmark broadcast-stream suppression list, via key-service
     runs-client.ts      # Runs service client (create/update runs)
     trace-event.ts      # Fire-and-forget event tracing to runs-service

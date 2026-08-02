@@ -125,7 +125,8 @@ describe("sending and history", () => {
     expect(history.status).toBe(200);
     expect(history.body.count).toBe(1);
     expect(history.body.updates[0].subject).toBe("Q3 update");
-    expect(history.body.updates[0].htmlBody).toContain("<h2>Hi</h2>");
+    expect(history.body.updates[0].htmlBody).toContain("Hi</h2>");
+    expect(history.body.updates[0].htmlBody).toContain("max-width:600px");
     expect(history.body.updates[0].recipientCount).toBe(2);
     expect(typeof history.body.updates[0].sentAt).toBe("string");
   });
