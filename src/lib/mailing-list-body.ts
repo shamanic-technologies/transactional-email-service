@@ -74,6 +74,18 @@ function alignStyle(align: "center" | "left" | "right" | null): string {
   return `text-align:${align ?? "left"};`;
 }
 
+/**
+ * Fixed layout needs the widths stated, and an even split is the wrong default:
+ * the first column carries the label ("Net revenue retention") while the rest
+ * carry short figures, so an even split is what breaks "$31,200" across two
+ * lines on a phone. Give the label a third and let the figures share the rest.
+ */
+function columnWidth(index: number, columns: number): number {
+  if (columns < 2) return 100;
+  if (index === 0) return 34;
+  return Math.round((66 / (columns - 1)) * 100) / 100;
+}
+
 const renderer = new Marked({ gfm: true, breaks: true });
 
 renderer.use({
@@ -126,14 +138,21 @@ renderer.use({
 
     /**
      * Investor updates carry numbers, so the table is the block most likely to
-     * break a phone. It is fluid rather than fixed-width, sized down a step,
-     * and every cell wraps — nothing here can force horizontal scroll.
+     * break a phone. It is sized in percentages rather than pixels, sized down a
+     * step, and every cell wraps — nothing here can force horizontal scroll.
+     *
+     * `table-layout:fixed` is what makes that last claim true. Under the default
+     * automatic layout a table is never narrower than its content, so on a phone
+     * the widest row pushes the table past the column, the layout tables around
+     * it stretch to follow, and the whole message scrolls sideways — measured at
+     * 401px of document for a 375px screen. Fixed layout takes the column widths
+     * from the header row instead, and the cells wrap inside them.
      */
     table(this: any, token: Tokens.Table) {
       const header = token.header
         .map(
           (cell: Tokens.TableCell, i: number) =>
-            `<th style="padding:8px 10px;font-family:${FONT_STACK};font-size:12px;font-weight:700;color:${MUTED_INK};text-transform:uppercase;letter-spacing:0.03em;background-color:${TINT};border-bottom:1px solid ${RULE};${alignStyle(token.align[i])}">${this.parser.parseInline(cell.tokens)}</th>`
+            `<th width="${columnWidth(i, token.header.length)}%" style="width:${columnWidth(i, token.header.length)}%;padding:8px 10px;font-family:${FONT_STACK};font-size:12px;font-weight:700;color:${MUTED_INK};text-transform:uppercase;letter-spacing:0.03em;background-color:${TINT};border-bottom:1px solid ${RULE};overflow-wrap:break-word;${alignStyle(token.align[i])}">${this.parser.parseInline(cell.tokens)}</th>`
         )
         .join("");
 
@@ -150,7 +169,7 @@ renderer.use({
         .join("\n");
 
       return (
-        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 20px 0;border-collapse:collapse;border:1px solid ${RULE};border-radius:6px;">\n` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;margin:0 0 20px 0;border-collapse:collapse;border:1px solid ${RULE};border-radius:6px;">\n` +
         `<thead><tr>${header}</tr></thead>\n` +
         `<tbody>\n${rows}\n</tbody>\n` +
         `</table>\n`

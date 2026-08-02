@@ -97,6 +97,34 @@ describe("renderUpdateBody — inlined styling", () => {
     expect(dataTable).toContain("overflow-wrap:break-word");
     expect(dataTable).not.toMatch(/width\s*:\s*\d+px/);
     expect(htmlBody).toContain("border-collapse:collapse");
+    // Without this the table is never narrower than its content: the row pushes
+    // the table past the column, the layout tables follow, and the message
+    // side-scrolls. Measured at 401px of document for a 375px screen.
+    expect(dataTable).toContain("table-layout:fixed");
+  });
+
+  it("states every column width, giving the label column more room than the figures", () => {
+    const { htmlBody: table } = renderUpdateBody(
+      "| Metric | Q2 | Q3 | Change |\n| --- | --- | --- | --- |\n| Net revenue retention | 108% | 121% | +13pt |"
+    );
+    const headers = table.match(/<th\s[^>]*>/g)!;
+    expect(headers).toHaveLength(4);
+    expect(headers[0]).toContain("width:34%");
+    for (const figure of headers.slice(1)) expect(figure).toContain("width:22%");
+    // Percentages, never pixels — a pixel column cannot shrink to a phone.
+    for (const cell of headers) expect(cell).not.toMatch(/width\s*[:=]\s*"?\d+px/);
+  });
+
+  it("gives a single-column table the whole width", () => {
+    const { htmlBody: table } = renderUpdateBody("| Note |\n| --- |\n| Only column |");
+    expect(table.match(/<th\s[^>]*>/g)![0]).toContain("width:100%");
+  });
+
+  it("wraps a long header instead of widening the table", () => {
+    const { htmlBody: table } = renderUpdateBody(
+      "| Extraordinarily long header | Q3 |\n| --- | --- |\n| a | b |"
+    );
+    expect(table.match(/<th\s[^>]*>/g)![0]).toContain("overflow-wrap:break-word");
   });
 
   it("keeps an image inside the column and never upscales it", () => {
