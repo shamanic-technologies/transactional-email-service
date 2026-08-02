@@ -20,13 +20,16 @@ Transactional email service that sends event-triggered emails. Resolves recipien
 
 - `src/schemas.ts` — Zod schemas (source of truth for validation + OpenAPI)
 - `src/index.ts` — Express app entry point
-- `src/routes/` — Route handlers (`send.ts`, `stats.ts`, `health.ts`, `openapi.ts`, `templates.ts`, `transfer-brand.ts`)
+- `src/routes/` — Route handlers (`send.ts`, `stats.ts`, `health.ts`, `openapi.ts`, `templates.ts`, `transfer-brand.ts`, `mailing-lists.ts`)
 - `src/middleware/auth.ts` — API key + identity-header authentication
 - `src/lib/client-service.ts` — client-service user email resolution
 - `src/lib/email-gateway.ts` — Email Gateway client
 - `src/lib/runs-client.ts` — Runs service client (create/update runs)
 - `src/lib/trace-event.ts` — Fire-and-forget event tracing to runs-service
-- `src/db/schema.ts` — Drizzle schema (`email_events` table)
+- `src/lib/suppression.ts` — Reads the Postmark **broadcast stream's suppression list** (the platform token + stream id come from key-service). This is the ONLY authoritative opt-out source for mailing lists — do NOT substitute postmark-service's `/orgs/status` mirror: it is org-scoped and only covers addresses already messaged under that org, so it reports a suppressed address as subscribed (verified in prod 2026-08-02 on an address Postmark had suppressed as a HardBounce since June). This service stores no opt-out flag of its own.
+- `src/lib/address-blob.ts` — Lenient parser for a pasted blob of addresses
+- `src/lib/mailing-list-body.ts` — Markdown → HTML for mailing-list update bodies. Adds NO unsubscribe markup: email-gateway's `appendSignature` already appends a discreet `{{{pm:unsubscribe}}}` footer to every transactional HTML body, and Postmark resolves it against the broadcast stream. Adding one here renders a duplicate link.
+- `src/db/schema.ts` — Drizzle schema (`email_events`, `email_templates`, `mailing_lists`, `mailing_list_subscribers`, `mailing_list_updates`)
 - `src/db/index.ts` — Database connection
 - `src/templates/index.ts` — Renderer + DB resolver (`{{var}}` interpolation, DB lookup by `name`). Template **content is NOT stored in this repo** — each consuming app declares its own templates and registers them at startup via `PUT /templates` (authed) or `PUT /platform-templates` (api-key only). Hardcoded templates were removed in PR #49 (commit `2eaf1d0`). To add a new template for the Distribute product, edit `distribute.you/apps/dashboard/src/instrumentation.ts` `EMAIL_TEMPLATES` array — NOT this repo.
 - `scripts/generate-openapi.ts` — OpenAPI spec generation script

@@ -147,6 +147,108 @@ export const TransferBrandResponseSchema = z
   })
   .openapi("TransferBrandResponse");
 
+// --- Mailing lists (platform-level, staff-only) ---
+
+export const MailingListSubscriberSchema = z
+  .object({
+    email: z.string(),
+    optedOut: z.boolean().openapi({
+      description:
+        "True when Postmark is suppressing sends to this address — the member used the native unsubscribe, complained, or hard-bounced. Read live from the Postmark broadcast stream's suppression list on every request; this service stores no opt-out flag of its own.",
+    }),
+    optedOutReason: z.string().nullable().openapi({
+      description: "Postmark's own reason: \"ManualSuppression\" (unsubscribed), \"SpamComplaint\" or \"HardBounce\". Null when not suppressed.",
+    }),
+    addedAt: z.string().openapi({ format: "date-time" }),
+  })
+  .openapi("MailingListSubscriber");
+
+export const MailingListSubscribersResponseSchema = z
+  .object({
+    slug: z.string(),
+    count: z.number(),
+    subscribers: z.array(MailingListSubscriberSchema),
+  })
+  .openapi("MailingListSubscribersResponse");
+
+export const AddSubscribersRequestSchema = z
+  .object({
+    raw: z.string().min(1).openapi({
+      description:
+        "A pasted blob of email addresses. Comma-, semicolon-, tab- or newline-separated; `Name <email@example.com>` pairs are accepted. Duplicates and existing members are skipped, so re-pasting the same blob is a no-op.",
+    }),
+  })
+  .openapi("AddSubscribersRequest");
+
+export const AddSubscribersResponseSchema = z
+  .object({
+    slug: z.string(),
+    added: z.array(z.string()).openapi({ description: "Addresses newly added to the list" }),
+    skipped: z.array(z.string()).openapi({ description: "Addresses already on the list, or repeated inside the blob" }),
+    rejected: z
+      .array(z.object({ value: z.string(), reason: z.string() }))
+      .openapi({ description: "Fragments that could not be read as an email address" }),
+  })
+  .openapi("AddSubscribersResponse");
+
+export const RemoveSubscriberResponseSchema = z
+  .object({
+    slug: z.string(),
+    email: z.string(),
+    removed: z.boolean(),
+  })
+  .openapi("RemoveSubscriberResponse");
+
+export const SendUpdateRequestSchema = z
+  .object({
+    subject: z.string().min(1),
+    body: z.string().min(1).openapi({
+      description:
+        "The update body, authored as markdown — headings, bold, links, and `![alt](https://…)` inline images. Rendered to HTML for delivery; the markdown itself is sent as the plain-text part. A discreet unsubscribe is appended downstream by email-gateway; do not add one here.",
+    }),
+  })
+  .openapi("SendUpdateRequest");
+
+export const UpdateFailureSchema = z
+  .object({
+    email: z.string(),
+    reason: z.string(),
+  })
+  .openapi("UpdateFailure");
+
+export const SendUpdateResponseSchema = z
+  .object({
+    updateId: z.string(),
+    slug: z.string(),
+    subject: z.string(),
+    status: z.enum(["sent", "partial"]),
+    recipientCount: z.number().openapi({ description: "Recipients the update actually reached" }),
+    skippedOptedOut: z.array(z.string()).openapi({ description: "Members not mailed because the provider is suppressing them" }),
+    failures: z.array(UpdateFailureSchema).openapi({ description: "Recipients whose send failed, with the provider's reason" }),
+  })
+  .openapi("SendUpdateResponse");
+
+export const MailingListUpdateSchema = z
+  .object({
+    id: z.string(),
+    subject: z.string(),
+    body: z.string().openapi({ description: "Markdown as authored" }),
+    htmlBody: z.string().openapi({ description: "Body as sent" }),
+    status: z.enum(["sent", "partial"]),
+    recipientCount: z.number(),
+    failures: z.array(UpdateFailureSchema),
+    sentAt: z.string().openapi({ format: "date-time" }),
+  })
+  .openapi("MailingListUpdate");
+
+export const MailingListUpdatesResponseSchema = z
+  .object({
+    slug: z.string(),
+    count: z.number(),
+    updates: z.array(MailingListUpdateSchema),
+  })
+  .openapi("MailingListUpdatesResponse");
+
 // --- Shared header parameters ---
 
 const orgIdHeader = {
@@ -402,6 +504,133 @@ registry.registerPath({
       description: "Unauthorized - invalid or missing API key",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+  },
+});
+
+// --- Mailing lists ---
+
+const mailingListSlugParam = {
+  name: "slug",
+  in: "path" as const,
+  required: true,
+  schema: { type: "string" as const },
+  description: "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens.",
+};
+
+const platformOrgIdHeader = {
+  ...orgIdHeader,
+  description:
+    "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation.",
+};
+
+const staffUserIdHeader = {
+  ...userIdHeader,
+  description:
+    "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation.",
+};
+
+const mailingListsDescription =
+  "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. " +
+  "Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, " +
+  "and every read reconciles against it through email-gateway.";
+
+registry.registerPath({
+  method: "get",
+  path: "/mailing-lists/{slug}/subscribers",
+  summary: "Read a mailing list",
+  description: `${mailingListsDescription} Each entry states whether the provider is currently suppressing it.`,
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ slug: z.string() }) },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: {
+      description: "Subscribers with live opt-out state",
+      content: { "application/json": { schema: MailingListSubscribersResponseSchema } },
+    },
+    400: { description: "Invalid slug or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "Provider suppression state unavailable", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/{slug}/subscribers",
+  summary: "Add addresses in bulk from a pasted blob",
+  description:
+    `${mailingListsDescription} Parses the blob leniently and reports what was added, skipped and rejected. ` +
+    "Creates the list on first use. Re-pasting the same blob is a no-op.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: { required: true, content: { "application/json": { schema: AddSubscribersRequestSchema } } },
+  },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: { description: "Add results", content: { "application/json": { schema: AddSubscribersResponseSchema } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/mailing-lists/{slug}/subscribers",
+  summary: "Remove an address from a mailing list",
+  description: mailingListsDescription,
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ slug: z.string() }), query: z.object({ email: z.string() }) },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: { description: "Removed", content: { "application/json": { schema: RemoveSubscriberResponseSchema } } },
+    400: { description: "Invalid slug or missing email", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list, or the address is not on it", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/{slug}/updates",
+  summary: "Send a written update to a mailing list",
+  description:
+    `${mailingListsDescription} The caller supplies the subject and a markdown body (inline images supported); ` +
+    "recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. " +
+    "Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing " +
+    "addresses and reasons, never as a clean success.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: { required: true, content: { "application/json": { schema: SendUpdateRequestSchema } } },
+  },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: { description: "Send outcome", content: { "application/json": { schema: SendUpdateResponseSchema } } },
+    400: { description: "Validation error, empty list, or every subscriber opted out", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/mailing-lists/{slug}/updates",
+  summary: "Read the history of updates sent to a mailing list",
+  description: `${mailingListsDescription} Returns every update with its subject, the body as sent, when it went out, and how many people it reached.`,
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ slug: z.string() }) },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: { description: "Update history, newest first", content: { "application/json": { schema: MailingListUpdatesResponseSchema } } },
+    400: { description: "Invalid slug or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
