@@ -311,7 +311,7 @@
           },
           "optedOut": {
             "type": "boolean",
-            "description": "True when Postmark is suppressing sends to this address — the member used the native unsubscribe, complained, or hard-bounced. Read live from the Postmark broadcast stream's suppression list on every request; this service stores no opt-out flag of its own."
+            "description": "True when Postmark is suppressing sends to this address — the member used the native unsubscribe, complained, or hard-bounced. Read from the Postmark broadcast stream's suppression list, per address, and reused for up to a minute; this service stores no opt-out flag of its own. A send re-checks every recipient against Postmark and never reuses that answer."
           },
           "optedOutReason": {
             "type": "string",
@@ -1125,7 +1125,7 @@
     "/mailing-lists/{slug}/subscribers": {
       "get": {
         "summary": "Read a mailing list",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. Each entry states whether the provider is currently suppressing it.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. Each entry states whether the provider is currently suppressing it.",
         "tags": [
           "Mailing lists"
         ],
@@ -1226,7 +1226,7 @@
       },
       "post": {
         "summary": "Add addresses in bulk from a pasted blob",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. Parses the blob leniently and reports what was added, skipped and rejected. Creates the list on first use. Re-pasting the same blob is a no-op.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. Parses the blob leniently and reports what was added, skipped and rejected. Creates the list on first use. Re-pasting the same blob is a no-op.",
         "tags": [
           "Mailing lists"
         ],
@@ -1317,7 +1317,7 @@
       },
       "delete": {
         "summary": "Remove an address from a mailing list",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all.",
         "tags": [
           "Mailing lists"
         ],
@@ -1418,7 +1418,7 @@
     "/mailing-lists/{slug}/updates": {
       "post": {
         "summary": "Send a written update to a mailing list",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. The caller supplies the subject and a markdown body (inline images supported); recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. The caller supplies the subject and a markdown body (inline images supported); recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success.",
         "tags": [
           "Mailing lists"
         ],
@@ -1519,7 +1519,7 @@
       },
       "get": {
         "summary": "Read the history of updates sent to a mailing list",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it through email-gateway. Returns every update with its subject, the body as sent, when it went out, and how many people it reached.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. Returns every update with its subject, the body as sent, when it went out, and how many people it reached.",
         "tags": [
           "Mailing lists"
         ],
