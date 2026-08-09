@@ -340,6 +340,16 @@ npm run db:push         # push schema to database
 npm run dev             # start dev server on PORT
 ```
 
+### Tests
+
+`npm test` runs the unit suite and needs no database. `npm run test:integration` does:
+point `TRANSACTIONAL_EMAIL_SERVICE_DATABASE_URL` at an empty database and the suite
+builds the schema from `drizzle/` itself, the same way the service does on boot.
+
+CI starts a `postgres:16` service container per run and points the suite at it. The
+database is created with the job and destroyed with it, so a run never shares a
+database with another run or with a deployed environment.
+
 ## Environment Variables
 
 | Variable | Description |
@@ -367,7 +377,7 @@ npm run dev             # start dev server on PORT
 | `npm start` | Run compiled server |
 | `npm test` | Run unit tests (Vitest, excludes integration) |
 | `npm run test:unit` | Same as `npm test` |
-| `npm run test:integration` | Run integration tests (requires database) |
+| `npm run test:integration` | Run integration tests (requires an empty database; migrates it itself) |
 | `npm run db:generate` | Generate Drizzle migrations |
 | `npm run db:migrate` | Run migrations |
 | `npm run db:push` | Push schema directly |
