@@ -10,14 +10,32 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # One Postgres per run, started and destroyed with the job. Nothing else
+    # points at it, so a run can build the schema from nothing and truncate
+    # freely without reaching another run, a shared box, or production.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: transactional_email_service_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     env:
       NODE_ENV: test
-      TRANSACTIONAL_EMAIL_SERVICE_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-      TRANSACTIONAL_EMAIL_SERVICE_API_KEY: ${{ secrets.TEST_API_KEY }}
+      TRANSACTIONAL_EMAIL_SERVICE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/transactional_email_service_test
+      TRANSACTIONAL_EMAIL_SERVICE_API_KEY: test-api-key
       CLIENT_SERVICE_URL: http://localhost:9999
       CLIENT_SERVICE_API_KEY: fake-client-service-key
-      EMAIL_GATEWAY_SERVICE_API_KEY: fake-email-gateway-key
       EMAIL_GATEWAY_SERVICE_URL: http://localhost:9999
+      EMAIL_GATEWAY_SERVICE_API_KEY: fake-email-gateway-key
 
     steps:
       - uses: actions/checkout@v4
@@ -27,26 +45,26 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # Create Neon branch only for PRs
-      - name: Create Neon branch for PR
-        if: github.event_name == 'pull_request'
-        id: neon
-        uses: neondatabase/create-branch-action@v6
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: pr-${{ github.event.number }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      # Override DB URL with Neon branch for PRs
-      - name: Use Neon branch DB for PR
-        if: github.event_name == 'pull_request'
-        run: echo "TRANSACTIONAL_EMAIL_SERVICE_DATABASE_URL=${{ steps.neon.outputs.db_url_pooled }}" >> "$GITHUB_ENV"
-
       - name: Generate OpenAPI spec
         run: npm run generate:openapi
 
-      - name: Push schema
-        run: npx drizzle-kit push --force
+      # The migration journal is what builds the schema — here and at boot in
+      # production (src/index.ts calls migrate()). So schema.ts and the journal
+      # have to agree: if schema.ts moved without a migration, drizzle-kit
+      # writes one here and the working tree stops being clean.
+      - name: Check schema.ts matches the migration journal
+        run: |
+          npx drizzle-kit generate --name ci_schema_drift_check
+          if [ -n "$(git status --porcelain drizzle/)" ]; then
+            echo "::error::schema.ts has changes with no matching migration. Run 'npm run db:generate' and commit the result."
+            git status --porcelain drizzle/
+            exit 1
+          fi
 
-      - name: Run tests
+      - name: Run unit tests
         run: npm test
+
+      # Builds the schema from the journal against the empty container database,
+      # the same path the service takes on boot.
+      - name: Run integration tests
+        run: npm run test:integration
