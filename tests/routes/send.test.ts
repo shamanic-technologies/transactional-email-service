@@ -212,8 +212,8 @@ describe("POST /send", () => {
 
     expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBeUndefined();
-    // Hardcoded staff BCC is always appended, even with no caller bccEmails
-    expect(body.bcc).toBe("kevin@distribute.you,kevin.lourd@gmail.com");
+    // No caller bccEmails means no blind copy at all — no staff address is added
+    expect(body).not.toHaveProperty("bcc");
   });
 
   it("forwards bccEmails to the provider payload as bcc", async () => {
@@ -234,8 +234,8 @@ describe("POST /send", () => {
     const body = JSON.parse(options.body);
 
     expect(body.to).toBe("primary@example.com");
-    // Caller bccEmails first, then hardcoded staff appended (never affects primary `to`)
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you,kevin.lourd@gmail.com");
+    // Exactly the caller's list, unchanged (and never affecting the primary `to`)
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com");
   });
 
   it("does not render bccEmails into primary-recipient content or metadata", async () => {
@@ -786,11 +786,11 @@ describe("POST /send — brand_daily_budget_changed staff notification", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
-    expect(body.to).toBe("kevin@distribute.you");
+    expect(body.to).toBe("kevin.lourd@gmail.com");
     expect(body.to).not.toBe("customer@example.com");
   });
 
@@ -848,7 +848,7 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
   });
 
   it("delivers to the staff recipient list, never to the customer", async () => {
@@ -863,7 +863,7 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
-    expect(body.to).toBe("kevin@distribute.you");
+    expect(body.to).toBe("kevin.lourd@gmail.com");
     expect(resolveUserEmail).not.toHaveBeenCalled();
   });
 
@@ -987,7 +987,7 @@ describe("POST /send — payment_method_removed staff routing", () => {
       .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242" } });
 
     expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
   });
 
   it("still requires the full identity headers on /send", async () => {
@@ -1000,5 +1000,73 @@ describe("POST /send — payment_method_removed staff routing", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("x-user-id");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("staff_daily_digest", () => {
+  const ORG_ONLY = { "x-org-id": "org_456" };
+
+  it("is accepted on the platform send route and delivered to the staff recipient", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "staff_daily_digest", metadata: { signups: "3" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.to).toBe("kevin.lourd@gmail.com");
+    expect(body).not.toHaveProperty("bcc");
+  });
+
+  it("goes to staff on /send too, never to the customer resolved from x-user-id", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "staff_daily_digest", recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(JSON.parse(options.body).to).toBe("kevin.lourd@gmail.com");
+  });
+
+  it("cannot carry a customer blind copy in on the platform route", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "staff_daily_digest", bccEmails: ["customer@example.com"] });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("applies no dedup — a digest sends every day it is requested", async () => {
+    const first = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "staff_daily_digest" });
+
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "staff_daily_digest" });
+
+    expect(first.body.results[0].sent).toBe(true);
+    expect(second.body.results[0].sent).toBe(true);
+    for (const call of mockValues.mock.calls) {
+      expect(call[0].dedupKey).toBeNull();
+    }
   });
 });

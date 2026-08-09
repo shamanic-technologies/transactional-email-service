@@ -115,7 +115,7 @@ describe("sendEmail", () => {
     expect(body.from).toBeUndefined();
   });
 
-  it("always appends hardcoded staff bcc to caller-provided bcc", async () => {
+  it("forwards a caller-provided bcc list unchanged", async () => {
     await sendEmail({
       to: "test@example.com",
       subject: "Test",
@@ -131,11 +131,10 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    // caller addresses first, then hardcoded staff
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you,kevin.lourd@gmail.com");
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com");
   });
 
-  it("adds hardcoded staff bcc when no caller bcc", async () => {
+  it("sends no bcc at all when the caller supplies none", async () => {
     await sendEmail({
       to: "test@example.com",
       subject: "Test",
@@ -150,10 +149,10 @@ describe("sendEmail", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    expect(body.bcc).toBe("kevin@distribute.you,kevin.lourd@gmail.com");
+    expect(body).not.toHaveProperty("bcc");
   });
 
-  it("de-dups caller bcc that already includes a staff address (case-insensitive)", async () => {
+  it("adds no staff address to a bcc list that already names one", async () => {
     await sendEmail({
       to: "test@example.com",
       subject: "Test",
@@ -163,32 +162,13 @@ describe("sendEmail", () => {
       orgId: "org_123",
       userId: "user_456",
       runId: "run_abc",
-      bcc: "alpha1@example.com,KEVIN@distribute.you",
+      bcc: "alpha1@example.com,kevin.lourd@gmail.com",
     });
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
 
-    // caller's KEVIN@... wins first-seen; kevin not duplicated; personal staff bcc appended
-    expect(body.bcc).toBe("alpha1@example.com,KEVIN@distribute.you,kevin.lourd@gmail.com");
-  });
-
-  it("always sets bcc to staff even with no caller bcc", async () => {
-    await sendEmail({
-      to: "test@example.com",
-      subject: "Test",
-      htmlBody: "<p>Test</p>",
-      textBody: "Test",
-      tag: "test-tag",
-      orgId: "org_123",
-      userId: "user_456",
-      runId: "run_abc",
-    });
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
-
-    expect(body.bcc).toBe("kevin@distribute.you,kevin.lourd@gmail.com");
+    expect(body.bcc).toBe("alpha1@example.com,kevin.lourd@gmail.com");
   });
 
   it("includes all required fields for email gateway", async () => {

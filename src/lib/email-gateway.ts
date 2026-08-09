@@ -20,42 +20,19 @@ interface SendEmailParams {
   workflowHeaders?: WorkflowHeaders;
 }
 
-// Staff addresses blind-copied on every transactional email for internal
-// visibility/archival. Hardcoded (not env-configured) so the guarantee can
-// never be silently disabled by a missing env var.
-const STAFF_BCC_EMAILS = ["kevin@distribute.you", "kevin.lourd@gmail.com"];
-
-/**
- * Merge a caller-supplied comma-separated bcc list with the hardcoded staff bcc
- * addresses. Trims whitespace, drops empties, and de-duplicates
- * (case-insensitive) preserving first-seen order. Staff addresses are always
- * appended. Returns undefined only when no addresses remain.
- */
-function mergeBcc(callerBcc?: string): string | undefined {
-  const addresses = [callerBcc, ...STAFF_BCC_EMAILS]
-    .filter((list): list is string => Boolean(list))
-    .flatMap((list) => list.split(","))
-    .map((addr) => addr.trim())
-    .filter((addr) => addr.length > 0);
-
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const addr of addresses) {
-    const key = addr.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(addr);
-  }
-
-  return deduped.length > 0 ? deduped.join(",") : undefined;
-}
+// No staff address is blind-copied here. Postmark bills per recipient and
+// counts blind copies, so a standing staff bcc multiplied every send by the
+// size of the staff list. The internal visibility it provided is already
+// covered twice over: Postmark keeps the full message in its Activity archive
+// for 45 days, and postmark-service stores a permanent metadata row per send.
+// Only a caller's own `bcc` reaches the provider, exactly as supplied.
 
 export async function sendEmail(params: SendEmailParams): Promise<void> {
   if (!EMAIL_GATEWAY_SERVICE_API_KEY) {
     throw new Error("EMAIL_GATEWAY_SERVICE_API_KEY is not configured");
   }
 
-  const bcc = mergeBcc(params.bcc);
+  const bcc = params.bcc;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
