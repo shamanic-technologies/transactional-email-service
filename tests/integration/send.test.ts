@@ -302,7 +302,7 @@ describe("recipient resolution", () => {
       .set(HEADERS)
       .send({ eventType: "signup_notification", ...BASE });
     const emails = res.body.results.map((r: { email: string }) => r.email);
-    expect(emails).toEqual(["kevin@distribute.you"]);
+    expect(emails).toEqual(["kevin.lourd@gmail.com"]);
     expect(res.body.results.every((r: { sent: boolean }) => r.sent)).toBe(true);
   });
 });

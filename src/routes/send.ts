@@ -30,13 +30,19 @@ const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
 // payment_method_removed is emitted by stripe-service when a customer detaches a card
 // inside Stripe's billing portal. It belongs to no dedup set above, so every removal
 // notifies — losing one of two cards and going to zero are different situations.
-const ADMIN_EMAILS = ["kevin@distribute.you"];
+// staff_daily_digest is emitted once a day by the customer dashboard, which owns and
+// registers the template under that exact name. It belongs to no dedup set above: the
+// dashboard decides when a digest goes out.
+// Hardcoded, never env-configured, so the routing cannot silently drift or be
+// disabled by a missing variable.
+const ADMIN_EMAILS = ["kevin.lourd@gmail.com"];
 const ADMIN_NOTIFICATION_EVENTS = new Set([
   "signup_notification",
   "signin_notification",
   "user_active",
   "brand_daily_budget_changed",
   "payment_method_removed",
+  "staff_daily_digest",
 ]);
 
 
