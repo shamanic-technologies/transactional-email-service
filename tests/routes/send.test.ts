@@ -1003,6 +1003,216 @@ describe("POST /send — payment_method_removed staff routing", () => {
   });
 });
 
+describe("provider_credits_exhausted — a paid provider has run out of credits", () => {
+  const ORG_ONLY = { "x-org-id": "org_456" };
+  const today = new Date().toISOString().split("T")[0];
+  const ALERT = {
+    eventType: "provider_credits_exhausted",
+    metadata: {
+      provider: "Apollo.io",
+      reason: "people/search returned 402 with credits_remaining: 0 on 3 consecutive calls",
+      detail: 'HTTP 402 {"error":"insufficient_credits","credits_remaining":0}',
+    },
+  };
+
+  it("is raised with an org and an API key and no acting user, and reaches the staff list", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(JSON.parse(options.body).to).toBe("kevin.lourd@gmail.com");
+    // No acting user was invented to make the send possible
+    expect(options.headers["x-user-id"]).toBeUndefined();
+    expect(mockValues.mock.calls[0][0].userId).toBeNull();
+  });
+
+  it("carries the caller's context through to the rendered email", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      name: "provider_credits_exhausted",
+      subject: "{{provider}} is out of credits",
+      htmlBody: "<p>{{provider}} — {{reason}} — {{orgId}} — {{detail}}</p>",
+      textBody: "{{provider}} {{reason}} {{orgId}} {{detail}}",
+      fromAddress: null,
+    }]);
+
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.subject).toBe("Apollo.io is out of credits");
+    expect(body.htmlBody).toContain("people/search returned 402");
+    expect(body.htmlBody).toContain("insufficient_credits");
+    // The affected org comes off the request, not off the caller's metadata
+    expect(body.htmlBody).toContain("org_456");
+  });
+
+  it("mails once per org per calendar day, and reports the repeat as a duplicate", async () => {
+    const first = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(first.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`org_456:provider_credits_exhausted:${today}`);
+    expect(mockOnConflictDoNothing).toHaveBeenCalled();
+
+    // A second call the same day loses the race on the unique dedup index
+    mockReturning.mockResolvedValueOnce([]);
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    // Exactly one email left the building
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys on the org, so a different org still gets its own alert the same day", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set({ "x-org-id": "org_other" })
+      .send(ALERT);
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`org_other:provider_credits_exhausted:${today}`);
+  });
+
+  it("keys on the day, so tomorrow the same org can alert again", async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    // Only the clock is faked: supertest still needs real timers to run a request
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(tomorrow);
+
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    const expected = tomorrow.toISOString().split("T")[0];
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`org_456:provider_credits_exhausted:${expected}`);
+    expect(expected).not.toBe(today);
+
+    vi.useRealTimers();
+  });
+
+  it("puts no recipient or user in the key, so a caller with an acting user dedupes identically", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send(ALERT);
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`org_456:provider_credits_exhausted:${today}`);
+  });
+
+  it("goes to staff on /send too, never to the customer resolved from x-user-id", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send(ALERT);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).to).toBe("kevin.lourd@gmail.com");
+  });
+
+  it("cannot be aimed at a customer address on either route", async () => {
+    for (const route of ["/send", "/platform-send"]) {
+      const headers = route === "/send" ? HEADERS : ORG_ONLY;
+
+      const withRecipient = await request(app)
+        .post(route)
+        .set("X-API-Key", "test-service-key")
+        .set(headers)
+        .send({ ...ALERT, recipientEmail: "customer@example.com" });
+
+      const withBcc = await request(app)
+        .post(route)
+        .set("X-API-Key", "test-service-key")
+        .set(headers)
+        .send({ ...ALERT, bccEmails: ["customer@example.com"] });
+
+      expect(withRecipient.status).toBe(400);
+      expect(withBcc.status).toBe(400);
+    }
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an alert that names no provider or no reason", async () => {
+    const noProvider = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "provider_credits_exhausted", metadata: { reason: "402 on every call" } });
+
+    const noReason = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "provider_credits_exhausted", metadata: { provider: "Apollo.io" } });
+
+    const blankProvider = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "provider_credits_exhausted", metadata: { provider: "  ", reason: "402" } });
+
+    expect(noProvider.status).toBe(400);
+    expect(noProvider.body.error).toContain("provider");
+    expect(noReason.status).toBe(400);
+    expect(noReason.body.error).toContain("reason");
+    expect(blankProvider.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts an alert with no upstream detail — detail is optional", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "provider_credits_exhausted", metadata: { provider: "Apollo.io", reason: "402" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].sent).toBe(true);
+  });
+
+  it("still needs an org, and an API key", async () => {
+    const noOrg = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .send(ALERT);
+
+    const noKey = await request(app)
+      .post("/platform-send")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(noOrg.status).toBe(400);
+    expect(noKey.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("staff_daily_digest", () => {
   const ORG_ONLY = { "x-org-id": "org_456" };
 
@@ -1048,6 +1258,26 @@ describe("staff_daily_digest", () => {
 
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("leaves provider_credits_exhausted alone: it is deduped, the digest is not", async () => {
+    const today = new Date().toISOString().split("T")[0];
+
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "staff_daily_digest" });
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBeNull();
+
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "provider_credits_exhausted", metadata: { provider: "Apollo.io", reason: "402" } });
+
+    expect(mockValues.mock.calls[1][0].dedupKey).toBe(`org_456:provider_credits_exhausted:${today}`);
   });
 
   it("applies no dedup — a digest sends every day it is requested", async () => {
