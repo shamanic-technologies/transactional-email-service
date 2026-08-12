@@ -21,6 +21,7 @@ import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
 import { emailEvents, emailTemplates } from "../../src/db/schema.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
+import { seedStaffTemplates } from "../../src/templates/staff-alerts.js";
 import { resolveUserEmail } from "../../src/lib/client-service.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
@@ -350,5 +351,111 @@ describe("database records", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("failed");
     expect(rows[0].errorMessage).toBe("email sending down");
+  });
+});
+
+// --- provider_credits_exhausted, against the real unique dedup index ---
+
+describe("provider_credits_exhausted", () => {
+  const ORG_ONLY = { "x-org-id": "org_test" };
+  const ALERT = {
+    eventType: "provider_credits_exhausted",
+    metadata: {
+      provider: "Apollo.io",
+      reason: "people/search returned 402 with credits_remaining: 0",
+      detail: 'HTTP 402 {"error":"insufficient_credits"}',
+    },
+  };
+
+  beforeAll(async () => {
+    await seedStaffTemplates();
+  });
+
+  it("mails staff once a day per org, however many times the wall is hit", async () => {
+    const first = await request(app)
+      .post("/platform-send")
+      .set("x-api-key", API_KEY)
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(first.status).toBe(200);
+    expect(first.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+
+    for (let i = 0; i < 5; i++) {
+      const repeat = await request(app)
+        .post("/platform-send")
+        .set("x-api-key", API_KEY)
+        .set(ORG_ONLY)
+        .send(ALERT);
+
+      expect(repeat.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    }
+
+    // One row, one delivery, whatever the caller did
+    const rows = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "provider_credits_exhausted"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("sent");
+    expect(rows[0].userId).toBeNull();
+    expect(rows[0].metadata).toMatchObject({ provider: "Apollo.io", orgId: "org_test" });
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1);
+  });
+
+  it("alerts again the next calendar day", async () => {
+    await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
+    const tomorrow = await request(app)
+      .post("/platform-send")
+      .set("x-api-key", API_KEY)
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    vi.useRealTimers();
+
+    expect(tomorrow.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not silence another org's alert on the same day", async () => {
+    await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
+
+    const other = await request(app)
+      .post("/platform-send")
+      .set("x-api-key", API_KEY)
+      .set({ "x-org-id": "org_other" })
+      .send(ALERT);
+
+    expect(other.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders the alert from the template this service registers on boot", async () => {
+    await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
+
+    const [sent] = vi.mocked(sendEmail).mock.calls[0];
+    expect(sent.subject).toBe("Apollo.io is out of credits");
+    expect(sent.htmlBody).toContain("credits_remaining");
+    expect(sent.htmlBody).toContain("org_test");
+    expect(sent.htmlBody).not.toContain("{{");
+  });
+
+  it("refuses an alert aimed at a customer address, and one with no facts", async () => {
+    const aimed = await request(app)
+      .post("/platform-send")
+      .set("x-api-key", API_KEY)
+      .set(ORG_ONLY)
+      .send({ ...ALERT, recipientEmail: "customer@test.com" });
+
+    const factless = await request(app)
+      .post("/platform-send")
+      .set("x-api-key", API_KEY)
+      .set(ORG_ONLY)
+      .send({ eventType: "provider_credits_exhausted", metadata: { provider: "Apollo.io" } });
+
+    expect(aimed.status).toBe(400);
+    expect(factless.status).toBe(400);
+    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
   });
 });
