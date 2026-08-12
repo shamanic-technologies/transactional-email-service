@@ -15,7 +15,7 @@ jobs:
     # freely without reaching another run, a shared box, or production.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

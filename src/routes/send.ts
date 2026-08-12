@@ -24,6 +24,26 @@ const PRODUCT_SCOPED_EVENTS = new Set(["webinar_welcome", "j_minus_3", "j_minus_
 // Event types deduped per org × brand × calendar month (one nudge per brand per month)
 const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
 
+// Event types deduped per org × calendar day, with no recipient in the key.
+// provider_credits_exhausted is raised by a backend service that has just hit a
+// paid provider's credit wall. The same service will hit that same wall on every
+// subsequent operation — thousands in a row — so without a bound one dry provider
+// mails the staff list thousands of times. The org says who is affected and the
+// day bounds the volume; the next calendar day the alert can raise again, because
+// a provider still dry tomorrow is news again.
+const ORG_DAILY_EVENTS = new Set(["provider_credits_exhausted"]);
+
+// Metadata a staff alert cannot be actionable without. Missing either one is a
+// 400, never an email with a blank line where the provider name should be.
+const REQUIRED_METADATA: Record<string, string[]> = {
+  provider_credits_exhausted: ["provider", "reason"],
+};
+
+// Staff-bound events that must never carry a caller-supplied recipient or blind
+// copy on ANY route, /send included — a "provider is dry" alert is internal and
+// has no customer-facing form.
+const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted"]);
+
 // Events where recipient is hardcoded to admin.
 // brand_daily_budget_changed is emitted by billing-service on every real change to a
 // brand's daily budget. It belongs to no dedup set above, so every change notifies.
@@ -33,6 +53,10 @@ const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
 // staff_daily_digest is emitted once a day by the customer dashboard, which owns and
 // registers the template under that exact name. It belongs to no dedup set above: the
 // dashboard decides when a digest goes out.
+// provider_credits_exhausted is raised by any backend service that detects a paid
+// third-party provider has run out of credits. It is deduped once per org per
+// calendar day (ORG_DAILY_EVENTS) so a service hitting the wall on thousands of
+// consecutive operations cannot mail-bomb.
 // Hardcoded, never env-configured, so the routing cannot silently drift or be
 // disabled by a missing variable.
 const ADMIN_EMAILS = ["kevin.lourd@gmail.com"];
@@ -43,6 +67,7 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "brand_daily_budget_changed",
   "payment_method_removed",
   "staff_daily_digest",
+  "provider_credits_exhausted",
 ]);
 
 
@@ -55,6 +80,13 @@ function getCurrentMonth(): string {
 }
 
 function buildDedupKey(orgId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string; brandIds?: string[] }): string | null {
+  // Org-daily dedup: one send per org per calendar day, whoever the recipient is.
+  // The key holds no recipient and no user, so a machine caller with no acting
+  // user deduplicates exactly like one that has one.
+  if (ORG_DAILY_EVENTS.has(eventType)) {
+    return `${orgId}:${eventType}:${getTodayDate()}`;
+  }
+
   // Monthly per-brand dedup: one send per org × brand × calendar month.
   // Brand + month derive entirely from the existing request (x-brand-id header / brandIds body).
   if (MONTHLY_BRAND_EVENTS.has(eventType)) {
@@ -107,6 +139,28 @@ async function handleSend(req: Request, res: Response) {
     const body = parsed.data;
     const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug, audienceId } = res.locals as PlatformIdentityLocals;
 
+    // Staff-only alerts carry no caller-chosen destination on any route
+    if (STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType) && (body.recipientEmail !== undefined || body.bccEmails !== undefined)) {
+      res.status(400).json({
+        error: `'${body.eventType}' does not accept recipientEmail or bccEmails: it is delivered to the internal staff recipient list only`,
+      });
+      return;
+    }
+
+    // An alert with no provider or no reason is not actionable — refuse it
+    // rather than mail a staff email with blanks where the facts should be
+    const required = REQUIRED_METADATA[body.eventType] ?? [];
+    const missing = required.filter((key) => {
+      const value = body.metadata?.[key];
+      return typeof value !== "string" ? value == null : value.trim() === "";
+    });
+    if (missing.length > 0) {
+      res.status(400).json({
+        error: `'${body.eventType}' requires non-empty metadata: ${missing.join(", ")}`,
+      });
+      return;
+    }
+
     // Headers take precedence over body for campaign/brand tracking
     const effectiveCampaignId = headerCampaignId || body.campaignId;
     const effectiveBrandIds = headerBrandIds ?? body.brandIds;
@@ -148,6 +202,12 @@ async function handleSend(req: Request, res: Response) {
       } catch {
         // Continue without email in metadata
       }
+    }
+
+    // The alert names the affected organisation. It is on the request already —
+    // the caller never has to repeat it, and cannot contradict it.
+    if (STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType)) {
+      metadata.orgId = orgId;
     }
 
     // Get template

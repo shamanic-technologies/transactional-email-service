@@ -57,7 +57,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 
 Same body, dedup, template resolution, run tracking and response shape as `POST /send`, for callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.
 
-Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`), so no request on this path can reach a customer. `recipientEmail` and `bccEmails` are rejected for the same reason.
+Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`), so no request on this path can reach a customer. `recipientEmail` and `bccEmails` are rejected for the same reason.
 
 With no acting user, the `email_events` row stores `user_id = NULL`, the runs-service run is created org-only, no `x-user-id` is forwarded downstream, and no actor email is added to metadata.
 
@@ -69,11 +69,39 @@ curl -X POST "$TRANSACTIONAL_EMAIL_SERVICE_URL/platform-send" \
   -d '{"eventType":"payment_method_removed","metadata":{"cardLast4":"4242","remainingChargeableCards":"0"}}'
 ```
 
+#### Reporting that a paid provider has run out of credits
+
+`provider_credits_exhausted` is the event type a backend service raises when it detects that a paid third-party provider is out of credits, so work depending on that provider now produces nothing. It needs an org and an API key, nothing else.
+
+```bash
+curl -X POST "$TRANSACTIONAL_EMAIL_SERVICE_URL/platform-send" \
+  -H "x-api-key: $TRANSACTIONAL_EMAIL_SERVICE_API_KEY" \
+  -H "x-org-id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventType": "provider_credits_exhausted",
+    "metadata": {
+      "provider": "Apollo.io",
+      "reason": "people/search returned 402 with credits_remaining: 0 on 3 consecutive calls",
+      "detail": "HTTP 402 {\"error\":\"insufficient_credits\",\"credits_remaining\":0}"
+    }
+  }'
+```
+
+| Metadata field | Required | Description |
+| -------------- | -------- | ----------- |
+| `provider`     | Yes      | Which provider is dry, as staff would name it |
+| `reason`       | Yes      | Why the caller concluded it is out of credits |
+| `detail`       | No       | Any raw upstream status or response body, free-form |
+| `orgId`        | —        | Filled in from `x-org-id`; a supplied value is overwritten |
+
+A missing or blank `provider` or `reason` is a 400: a staff alert with blanks where the facts belong is not actionable. The alert is deduped once per org per calendar day, so a service that hits the credit wall on thousands of consecutive operations mails staff once and the repeats come back `{ sent: false, reason: "duplicate" }`. The next calendar day it can raise again. Its template is registered by this service on boot, not by the caller.
+
 **Error responses:**
 
 | Status | Condition |
 | ------ | --------- |
-| 400    | Missing `x-org-id`, missing `eventType`, a non-staff-bound `eventType`, or `recipientEmail`/`bccEmails` supplied |
+| 400    | Missing `x-org-id`, missing `eventType`, a non-staff-bound `eventType`, `recipientEmail`/`bccEmails` supplied, or a `provider_credits_exhausted` with no `provider` or no `reason` |
 | 401    | Missing or invalid `x-api-key` |
 | 404    | No template found for the given `eventType` |
 
@@ -305,15 +333,18 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | Daily per user | `user_active` | `{orgId}:{eventType}:{userId}:{date}` |
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | Monthly per brand | `audience_fully_contacted` | `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}` |
+| Daily per org | `provider_credits_exhausted` | `{orgId}:{eventType}:{YYYY-MM-DD}` |
 | None (repeatable) | `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, and any event not listed above | — |
 
 Monthly per-brand dedup caps a send to at most once per org per brand per calendar month. Brand and month derive entirely from the existing request (`x-brand-id` header, or `brandIds` body field). A send in a new calendar month, or for a different brand, goes through; a repeat within the same brand and month returns `{ sent: false, reason: "duplicate" }`. If no brand identity is present the event falls through to no-dedup (repeatable).
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `send.ts`, never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `send.ts`, never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
 
 `brand_daily_budget_changed` is emitted by billing-service on every real change to a brand's daily budget. It carries no dedup, so two changes on the same day produce two notifications.
 
 `payment_method_removed` is emitted by stripe-service when a customer detaches a card in Stripe's billing portal. There is no acting user of ours, so it arrives on `POST /platform-send`. It carries no dedup: losing one of two cards and going to zero chargeable cards are different situations and staff needs both.
+
+`provider_credits_exhausted` is raised by any backend service that detects a paid third-party provider has run out of credits — apollo-service on Apollo.io credit exhaustion is the first. There is no acting user, so it arrives on `POST /platform-send`. Its dedup key holds neither a recipient nor a user, so a machine caller deduplicates exactly like one with an acting user: one alert per org per calendar day, however many operations hit the wall. It accepts no `recipientEmail` and no `bccEmails` on any route, so it cannot reach a customer address, and unlike the product templates its own template ships in this repo (`src/templates/staff-alerts.ts`) and is registered on boot — no consuming app owns a staff alert, and leaving it to callers would mean every future caller shipping its own copy of the same email.
 
 `staff_daily_digest` is emitted once a day by the customer dashboard, which owns and registers the template under that exact name. It has no acting user, so it arrives on `POST /platform-send`, and it carries no dedup — the dashboard decides when a digest goes out.
 
@@ -412,6 +443,7 @@ src/
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
+    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted)
 tests/
   migrations.test.ts    # Validates migration files use idempotent patterns
   ...
