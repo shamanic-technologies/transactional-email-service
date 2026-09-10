@@ -207,6 +207,14 @@ export const SendUpdateRequestSchema = z
       description:
         "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here.",
     }),
+    from: z
+      .string()
+      .email()
+      .optional()
+      .openapi({
+        description:
+          "The address this update goes out from, for this send only. Omit it and the update leaves the investor-update sender, kevin@distribute.you, exactly as every update did before this field existed. State one to send from another identity — a newsletter leaving a dedicated subdomain, say. The address must be a sender Postmark has verified: an unverified one is refused by the provider and the whole send fails with its reason, never silently falling back to the default.",
+      }),
   })
   .openapi("SendUpdateRequest");
 
@@ -245,12 +253,23 @@ export const SendUpdateResponseSchema = z
     updateId: z.string(),
     slug: z.string(),
     subject: z.string(),
-    status: z.enum(["sent", "partial"]),
+    status: z.enum(["sent", "partial", "failed"]).openapi({
+      description:
+        '"sent" — every recipient succeeded. "partial" — some did. "failed" — none did, which is answered with a 502 carrying the provider\'s reason.',
+    }),
+    from: z.string().openapi({ description: "The address the update went out from" }),
     recipientCount: z.number().openapi({ description: "Recipients the update actually reached" }),
     skippedOptedOut: z.array(z.string()).openapi({ description: "Members not mailed because the provider is suppressing them" }),
     failures: z.array(UpdateFailureSchema).openapi({ description: "Recipients whose send failed, with the provider's reason" }),
   })
   .openapi("SendUpdateResponse");
+
+/** The 502 body when a send reached nobody: the outcome, plus the provider's reason. */
+export const SendUpdateFailureResponseSchema = SendUpdateResponseSchema.extend({
+  error: z.string().openapi({
+    description: "The provider's own reason for refusing, verbatim — an unverified sender signature, say",
+  }),
+}).openapi("SendUpdateFailureResponse");
 
 export const MailingListUpdateSchema = z
   .object({
@@ -258,7 +277,8 @@ export const MailingListUpdateSchema = z
     subject: z.string(),
     body: z.string().openapi({ description: "Markdown as authored" }),
     htmlBody: z.string().openapi({ description: "Body as sent" }),
-    status: z.enum(["sent", "partial"]),
+    status: z.enum(["sent", "partial", "failed"]),
+    from: z.string().openapi({ description: "The address this update went out from" }),
     recipientCount: z.number(),
     failures: z.array(UpdateFailureSchema),
     sentAt: z.string().openapi({ format: "date-time" }),
@@ -662,7 +682,9 @@ registry.registerPath({
     `${mailingListsDescription} The caller supplies the subject and a markdown body (inline images supported); ` +
     "recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. " +
     "Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing " +
-    "addresses and reasons, never as a clean success.",
+    "addresses and reasons, never as a clean success. The sender defaults to the investor-update address and can be " +
+    "stated per send with `from`; a sender the provider has not verified fails the send with a 502 carrying the " +
+    "provider's reason, and is never retried onto the default.",
   tags: ["Mailing lists"],
   security: [{ apiKey: [] }],
   request: {
@@ -675,6 +697,11 @@ registry.registerPath({
     400: { description: "Validation error, an SVG image no mail client renders, empty list, or every subscriber opted out", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: {
+      description:
+        "Not one recipient was reached — an unverified sender, say. Carries the provider's reason and the recorded update, which is stored as `failed`.",
+      content: { "application/json": { schema: SendUpdateFailureResponseSchema } },
+    },
   },
 });
 

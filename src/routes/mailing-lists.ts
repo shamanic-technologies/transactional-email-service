@@ -28,8 +28,12 @@ const router = Router();
  * in another recipient's headers.
  */
 
-/** Every update is sent from this address. */
-const MAILING_LIST_FROM_ADDRESS = "kevin@distribute.you";
+/**
+ * The sender an update leaves from when the caller states none. This is the
+ * address every update left from before a sender could be stated per send, so
+ * a caller that says nothing sends exactly what it sent before.
+ */
+const DEFAULT_MAILING_LIST_FROM_ADDRESS = "kevin@distribute.you";
 
 /** Postmark accepts 500 messages per batch; per-recipient sends run in bounded waves. */
 const SEND_CONCURRENCY = 8;
@@ -258,7 +262,14 @@ router.post("/mailing-lists/updates/preview", requireApiKey, requireOrgIdOnly, (
 /**
  * POST /mailing-lists/:slug/updates
  * Sends the update to every member the provider is not suppressing — one
- * message per recipient — and records what was sent.
+ * message per recipient — and records what was sent, the sender included.
+ *
+ * The sender is stated per send. A caller that states none sends from the
+ * investor-update address, which is where every update went before this was
+ * askable, so the composer that has always sent investor updates keeps sending
+ * them unchanged. Postmark refuses a sender it has not verified, and that
+ * refusal is returned to the caller with the provider's own words: the send
+ * fails whole rather than reaching anyone from an identity nobody chose.
  */
 router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, async (req, res) => {
   const slug = readSlug(req, res);
@@ -271,6 +282,11 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
   }
 
   const { subject, body } = parsed.data;
+  // Stated per send, defaulted to the investor-update sender. Postmark refuses
+  // an address it has not verified; that refusal is surfaced below rather than
+  // retried onto the default, because a newsletter arriving from the investor
+  // address is a worse outcome than a newsletter that did not go out.
+  const fromAddress = parsed.data.from ?? DEFAULT_MAILING_LIST_FROM_ADDRESS;
 
   // The sender is the last place this is cheap to catch: it knows the body
   // before it goes out, and an SVG reaches the recipient as a broken-image
@@ -352,7 +368,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       {
         service: "transactional-email-service",
         event: "mailing-list-update-start",
-        detail: `Sending '${subject}' to ${recipients.length} subscriber(s) of '${slug}'`,
+        detail: `Sending '${subject}' to ${recipients.length} subscriber(s) of '${slug}' from ${fromAddress}`,
       },
       traceHeaders
     );
@@ -377,7 +393,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
               orgId: identity.orgId,
               userId: identity.userId,
               runId: run.id,
-              from: MAILING_LIST_FROM_ADDRESS,
+              from: fromAddress,
               workflowHeaders,
             });
             return { email, reason: null as string | null };
@@ -391,15 +407,22 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
         if (outcome.reason === null) sentCount++;
         else failures.push({ email: outcome.email, reason: outcome.reason });
       }
+
+      // A whole wave failing is not a recipient's problem — it is the message's,
+      // and a sender the provider has not verified is refused for everyone
+      // identically. Stop rather than walk the rest of the list collecting the
+      // same refusal a thousand times.
+      if (sentCount === 0) break;
     }
 
-    const status = failures.length === 0 ? "sent" : "partial";
+    const status = sentCount === 0 ? "failed" : failures.length === 0 ? "sent" : "partial";
 
     const [record] = await db
       .insert(mailingListUpdates)
       .values({
         listId: list.id,
         subject,
+        fromAddress,
         bodyMarkdown: body,
         htmlBody,
         status,
@@ -413,7 +436,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       {
         service: "transactional-email-service",
         event: "mailing-list-update-done",
-        detail: `'${subject}' reached ${sentCount}/${recipients.length}; ${failures.length} failed`,
+        detail: `'${subject}' reached ${sentCount}/${recipients.length} from ${fromAddress}; ${failures.length} failed`,
         ...(failures.length > 0 ? { level: "error" as const } : {}),
       },
       traceHeaders
@@ -426,15 +449,27 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       workflowHeaders
     );
 
-    res.json({
+    const outcome = {
       updateId: record.id,
       slug,
       subject,
       status,
+      from: fromAddress,
       recipientCount: sentCount,
       skippedOptedOut,
       failures,
-    });
+    };
+
+    // Nobody was reached. Answering 200 here would report a send that never
+    // happened as a send that happened badly, and the caller most needs the
+    // provider's own words — an unverified sender signature reads as nothing
+    // else. The recorded update stays, marked failed.
+    if (status === "failed") {
+      res.status(502).json({ ...outcome, error: failures[0].reason });
+      return;
+    }
+
+    res.json(outcome);
   } catch (error: any) {
     console.error("Send mailing-list update error:", error);
     res.status(500).json({ error: error.message || "Failed to send mailing-list update" });
@@ -468,6 +503,7 @@ router.get("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asyn
       updates: rows.map((r) => ({
         id: r.id,
         subject: r.subject,
+        from: r.fromAddress,
         body: r.bodyMarkdown,
         htmlBody: r.htmlBody,
         status: r.status,
