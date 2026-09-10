@@ -170,6 +170,46 @@ describe("sending and history", () => {
     expect(history.body.updates[0].failures).toHaveLength(1);
   });
 
+  it("keeps the sender on the record, so a newsletter reads apart from an investor update", async () => {
+    await paste("ada@example.com");
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3 update", body: "investors" });
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro for cold email", body: "newsletter", from: "news@news.distribute.you" });
+
+    const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
+    expect(history.status).toBe(200);
+    const bySubject = Object.fromEntries(history.body.updates.map((u: any) => [u.subject, u.from]));
+    expect(bySubject["Flash vs Pro for cold email"]).toBe("news@news.distribute.you");
+    expect(bySubject["Q3 update"]).toBe("kevin@distribute.you");
+  });
+
+  it("answers a send nobody received with the provider's reason, and records it as failed", async () => {
+    await paste("ada@example.com");
+    vi.mocked(sendEmail).mockRejectedValue(
+      new Error('Email sending failed (422): {"Message":"Sender signature not confirmed"}')
+    );
+
+    const sent = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", body: "b", from: "news@news.distribute.you" });
+
+    expect(sent.status).toBe(502);
+    expect(sent.body.error).toContain("Sender signature not confirmed");
+
+    const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
+    expect(history.body.updates[0].status).toBe("failed");
+    expect(history.body.updates[0].from).toBe("news@news.distribute.you");
+    expect(history.body.updates[0].recipientCount).toBe(0);
+  });
+
   it("404s on an unknown list", async () => {
     const res = await request(app).get("/mailing-lists/nobody/updates").set(AUTH);
     expect(res.status).toBe(404);

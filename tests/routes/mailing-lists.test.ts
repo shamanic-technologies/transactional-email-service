@@ -330,6 +330,96 @@ describe("POST /mailing-lists/:slug/updates", () => {
     }
   });
 
+  it("sends from the address the caller states, for that send only", async () => {
+    seedList(["a@example.com", "b@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", body: "hello", from: "news@news.distribute.you" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.from).toBe("news@news.distribute.you");
+
+    const calls = (sendEmail as any).mock.calls.map((c: any[]) => c[0]);
+    expect(calls.map((c: any) => c.from)).toEqual([
+      "news@news.distribute.you",
+      "news@news.distribute.you",
+    ]);
+    expect(store.inserted.updates[0].fromAddress).toBe("news@news.distribute.you");
+  });
+
+  it("sends from the investor-update address when the caller states none", async () => {
+    seedList(["a@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", body: "b" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.from).toBe("kevin@distribute.you");
+    expect((sendEmail as any).mock.calls[0][0].from).toBe("kevin@distribute.you");
+    expect(store.inserted.updates[0].fromAddress).toBe("kevin@distribute.you");
+  });
+
+  it("refuses a sender that is not an address at all, before anything is sent", async () => {
+    seedList(["a@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", body: "b", from: "news.distribute.you" });
+
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(store.inserted.updates).toEqual([]);
+  });
+
+  it("fails the whole send with the provider's reason when the sender is unverified, and never retries the default", async () => {
+    seedList(["a@example.com", "b@example.com"]);
+    (sendEmail as any).mockRejectedValue(
+      new Error(
+        'Email sending failed (422): {"ErrorCode":400,"Message":"Sender signature not confirmed: news@news.distribute.you"}'
+      )
+    );
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", body: "b", from: "news@news.distribute.you" });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("Sender signature not confirmed");
+    expect(res.body.status).toBe("failed");
+    expect(res.body.recipientCount).toBe(0);
+    expect(res.body.from).toBe("news@news.distribute.you");
+
+    // Every attempt used the stated sender; none fell back to the default.
+    const attempted = (sendEmail as any).mock.calls.map((c: any[]) => c[0].from);
+    expect(attempted.every((f: string) => f === "news@news.distribute.you")).toBe(true);
+    expect(attempted).not.toContain("kevin@distribute.you");
+
+    expect(store.inserted.updates[0].status).toBe("failed");
+    expect(store.inserted.updates[0].fromAddress).toBe("news@news.distribute.you");
+    expect(updateRun).toHaveBeenCalledWith("run-broadcast-1", "failed", expect.anything(), expect.anything());
+  });
+
+  it("stops after the first wave when nothing in it lands, rather than collecting the same refusal per member", async () => {
+    seedList(Array.from({ length: 20 }, (_, i) => `m${i}@example.com`));
+    (sendEmail as any).mockRejectedValue(new Error("Email sending failed (422): Sender signature not confirmed"));
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", body: "b", from: "news@news.distribute.you" });
+
+    expect(res.status).toBe(502);
+    // SEND_CONCURRENCY is 8: one wave attempted, the other 12 members untouched.
+    expect(sendEmail).toHaveBeenCalledTimes(8);
+    expect(res.body.failures).toHaveLength(8);
+  });
+
   it("does not add its own unsubscribe markup — email-gateway appends the provider one", async () => {
     seedList(["a@example.com"]);
 

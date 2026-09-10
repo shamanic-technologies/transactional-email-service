@@ -282,7 +282,8 @@ Sends a written update to every member Postmark is not suppressing.
 ```json
 {
   "subject": "Q3 update",
-  "body": "## Q3 update\n\nRevenue **doubled**.\n\n![chart](https://cdn.example.com/q3.png)"
+  "body": "## Q3 update\n\nRevenue **doubled**.\n\n![chart](https://cdn.example.com/q3.png)",
+  "from": "news@news.distribute.you"
 }
 ```
 
@@ -292,7 +293,11 @@ The HTML carries every style inline on the element. Gmail discards `<style>` and
 
 An update carrying an **SVG image is rejected with a 400** naming the URL. Gmail, Outlook and Yahoo all refuse `image/svg+xml` and render the alt text in a broken-image placeholder instead, and the sender knows the body before it goes out. Use PNG or JPEG. Both `![alt](…​.svg)` and a raw `<img src="….svg">` are caught, including `.svgz`, a query string or fragment after the extension, and `data:image/svg+xml` URIs.
 
-One message is sent per recipient, in waves of 8, so no recipient ever appears in another recipient's headers. Every update is sent from `kevin@distribute.you`.
+One message is sent per recipient, in waves of 8, so no recipient ever appears in another recipient's headers.
+
+`from` is optional and applies to that send only. Omit it and the update leaves `kevin@distribute.you`, which is where every update went before the field existed, so a caller that never states one keeps sending exactly what it sent before. State one to send from another verified identity — a newsletter leaving a dedicated subdomain rather than the address investors hear from.
+
+The address must be a sender Postmark has verified. An unverified one is refused for every recipient identically, so the send stops after the first wave and answers **502** with the provider's own reason; it is never retried onto the default, because a newsletter arriving from the investor address is worse than a newsletter that did not go out. The update is still recorded, as `failed`.
 
 **Response:**
 
@@ -302,17 +307,18 @@ One message is sent per recipient, in waves of 8, so no recipient ever appears i
   "slug": "investors",
   "subject": "Q3 update",
   "status": "sent",
+  "from": "kevin@distribute.you",
   "recipientCount": 12,
   "skippedOptedOut": ["b@fund.com"],
   "failures": []
 }
 ```
 
-`status` is `partial` when at least one recipient failed, and `failures` names each one with the provider's reason. A partial send is never recorded as a clean success.
+`status` is `partial` when at least one recipient failed, and `failures` names each one with the provider's reason. A partial send is never recorded as a clean success. `failed` means nobody was reached at all; that answer is a 502 carrying an `error` field with the provider's reason beside the same body.
 
 #### `GET /mailing-lists/{slug}/updates`
 
-Every update sent to the list, newest first, with the subject, the markdown as authored, the HTML as sent, the timestamp and the recipient count.
+Every update sent to the list, newest first, with the subject, the sender it went out from (`from`), the markdown as authored, the HTML as sent, the timestamp and the recipient count. Updates sent before the sender could be stated read as `kevin@distribute.you`, which is what they were sent from.
 
 ### `GET /health`
 

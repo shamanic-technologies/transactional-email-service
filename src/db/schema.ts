@@ -110,6 +110,13 @@ export const mailingListUpdates = pgTable(
       .notNull()
       .references(() => mailingLists.id, { onDelete: "cascade" }),
     subject: text("subject").notNull(),
+    /**
+     * The address this update went out from, as sent. Stated per send by the
+     * caller and defaulted to the investor-update sender, so a later read can
+     * tell a newsletter leaving a dedicated subdomain from an investor update
+     * leaving the apex address.
+     */
+    fromAddress: text("from_address").notNull(),
     /** Markdown as authored by staff. */
     bodyMarkdown: text("body_markdown").notNull(),
     /** Rendered HTML, byte-identical to what recipients received. */
