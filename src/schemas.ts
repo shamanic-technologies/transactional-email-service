@@ -200,12 +200,61 @@ export const RemoveSubscriberResponseSchema = z
   })
   .openapi("RemoveSubscriberResponse");
 
+/**
+ * An update body arrives one of two ways and never both.
+ *
+ * `body` is markdown this service renders — the composer path, unchanged.
+ * `htmlBody` is a finished HTML document staff authored themselves, which no
+ * markdown renderer can express: table layout, inline styles, hosted images, a
+ * 600px shell of its own. It is sent exactly as supplied.
+ *
+ * Refusing "both" and "neither" loudly matters more here than it looks. Both
+ * would make the service pick one silently, and the one it picked would be
+ * discovered by tens of thousands of people reading the wrong email.
+ */
+const bodyKindRefinement = (
+  value: { body?: string; htmlBody?: string; textBody?: string },
+  ctx: { addIssue: (issue: { code: "custom"; path: string[]; message: string }) => void }
+) => {
+  if (value.body && value.htmlBody) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["htmlBody"],
+      message:
+        "State either `body` (markdown this service renders) or `htmlBody` (a document you authored), never both — there is no rule for which would win.",
+    });
+  }
+  if (!value.body && !value.htmlBody) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["body"],
+      message: "An update needs a body: `body` as markdown, or `htmlBody` as a document you authored.",
+    });
+  }
+  if (value.textBody && !value.htmlBody) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["textBody"],
+      message:
+        "`textBody` belongs with `htmlBody` only. A markdown update sends the markdown itself as its text part, so a `textBody` beside `body` would be dropped without a word.",
+    });
+  }
+};
+
 export const SendUpdateRequestSchema = z
   .object({
     subject: z.string().min(1),
-    body: z.string().min(1).openapi({
+    body: z.string().min(1).optional().openapi({
       description:
-        "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here.",
+        "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here. Mutually exclusive with `htmlBody`; exactly one of the two is required.",
+    }),
+    htmlBody: z.string().min(1).optional().openapi({
+      description:
+        "A complete HTML document staff authored, sent to every recipient byte-for-byte as supplied: nothing is re-rendered, no styles are inlined for you, and it is not wrapped in the markdown template's shell. Use it for a designed newsletter — table layout, inline styles on every element, hosted PNG or JPEG images, a 600px measure — which markdown cannot express. Everything else applies unchanged: email-gateway appends the unsubscribe footer, suppressed members are skipped, one message goes per recipient, and `from` selects the sender. SVG images are still refused with a 400, since they arrive as broken placeholders whoever authored the markup. Mutually exclusive with `body`; exactly one of the two is required.",
+    }),
+    textBody: z.string().min(1).optional().openapi({
+      description:
+        "The plain-text part for an `htmlBody` send. Omit it and one is derived from the HTML — tags dropped, links kept as `label (url)` — so the message always carries a text alternative. Supply it to write better prose than a derivation gives. Only valid beside `htmlBody`: a markdown update's text part is its markdown.",
     }),
     from: z
       .string()
@@ -216,24 +265,40 @@ export const SendUpdateRequestSchema = z
           "The address this update goes out from, for this send only. Omit it and the update leaves the investor-update sender, kevin@distribute.you, exactly as every update did before this field existed. State one to send from another identity — a newsletter leaving a dedicated subdomain, say. The address must be a sender Postmark has verified: an unverified one is refused by the provider and the whole send fails with its reason, never silently falling back to the default.",
       }),
   })
+  .superRefine(bodyKindRefinement)
   .openapi("SendUpdateRequest");
 
 export const PreviewUpdateRequestSchema = z
   .object({
-    body: z.string().min(1).openapi({
+    body: z.string().min(1).optional().openapi({
       description:
-        "The update body as markdown, exactly as it would be sent. Rendered by the same code a real send uses.",
+        "The update body as markdown, exactly as it would be sent. Rendered by the same code a real send uses. Mutually exclusive with `htmlBody`; exactly one of the two is required.",
+    }),
+    htmlBody: z.string().min(1).optional().openapi({
+      description:
+        "A document staff authored, previewed exactly as a send treats it: returned unchanged. Mutually exclusive with `body`.",
+    }),
+    textBody: z.string().min(1).optional().openapi({
+      description:
+        "The plain-text part for an `htmlBody` preview. Omit it and the derived one comes back, which is what a send with no `textBody` would use. Only valid beside `htmlBody`.",
     }),
   })
+  .superRefine(bodyKindRefinement)
   .openapi("PreviewUpdateRequest");
 
 export const PreviewUpdateResponseSchema = z
   .object({
     htmlBody: z.string().openapi({
       description:
-        "The HTML a recipient would receive for this body, byte-for-byte what a send of the same body produces. email-gateway appends the unsubscribe footer at send time, so it is absent here.",
+        "The HTML a recipient would receive for this body, byte-for-byte what a send of the same body produces. email-gateway appends the unsubscribe footer at send time, so it is absent here. For an authored `htmlBody` this is that document unchanged.",
     }),
-    textBody: z.string().openapi({ description: "The plain-text part, which is the markdown itself" }),
+    textBody: z.string().openapi({
+      description:
+        "The plain-text part: the markdown itself for a markdown body, and for an authored one the supplied `textBody` or the text derived from the HTML.",
+    }),
+    bodyKind: z.enum(["markdown", "html"]).openapi({
+      description: 'Which body this preview rendered: "markdown" was rendered by this service, "html" was returned as authored.',
+    }),
     unrenderableImages: z.array(z.string()).openapi({
       description:
         "Image URLs no mail client renders. A send of this body would be refused with a 400 naming these; empty means the body is sendable.",
@@ -275,8 +340,14 @@ export const MailingListUpdateSchema = z
   .object({
     id: z.string(),
     subject: z.string(),
-    body: z.string().openapi({ description: "Markdown as authored" }),
+    body: z.string().nullable().openapi({
+      description: "Markdown as authored, and null when the update was authored as HTML — there was no markdown",
+    }),
     htmlBody: z.string().openapi({ description: "Body as sent" }),
+    bodyKind: z.enum(["markdown", "html"]).openapi({
+      description:
+        'How this update was authored: "markdown" was rendered by this service, "html" was sent as the author wrote it.',
+    }),
     status: z.enum(["sent", "partial", "failed"]),
     from: z.string().openapi({ description: "The address this update went out from" }),
     recipientCount: z.number(),
@@ -660,7 +731,8 @@ registry.registerPath({
     `${mailingListsDescription} Renders a draft body and returns nothing else: no message is sent, no update is ` +
     "recorded, no suppression state is read. The rendering is the same code path a real send uses, so an author " +
     "approving this preview is approving what lands in the inbox. It takes no list, because the body renders the " +
-    "same whoever receives it.",
+    "same whoever receives it. A body authored as HTML (`htmlBody`) comes back unchanged, which is also what a send " +
+    "does with it.",
   tags: ["Mailing lists"],
   security: [{ apiKey: [] }],
   request: {
@@ -679,8 +751,10 @@ registry.registerPath({
   path: "/mailing-lists/{slug}/updates",
   summary: "Send a written update to a mailing list",
   description:
-    `${mailingListsDescription} The caller supplies the subject and a markdown body (inline images supported); ` +
-    "recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. " +
+    `${mailingListsDescription} The caller supplies the subject and exactly one body: \`body\` as markdown ` +
+    "(inline images supported), which this service renders to HTML, or `htmlBody` as a complete document the staff " +
+    "author wrote, which goes out byte-for-byte as supplied with a text part supplied or derived. Stating both, or " +
+    "neither, is refused with a 400. One message is sent per recipient, so no recipient is visible to another. " +
     "Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing " +
     "addresses and reasons, never as a clean success. The sender defaults to the investor-update address and can be " +
     "stated per send with `from`; a sender the provider has not verified fails the send with a 502 carrying the " +

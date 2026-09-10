@@ -227,7 +227,7 @@ Re-assigns `email_events` rows from one org to another for a given brand. Only u
 
 ### Mailing lists (staff-only)
 
-A mailing list is a platform-level list of bare email addresses — `investors` is the first one, a changelog or customer newsletter list is the obvious next. Lists belong to the platform, not to a customer organisation, and nothing here is filtered by org. All five routes require `x-api-key`, `x-org-id` and `x-user-id`; `x-org-id` and `x-user-id` are the **sending identity** only (key-service resolves the Postmark token and stream against them, and a send is billed to that organisation).
+A mailing list is a platform-level list of bare email addresses — `investors` is the first one, a changelog or customer newsletter list is the obvious next. Lists belong to the platform, not to a customer organisation, and nothing here is filtered by org. Every route requires `x-api-key` and `x-org-id`, and every route but the preview requires `x-user-id`; `x-org-id` and `x-user-id` are the **sending identity** only (key-service resolves the Postmark token and stream against them, and a send is billed to that organisation).
 
 Opt-out state is never stored here. Postmark's broadcast stream owns the suppression list — the native one-click unsubscribe, a spam complaint and a hard bounce all write to it — and both the list read and the send read it back from Postmark, using the platform token resolved through key-service. postmark-service's own mirror is not usable for this: it is org-scoped and only covers addresses already messaged under that org, so it reports a suppressed address as subscribed.
 
@@ -287,11 +287,19 @@ Sends a written update to every member Postmark is not suppressing.
 }
 ```
 
+An update carries exactly one body: `body` as markdown, which this service renders, or `htmlBody` as a finished document the author wrote. Stating both, or neither, is a **400** — there is no rule for which would win, and the one picked silently would be discovered by everyone who reads the email.
+
 `body` is markdown — headings, bold, links, tables, and `![alt](url)` inline images. It is rendered to HTML for delivery, and the markdown itself is sent as the plain-text part. Do not add an unsubscribe link: email-gateway appends a discreet one to every transactional HTML body, and Postmark resolves it against the broadcast stream.
+
+`htmlBody` is a complete HTML document staff authored, sent to every recipient **byte-for-byte as supplied**: nothing is re-rendered, no styles are inlined for you, and it is not wrapped in the markdown template's shell. It exists for a designed newsletter — table layout, inline styles on every element, hosted PNG or JPEG images, a 600px measure — which markdown cannot express. The same rules for authored markup apply as for the rendered kind (inline styles only, table geometry, no `<style>` block worth relying on), because the client does not care who wrote the markup.
+
+Everything else is identical for both kinds: email-gateway appends the unsubscribe footer, suppressed members are skipped against Postmark at send time, one message goes per recipient, `from` selects the sender, and the update is recorded.
+
+A message always carries a text part. For markdown it is the markdown. For `htmlBody` it is the optional `textBody` when the author writes one, and otherwise one derived from the HTML — tags dropped, links kept as `label (url)`, entities unescaped. A document that yields no text at all (an all-image layout) is refused with a **400** asking for `textBody`, because clients that prefer text would show an empty message. `textBody` beside `body` is also a **400**: a markdown update's text part is its markdown, so a `textBody` there would be dropped without a word.
 
 The HTML carries every style inline on the element. Gmail discards `<style>` and `<head>` and Outlook's Word engine ignores most of what is left, so a stylesheet renders in a browser preview and arrives unstyled in the inbox. Layout is a centred table capped at 600px with `width:100%`, which gives a readable measure on a desktop and no horizontal scroll on a phone; images are capped at `max-width:100%`, and tables use `table-layout:fixed` with percentage columns (the label column wider than the figures) so a row wraps instead of pushing the message sideways. Nothing depends on flexbox, grid, custom properties or class attributes.
 
-An update carrying an **SVG image is rejected with a 400** naming the URL. Gmail, Outlook and Yahoo all refuse `image/svg+xml` and render the alt text in a broken-image placeholder instead, and the sender knows the body before it goes out. Use PNG or JPEG. Both `![alt](…​.svg)` and a raw `<img src="….svg">` are caught, including `.svgz`, a query string or fragment after the extension, and `data:image/svg+xml` URIs.
+An update carrying an **SVG image is rejected with a 400** naming the URL, whichever kind of body it came in. Gmail, Outlook and Yahoo all refuse `image/svg+xml` and render the alt text in a broken-image placeholder instead, and the sender knows the body before it goes out. Use PNG or JPEG. Both `![alt](…​.svg)` and a raw `<img src="….svg">` are caught, including `.svgz`, a query string or fragment after the extension, and `data:image/svg+xml` URIs.
 
 One message is sent per recipient, in waves of 8, so no recipient ever appears in another recipient's headers.
 
@@ -316,9 +324,19 @@ The address must be a sender Postmark has verified. An unverified one is refused
 
 `status` is `partial` when at least one recipient failed, and `failures` names each one with the provider's reason. A partial send is never recorded as a clean success. `failed` means nobody was reached at all; that answer is a 502 carrying an `error` field with the provider's reason beside the same body.
 
+#### `POST /mailing-lists/updates/preview`
+
+Renders a draft the way a recipient will receive it and does nothing else: no message goes out, no update is recorded, no suppression state is read. It takes no list slug and no `x-user-id` — the body renders the same whoever receives it, and nothing here resolves a provider key or spends.
+
+**Request body:** the same body fields as a send — `body`, or `htmlBody` with an optional `textBody`.
+
+**Response:** `{ "htmlBody": …, "textBody": …, "bodyKind": "markdown" | "html", "unrenderableImages": [] }`
+
+The rendering is the same code path a send takes, so approving a preview is approving what lands in the inbox. An authored `htmlBody` comes back unchanged, which is also what a send does with it. Unrenderable images are **reported** here rather than refused: a browser renders SVG happily, which is exactly the trap, so the body still renders and the offending URLs come back beside it.
+
 #### `GET /mailing-lists/{slug}/updates`
 
-Every update sent to the list, newest first, with the subject, the sender it went out from (`from`), the markdown as authored, the HTML as sent, the timestamp and the recipient count. Updates sent before the sender could be stated read as `kevin@distribute.you`, which is what they were sent from.
+Every update sent to the list, newest first, with the subject, the sender it went out from (`from`), `bodyKind` (`"markdown"` or `"html"`), the markdown as authored in `body` (`null` for an update authored as HTML — there was none), the HTML as sent, the timestamp and the recipient count. Updates sent before the sender could be stated read as `kevin@distribute.you`, which is what they were sent from.
 
 ### `GET /health`
 
@@ -433,7 +451,7 @@ src/
     address-blob.ts     # Lenient parser for a pasted blob of email addresses
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client
-    mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard
+    mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard; plain-text derivation for authored HTML
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
     runs-client.ts      # Runs service client (create/update runs)
     trace-event.ts      # Fire-and-forget event tracing to runs-service

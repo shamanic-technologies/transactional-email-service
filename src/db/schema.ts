@@ -117,9 +117,21 @@ export const mailingListUpdates = pgTable(
      * leaving the apex address.
      */
     fromAddress: text("from_address").notNull(),
-    /** Markdown as authored by staff. */
-    bodyMarkdown: text("body_markdown").notNull(),
-    /** Rendered HTML, byte-identical to what recipients received. */
+    /**
+     * How the body was authored: "markdown" was written as markdown and
+     * rendered here, "html" was a finished document sent as the author wrote it.
+     * Recorded because the two are indistinguishable from `html_body` alone,
+     * and a later reader asking "did we render this or did a person?" has no
+     * other way to know.
+     */
+    bodyKind: text("body_kind").notNull(),
+    /**
+     * Markdown as authored by staff — null for an update authored as HTML,
+     * where there never was any markdown. Storing the HTML here instead would
+     * record a markdown source nobody wrote.
+     */
+    bodyMarkdown: text("body_markdown"),
+    /** Body as sent, byte-identical to what recipients received. */
     htmlBody: text("html_body").notNull(),
     /** "sent" — every recipient succeeded. "partial" — at least one failed. */
     status: text("status").notNull(),

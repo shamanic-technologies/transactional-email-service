@@ -106,6 +106,13 @@
       "when": 1789063431939,
       "tag": "0014_gorgeous_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1789430000000,
+      "tag": "0015_authored_html_updates",
+      "breakpoints": true
     }
   ]
 }

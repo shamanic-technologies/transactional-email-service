@@ -215,3 +215,63 @@ describe("sending and history", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("an update authored as HTML", () => {
+  const AUTHORED =
+    '<table role="presentation" width="600" style="width:100%;max-width:600px;">' +
+    '<tr><td style="padding:36px 28px;"><h1 style="font-size:26px;">Flash vs Pro</h1>' +
+    '<p style="margin:0;">We measured <a href="https://distribute.you/bench">both</a>.</p>' +
+    '<img src="https://cdn.distribute.you/latency.png" width="544" alt="latency" /></td></tr></table>';
+
+  it("reaches every subscriber as authored and records the body kind", async () => {
+    await paste("ada@example.com, bob@example.com");
+
+    const sent = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", htmlBody: AUTHORED, from: "news@news.distribute.you" });
+
+    expect(sent.status).toBe(200);
+    expect(sent.body.recipientCount).toBe(2);
+    expect(vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody)).toEqual([AUTHORED, AUTHORED]);
+    expect((vi.mocked(sendEmail).mock.calls[0][0] as any).textBody).toContain("https://distribute.you/bench");
+
+    const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
+    expect(history.status).toBe(200);
+    expect(history.body.updates[0].bodyKind).toBe("html");
+    expect(history.body.updates[0].body).toBeNull();
+    expect(history.body.updates[0].htmlBody).toBe(AUTHORED);
+    expect(history.body.updates[0].from).toBe("news@news.distribute.you");
+  });
+
+  it("reads back beside a markdown update, each saying which it was", async () => {
+    await paste("ada@example.com");
+
+    await request(app).post("/mailing-lists/investors/updates").set(AUTH).send({ subject: "Q3", body: "## Hi" });
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Newsletter", htmlBody: AUTHORED });
+
+    const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
+    const bySubject = Object.fromEntries(history.body.updates.map((u: any) => [u.subject, u]));
+    expect(bySubject["Q3"].bodyKind).toBe("markdown");
+    expect(bySubject["Q3"].body).toBe("## Hi");
+    expect(bySubject["Newsletter"].bodyKind).toBe("html");
+  });
+
+  it("refuses both bodies at once and sends nothing", async () => {
+    await paste("ada@example.com");
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", body: "## Hi", htmlBody: AUTHORED });
+
+    expect(res.status).toBe(400);
+    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
+
+    const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
+    expect(history.body.count).toBe(0);
+  });
+});

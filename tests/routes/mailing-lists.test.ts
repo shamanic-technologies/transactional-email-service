@@ -692,3 +692,216 @@ describe("POST /mailing-lists/updates/preview", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("an update whose body staff authored as HTML", () => {
+  const AUTHORED =
+    '<table role="presentation" width="600" style="width:100%;max-width:600px;">' +
+    '<tr><td style="padding:36px 28px;font-size:16px;"><h1 style="font-size:26px;">Flash vs Pro</h1>' +
+    '<p style="margin:0;">We measured <a href="https://distribute.you/bench">both</a>.</p>' +
+    '<img src="https://cdn.distribute.you/latency.png" width="544" alt="latency" /></td></tr></table>';
+
+  it("reaches every recipient byte-for-byte as authored", async () => {
+    seedList(["ada@example.com", "bob@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", htmlBody: AUTHORED });
+
+    expect(res.status).toBe(200);
+    expect(res.body.recipientCount).toBe(2);
+    const bodies = vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody);
+    expect(bodies).toEqual([AUTHORED, AUTHORED]);
+    // Not wrapped in the markdown shell, not re-rendered, nothing appended here.
+    expect(bodies[0]).not.toContain("background-color:#f4f5f7");
+  });
+
+  it("carries a text part derived from the HTML when none is supplied", async () => {
+    seedList(["ada@example.com"]);
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", htmlBody: AUTHORED });
+
+    const call = vi.mocked(sendEmail).mock.calls[0][0] as any;
+    expect(call.textBody).toContain("Flash vs Pro");
+    expect(call.textBody).toContain("https://distribute.you/bench");
+    expect(call.textBody).not.toContain("<");
+  });
+
+  it("sends the author's own text part when they wrote one", async () => {
+    seedList(["ada@example.com"]);
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Flash vs Pro", htmlBody: AUTHORED, textBody: "Flash beats Pro. Read distribute.you/bench" });
+
+    const call = vi.mocked(sendEmail).mock.calls[0][0] as any;
+    expect(call.textBody).toBe("Flash beats Pro. Read distribute.you/bench");
+  });
+
+  it("refuses a document no text part can be derived from rather than sending without one", async () => {
+    seedList(["ada@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", htmlBody: '<table><tr><td><img src="https://cdn.test/all.png"></td></tr></table>' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("textBody");
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("still goes one message per recipient, skipping the suppressed", async () => {
+    seedList(["ada@example.com", "gone@example.com"]);
+    vi.mocked(fetchSuppressed).mockResolvedValue({
+      isSuppressed: (email: string) => email === "gone@example.com",
+      reasonFor: () => "HardBounce",
+    } as any);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", htmlBody: AUTHORED });
+
+    expect(res.body.skippedOptedOut).toEqual(["gone@example.com"]);
+    expect(vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].to)).toEqual(["ada@example.com"]);
+  });
+
+  it("takes the sender stated per send, exactly as a markdown update does", async () => {
+    seedList(["ada@example.com"]);
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", htmlBody: AUTHORED, from: "news@news.distribute.you" });
+
+    expect((vi.mocked(sendEmail).mock.calls[0][0] as any).from).toBe("news@news.distribute.you");
+    expect(store.inserted.updates[0].fromAddress).toBe("news@news.distribute.you");
+  });
+
+  it("records what kind of body it was, and no markdown it never had", async () => {
+    seedList(["ada@example.com"]);
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", htmlBody: AUTHORED });
+
+    expect(store.inserted.updates[0].bodyKind).toBe("html");
+    expect(store.inserted.updates[0].bodyMarkdown).toBeNull();
+    expect(store.inserted.updates[0].htmlBody).toBe(AUTHORED);
+  });
+
+  it("refuses an SVG the same way — a broken placeholder is broken whoever wrote the markup", async () => {
+    seedList(["ada@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", htmlBody: '<p>hi</p><img src="https://cdn.test/logo.svg" alt="logo">' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("logo.svg");
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("refuses both bodies at once, and neither, rather than choosing", async () => {
+    seedList(["ada@example.com"]);
+
+    const both = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", body: "# md", htmlBody: AUTHORED });
+    expect(both.status).toBe(400);
+
+    const neither = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s" });
+    expect(neither.status).toBe(400);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("refuses a text part offered beside markdown, which would be dropped silently", async () => {
+    seedList(["ada@example.com"]);
+
+    const res = await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "s", body: "# md", textBody: "plain" });
+
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("records a markdown update exactly as before", async () => {
+    seedList(["ada@example.com"]);
+
+    await request(app)
+      .post("/mailing-lists/investors/updates")
+      .set(AUTH)
+      .send({ subject: "Q3", body: "## Hi" });
+
+    expect(store.inserted.updates[0].bodyKind).toBe("markdown");
+    expect(store.inserted.updates[0].bodyMarkdown).toBe("## Hi");
+    expect(store.inserted.updates[0].htmlBody).toContain("max-width:600px");
+    expect((vi.mocked(sendEmail).mock.calls[0][0] as any).textBody).toBe("## Hi");
+  });
+});
+
+describe("previewing an authored HTML body", () => {
+  const AUTHORED = '<table><tr><td><h1>Flash vs Pro</h1><p>We measured both.</p></td></tr></table>';
+
+  it("returns it unchanged, which is what a send does with it", async () => {
+    const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ htmlBody: AUTHORED });
+
+    expect(res.status).toBe(200);
+    expect(res.body.htmlBody).toBe(AUTHORED);
+    expect(res.body.bodyKind).toBe("html");
+    expect(res.body.textBody).toBe("Flash vs Pro\n\nWe measured both.");
+    expect(res.body.unrenderableImages).toEqual([]);
+  });
+
+  it("previews the same bytes a send of the same body puts on the wire", async () => {
+    const preview = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ htmlBody: AUTHORED });
+
+    seedList(["ada@example.com"]);
+    await request(app).post("/mailing-lists/investors/updates").set(AUTH).send({ subject: "s", htmlBody: AUTHORED });
+
+    const sentCall = vi.mocked(sendEmail).mock.calls[0][0] as any;
+    expect(preview.body.htmlBody).toBe(sentCall.htmlBody);
+    expect(preview.body.textBody).toBe(sentCall.textBody);
+  });
+
+  it("says a markdown preview is markdown", async () => {
+    const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: "## Hi" });
+    expect(res.body.bodyKind).toBe("markdown");
+    expect(res.body.textBody).toBe("## Hi");
+  });
+
+  it("reports an SVG in an authored body without refusing it", async () => {
+    const res = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ htmlBody: '<p>hi</p><img src="https://cdn.test/logo.svg">' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.unrenderableImages).toEqual(["https://cdn.test/logo.svg"]);
+  });
+
+  it("refuses both bodies at once, and neither", async () => {
+    const both = await request(app)
+      .post("/mailing-lists/updates/preview")
+      .set(AUTH)
+      .send({ body: "# md", htmlBody: AUTHORED });
+    expect(both.status).toBe(400);
+
+    const neither = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({});
+    expect(neither.status).toBe(400);
+  });
+});
