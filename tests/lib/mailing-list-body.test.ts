@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { findUnrenderableImages, renderUpdateBody } from "../../src/lib/mailing-list-body.js";
+import {
+  deriveTextFromHtml,
+  findUnrenderableImages,
+  findUnrenderableImagesInHtml,
+  renderUpdateBody,
+} from "../../src/lib/mailing-list-body.js";
 
 const FULL_UPDATE = [
   "# Q3 investor update",
@@ -213,5 +218,66 @@ describe("findUnrenderableImages", () => {
   it("reports each offending URL once", () => {
     const md = "![a](https://x.test/a.svg)\n\n![again](https://x.test/a.svg)";
     expect(findUnrenderableImages(md)).toEqual(["https://x.test/a.svg"]);
+  });
+});
+
+describe("findUnrenderableImagesInHtml", () => {
+  it("names an SVG an authored document points at", () => {
+    const html = '<table><tr><td><img src="https://cdn.test/logo.svg" alt="logo" /></td></tr></table>';
+    expect(findUnrenderableImagesInHtml(html)).toEqual(["https://cdn.test/logo.svg"]);
+  });
+
+  it("says nothing about hosted PNG charts, which is what a designed newsletter carries", () => {
+    const html = '<img src="https://cdn.test/arr.png"><img src=\'https://cdn.test/nrr.jpg\'>';
+    expect(findUnrenderableImagesInHtml(html)).toEqual([]);
+  });
+
+  it("does not read the document as markdown", () => {
+    // A designed body is full of characters markdown would lex into images or
+    // emphasis. Only real <img> tags count.
+    const html = "<td>Revenue ![not-an-image](https://cdn.test/x.svg) grew</td>";
+    expect(findUnrenderableImagesInHtml(html)).toEqual([]);
+  });
+});
+
+describe("deriveTextFromHtml", () => {
+  it("keeps the copy and drops the markup", () => {
+    const text = deriveTextFromHtml(
+      '<table style="width:100%"><tr><td><h1 style="font-size:26px">Q3</h1><p>We <b>shipped</b>.</p></td></tr></table>'
+    );
+    expect(text).toBe("Q3\n\nWe shipped.");
+  });
+
+  it("keeps a link's target, which is the only part text cannot infer", () => {
+    expect(deriveTextFromHtml('<p>Read <a href="https://distribute.you/blog">the post</a>.</p>')).toBe(
+      "Read the post (https://distribute.you/blog)."
+    );
+  });
+
+  it("does not repeat a URL that is already its own label", () => {
+    expect(deriveTextFromHtml('<a href="https://distribute.you">https://distribute.you</a>')).toBe(
+      "https://distribute.you"
+    );
+  });
+
+  it("drops style and script, which are not copy", () => {
+    const text = deriveTextFromHtml(
+      "<style>.x{color:red}</style><script>alert(1)</script><p>Only this</p>"
+    );
+    expect(text).toBe("Only this");
+  });
+
+  it("unescapes entities so the text part reads as written", () => {
+    expect(deriveTextFromHtml("<p>Flash &amp; Pro &quot;beat&quot; 2.5 &lt;30ms</p>")).toBe(
+      'Flash & Pro "beat" 2.5 <30ms'
+    );
+  });
+
+  it("turns a br into one line break and a block into a paragraph break", () => {
+    expect(deriveTextFromHtml("<p>one<br>two</p><p>three</p>")).toBe("one\ntwo\n\nthree");
+  });
+
+  it("comes back empty for a document with no copy at all, so the caller can refuse it", () => {
+    expect(deriveTextFromHtml('<table><tr><td><img src="https://cdn.test/all.png"></td></tr></table>')).toBe("");
   });
 });

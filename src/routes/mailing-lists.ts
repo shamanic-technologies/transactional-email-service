@@ -4,7 +4,12 @@ import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "..
 import { db } from "../db/index.js";
 import { mailingLists, mailingListSubscribers, mailingListUpdates } from "../db/schema.js";
 import { parseAddressBlob } from "../lib/address-blob.js";
-import { findUnrenderableImages, renderUpdateBody } from "../lib/mailing-list-body.js";
+import {
+  deriveTextFromHtml,
+  findUnrenderableImages,
+  findUnrenderableImagesInHtml,
+  renderUpdateBody,
+} from "../lib/mailing-list-body.js";
 import { fetchSuppressed } from "../lib/suppression.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
@@ -73,6 +78,66 @@ function workflowHeadersOf(identity: PlatformIdentityLocals) {
     workflowSlug: identity.workflowSlug,
     featureSlug: identity.featureSlug,
     audienceId: identity.audienceId,
+  };
+}
+
+interface ResolvedBody {
+  bodyKind: "markdown" | "html";
+  /** The markdown source, or null for a body authored as HTML — there is none. */
+  markdown: string | null;
+  htmlBody: string;
+  textBody: string;
+  /** Image URLs no client renders. A send refuses on these; a preview reports them. */
+  unrenderableImages: string[];
+}
+
+/**
+ * Turns whatever the caller stated into the two parts a message carries.
+ *
+ * Markdown is rendered, exactly as it always was. An authored document is NOT:
+ * it is the bytes staff wrote, and re-rendering, re-wrapping or inlining
+ * anything into it would break the design it exists to carry. So the html path
+ * passes the body through untouched and only decides the text part beside it.
+ *
+ * A message with no text part is not an option: clients that prefer text show
+ * an empty message and filters read the missing alternative as a signal. The
+ * caller may write one; otherwise one is derived; and a document that yields
+ * neither — an all-image layout, say — is refused with the ask, because the
+ * only thing worse than a rough text part is none.
+ *
+ * Shared by the send and the preview so the preview cannot drift from what
+ * lands in the inbox, which is the reason the preview route exists at all.
+ */
+function resolveBody(input: { body?: string; htmlBody?: string; textBody?: string }): ResolvedBody | { error: string } {
+  if (input.htmlBody) {
+    const textBody = input.textBody ?? deriveTextFromHtml(input.htmlBody);
+    if (textBody.trim().length === 0) {
+      return {
+        error:
+          "This HTML carries no text a plain-text part could be derived from, and a message with no text part " +
+          "arrives empty in clients that prefer text. Supply `textBody`.",
+      };
+    }
+
+    return {
+      bodyKind: "html",
+      markdown: null,
+      htmlBody: input.htmlBody,
+      textBody,
+      unrenderableImages: findUnrenderableImagesInHtml(input.htmlBody),
+    };
+  }
+
+  // The schema guarantees one of the two, so this is the markdown path.
+  const markdown = input.body as string;
+  const rendered = renderUpdateBody(markdown);
+
+  return {
+    bodyKind: "markdown",
+    markdown,
+    htmlBody: rendered.htmlBody,
+    textBody: rendered.textBody,
+    unrenderableImages: findUnrenderableImages(markdown),
   };
 }
 
@@ -242,6 +307,11 @@ router.delete("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnl
  * resolves a provider key, sends, or spends, so requiring one would be a guard
  * against nothing.
  *
+ * A body authored as HTML comes back unchanged, which is what a send does with
+ * it — there is nothing to render, and rendering it is exactly what must not
+ * happen. Its text part is the supplied `textBody` or the derived one, so the
+ * preview shows both parts a send would carry.
+ *
  * Images no client can render are REPORTED rather than refused. A send is
  * refused because the alternative is a broken placeholder in every inbox; a
  * preview's whole job is to show the author what they have, and the browser
@@ -255,8 +325,18 @@ router.post("/mailing-lists/updates/preview", requireApiKey, requireOrgIdOnly, (
     return;
   }
 
-  const { htmlBody, textBody } = renderUpdateBody(parsed.data.body);
-  res.json({ htmlBody, textBody, unrenderableImages: findUnrenderableImages(parsed.data.body) });
+  const resolved = resolveBody(parsed.data);
+  if ("error" in resolved) {
+    res.status(400).json({ error: resolved.error });
+    return;
+  }
+
+  res.json({
+    htmlBody: resolved.htmlBody,
+    textBody: resolved.textBody,
+    bodyKind: resolved.bodyKind,
+    unrenderableImages: resolved.unrenderableImages,
+  });
 });
 
 /**
@@ -281,23 +361,31 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
     return;
   }
 
-  const { subject, body } = parsed.data;
+  const { subject } = parsed.data;
   // Stated per send, defaulted to the investor-update sender. Postmark refuses
   // an address it has not verified; that refusal is surfaced below rather than
   // retried onto the default, because a newsletter arriving from the investor
   // address is a worse outcome than a newsletter that did not go out.
   const fromAddress = parsed.data.from ?? DEFAULT_MAILING_LIST_FROM_ADDRESS;
 
+  // Rendered here, or taken as authored, with the text part settled either way.
+  const resolved = resolveBody(parsed.data);
+  if ("error" in resolved) {
+    res.status(400).json({ error: resolved.error });
+    return;
+  }
+  const { bodyKind, markdown, htmlBody, textBody } = resolved;
+
   // The sender is the last place this is cheap to catch: it knows the body
   // before it goes out, and an SVG reaches the recipient as a broken-image
   // placeholder showing its alt text. Reject rather than send something
-  // knowably broken.
-  const unrenderable = findUnrenderableImages(body);
-  if (unrenderable.length > 0) {
+  // knowably broken. Naming an image is not rewriting one — an authored body
+  // still goes out byte-for-byte, or does not go out.
+  if (resolved.unrenderableImages.length > 0) {
     res.status(400).json({
       error:
         `Email clients do not render SVG images. Gmail, Outlook and Yahoo show the alt text instead. ` +
-        `Use a PNG or JPEG for: ${unrenderable.join(", ")}`,
+        `Use a PNG or JPEG for: ${resolved.unrenderableImages.join(", ")}`,
     });
     return;
   }
@@ -325,8 +413,6 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       res.status(400).json({ error: `Mailing list '${slug}' has no subscribers` });
       return;
     }
-
-    const { htmlBody, textBody } = renderUpdateBody(body);
 
     // maxAgeMs: 0 — a send never reads a cached answer. Someone who opted out
     // a second ago, after a page load cached them as subscribed, is still
@@ -423,7 +509,8 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
         listId: list.id,
         subject,
         fromAddress,
-        bodyMarkdown: body,
+        bodyKind,
+        bodyMarkdown: markdown,
         htmlBody,
         status,
         recipientCount: sentCount,
@@ -505,6 +592,7 @@ router.get("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asyn
         subject: r.subject,
         from: r.fromAddress,
         body: r.bodyMarkdown,
+        bodyKind: r.bodyKind,
         htmlBody: r.htmlBody,
         status: r.status,
         recipientCount: r.recipientCount,

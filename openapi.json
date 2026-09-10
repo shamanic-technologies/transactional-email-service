@@ -414,11 +414,19 @@
         "properties": {
           "htmlBody": {
             "type": "string",
-            "description": "The HTML a recipient would receive for this body, byte-for-byte what a send of the same body produces. email-gateway appends the unsubscribe footer at send time, so it is absent here."
+            "description": "The HTML a recipient would receive for this body, byte-for-byte what a send of the same body produces. email-gateway appends the unsubscribe footer at send time, so it is absent here. For an authored `htmlBody` this is that document unchanged."
           },
           "textBody": {
             "type": "string",
-            "description": "The plain-text part, which is the markdown itself"
+            "description": "The plain-text part: the markdown itself for a markdown body, and for an authored one the supplied `textBody` or the text derived from the HTML."
+          },
+          "bodyKind": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html"
+            ],
+            "description": "Which body this preview rendered: \"markdown\" was rendered by this service, \"html\" was returned as authored."
           },
           "unrenderableImages": {
             "type": "array",
@@ -431,6 +439,7 @@
         "required": [
           "htmlBody",
           "textBody",
+          "bodyKind",
           "unrenderableImages"
         ]
       },
@@ -440,12 +449,19 @@
           "body": {
             "type": "string",
             "minLength": 1,
-            "description": "The update body as markdown, exactly as it would be sent. Rendered by the same code a real send uses."
+            "description": "The update body as markdown, exactly as it would be sent. Rendered by the same code a real send uses. Mutually exclusive with `htmlBody`; exactly one of the two is required."
+          },
+          "htmlBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A document staff authored, previewed exactly as a send treats it: returned unchanged. Mutually exclusive with `body`."
+          },
+          "textBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The plain-text part for an `htmlBody` preview. Omit it and the derived one comes back, which is what a send with no `textBody` would use. Only valid beside `htmlBody`."
           }
-        },
-        "required": [
-          "body"
-        ]
+        }
       },
       "SendUpdateResponse": {
         "type": "object",
@@ -546,7 +562,17 @@
           "body": {
             "type": "string",
             "minLength": 1,
-            "description": "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here."
+            "description": "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here. Mutually exclusive with `htmlBody`; exactly one of the two is required."
+          },
+          "htmlBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A complete HTML document staff authored, sent to every recipient byte-for-byte as supplied: nothing is re-rendered, no styles are inlined for you, and it is not wrapped in the markdown template's shell. Use it for a designed newsletter — table layout, inline styles on every element, hosted PNG or JPEG images, a 600px measure — which markdown cannot express. Everything else applies unchanged: email-gateway appends the unsubscribe footer, suppressed members are skipped, one message goes per recipient, and `from` selects the sender. SVG images are still refused with a 400, since they arrive as broken placeholders whoever authored the markup. Mutually exclusive with `body`; exactly one of the two is required."
+          },
+          "textBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The plain-text part for an `htmlBody` send. Omit it and one is derived from the HTML — tags dropped, links kept as `label (url)` — so the message always carries a text alternative. Supply it to write better prose than a derivation gives. Only valid beside `htmlBody`: a markdown update's text part is its markdown."
           },
           "from": {
             "type": "string",
@@ -555,8 +581,7 @@
           }
         },
         "required": [
-          "subject",
-          "body"
+          "subject"
         ]
       },
       "MailingListUpdatesResponse": {
@@ -592,11 +617,20 @@
           },
           "body": {
             "type": "string",
-            "description": "Markdown as authored"
+            "nullable": true,
+            "description": "Markdown as authored, and null when the update was authored as HTML — there was no markdown"
           },
           "htmlBody": {
             "type": "string",
             "description": "Body as sent"
+          },
+          "bodyKind": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html"
+            ],
+            "description": "How this update was authored: \"markdown\" was rendered by this service, \"html\" was sent as the author wrote it."
           },
           "status": {
             "type": "string",
@@ -629,6 +663,7 @@
           "subject",
           "body",
           "htmlBody",
+          "bodyKind",
           "status",
           "from",
           "recipientCount",
@@ -1493,7 +1528,7 @@
     "/mailing-lists/updates/preview": {
       "post": {
         "summary": "Render an update body exactly as a recipient would receive it",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. Renders a draft body and returns nothing else: no message is sent, no update is recorded, no suppression state is read. The rendering is the same code path a real send uses, so an author approving this preview is approving what lands in the inbox. It takes no list, because the body renders the same whoever receives it.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. Renders a draft body and returns nothing else: no message is sent, no update is recorded, no suppression state is read. The rendering is the same code path a real send uses, so an author approving this preview is approving what lands in the inbox. It takes no list, because the body renders the same whoever receives it. A body authored as HTML (`htmlBody`) comes back unchanged, which is also what a send does with it.",
         "tags": [
           "Mailing lists"
         ],
@@ -1560,7 +1595,7 @@
     "/mailing-lists/{slug}/updates": {
       "post": {
         "summary": "Send a written update to a mailing list",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. The caller supplies the subject and a markdown body (inline images supported); recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success. The sender defaults to the investor-update address and can be stated per send with `from`; a sender the provider has not verified fails the send with a 502 carrying the provider's reason, and is never retried onto the default.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. The caller supplies the subject and exactly one body: `body` as markdown (inline images supported), which this service renders to HTML, or `htmlBody` as a complete document the staff author wrote, which goes out byte-for-byte as supplied with a text part supplied or derived. Stating both, or neither, is refused with a 400. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success. The sender defaults to the investor-update address and can be stated per send with `from`; a sender the provider has not verified fails the send with a 502 carrying the provider's reason, and is never retried onto the default.",
         "tags": [
           "Mailing lists"
         ],
