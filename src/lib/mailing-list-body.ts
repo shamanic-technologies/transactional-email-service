@@ -268,3 +268,68 @@ export function renderUpdateBody(markdown: string): { htmlBody: string; textBody
 
   return { htmlBody: wrap(content), textBody: markdown };
 }
+
+/**
+ * The same unrenderable-image check for a body staff authored as HTML rather
+ * than markdown. It does NOT lex the body: an authored document is not markdown
+ * and running the markdown lexer over it would report images that are not
+ * there. The `<img src>` scan is the whole of it, which is all an authored
+ * document can carry.
+ *
+ * Reporting is not rewriting — the body still goes out byte-for-byte as
+ * authored. This only decides whether it goes out at all, on exactly the
+ * ground the markdown path uses: an SVG reaches Gmail, Outlook and Yahoo as a
+ * broken placeholder showing its alt text.
+ */
+export function findUnrenderableImagesInHtml(html: string): string[] {
+  const hrefs: string[] = [];
+
+  for (const match of html.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)) {
+    hrefs.push(match[1]);
+  }
+
+  return [...new Set(hrefs.filter((href) => UNRENDERABLE_IMAGE_RE.test(href.trim())))];
+}
+
+const BLOCK_BREAK_RE =
+  /<\/(?:p|div|tr|table|h1|h2|h3|h4|h5|h6|li|ul|ol|blockquote|section|header|footer|td)\s*>/gi;
+
+/**
+ * The plain-text part for an authored HTML body the caller supplied no text for.
+ *
+ * A message with no text part lands worse than one with a rough one: clients
+ * that prefer text show an empty message, and spam filters read a missing
+ * alternative as a signal. So the text part is never allowed to be absent — it
+ * is derived here when the author did not write one, and an author who wants
+ * better prose than a derivation supplies `textBody`.
+ *
+ * This is deliberately crude and touches only the copy destined for the text
+ * part. The HTML that goes to recipients is never passed through it.
+ */
+export function deriveTextFromHtml(html: string): string {
+  const text = html
+    // Neither is copy, and both carry braces and selectors that read as noise.
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    // A link is only useful in text if its target survives with it.
+    .replace(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a\s*>/gi, (_m, href, label) => {
+      const text = label.replace(/<[^>]+>/g, "").trim();
+      return text && !text.includes(href) ? `${text} (${href})` : text || href;
+    })
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(BLOCK_BREAK_RE, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
+}
