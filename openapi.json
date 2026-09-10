@@ -463,8 +463,14 @@
             "type": "string",
             "enum": [
               "sent",
-              "partial"
-            ]
+              "partial",
+              "failed"
+            ],
+            "description": "\"sent\" — every recipient succeeded. \"partial\" — some did. \"failed\" — none did, which is answered with a 502 carrying the provider's reason."
+          },
+          "from": {
+            "type": "string",
+            "description": "The address the update went out from"
           },
           "recipientCount": {
             "type": "number",
@@ -490,6 +496,7 @@
           "slug",
           "subject",
           "status",
+          "from",
           "recipientCount",
           "skippedOptedOut",
           "failures"
@@ -510,6 +517,25 @@
           "reason"
         ]
       },
+      "SendUpdateFailureResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SendUpdateResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "description": "The provider's own reason for refusing, verbatim — an unverified sender signature, say"
+              }
+            },
+            "required": [
+              "error"
+            ]
+          }
+        ]
+      },
       "SendUpdateRequest": {
         "type": "object",
         "properties": {
@@ -521,6 +547,11 @@
             "type": "string",
             "minLength": 1,
             "description": "The update body, authored as markdown — headings, bold, links, tables, and `![alt](https://…)` inline images. Rendered to HTML with all styling inlined on the elements (mail clients strip `<style>` and `<head>`); the markdown itself is sent as the plain-text part. SVG images are rejected with a 400 — Gmail, Outlook and Yahoo show the alt text instead of the image, so use PNG or JPEG. A discreet unsubscribe is appended downstream by email-gateway; do not add one here."
+          },
+          "from": {
+            "type": "string",
+            "format": "email",
+            "description": "The address this update goes out from, for this send only. Omit it and the update leaves the investor-update sender, kevin@distribute.you, exactly as every update did before this field existed. State one to send from another identity — a newsletter leaving a dedicated subdomain, say. The address must be a sender Postmark has verified: an unverified one is refused by the provider and the whole send fails with its reason, never silently falling back to the default."
           }
         },
         "required": [
@@ -571,8 +602,13 @@
             "type": "string",
             "enum": [
               "sent",
-              "partial"
+              "partial",
+              "failed"
             ]
+          },
+          "from": {
+            "type": "string",
+            "description": "The address this update went out from"
           },
           "recipientCount": {
             "type": "number"
@@ -594,6 +630,7 @@
           "body",
           "htmlBody",
           "status",
+          "from",
           "recipientCount",
           "failures",
           "sentAt"
@@ -1523,7 +1560,7 @@
     "/mailing-lists/{slug}/updates": {
       "post": {
         "summary": "Send a written update to a mailing list",
-        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. The caller supplies the subject and a markdown body (inline images supported); recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success.",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. The caller supplies the subject and a markdown body (inline images supported); recipients receive it as HTML. One message is sent per recipient, so no recipient is visible to another. Members the provider is suppressing are skipped. A partial failure is reported as `partial` with the failing addresses and reasons, never as a clean success. The sender defaults to the investor-update address and can be stated per send with `from`; a sender the provider has not verified fails the send with a 502 carrying the provider's reason, and is never retried onto the default.",
         "tags": [
           "Mailing lists"
         ],
@@ -1616,6 +1653,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Not one recipient was reached — an unverified sender, say. Carries the provider's reason and the recorded update, which is stored as `failed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendUpdateFailureResponse"
                 }
               }
             }
