@@ -1300,3 +1300,60 @@ describe("staff_daily_digest", () => {
     }
   });
 });
+
+describe("unpaid_debt_uncollectable", () => {
+  const ORG_ONLY = { "x-org-id": "org_456" };
+
+  it("is accepted on the platform send route and delivered to the staff recipient", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "unpaid_debt_uncollectable", metadata: { balanceCents: "-4200" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.to).toBe("kevin.lourd@gmail.com");
+    expect(body).not.toHaveProperty("bcc");
+  });
+
+  it("goes to staff on /send too, never to the customer resolved from x-user-id", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "unpaid_debt_uncollectable" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(JSON.parse(options.body).to).toBe("kevin.lourd@gmail.com");
+  });
+
+  it("applies no dedup — every uncollectable debt billing-service reports is news", async () => {
+    const first = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "unpaid_debt_uncollectable" });
+
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "unpaid_debt_uncollectable" });
+
+    expect(first.body.results[0].sent).toBe(true);
+    expect(second.body.results[0].sent).toBe(true);
+    for (const call of mockValues.mock.calls) {
+      expect(call[0].dedupKey).toBeNull();
+    }
+  });
+});
