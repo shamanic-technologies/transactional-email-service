@@ -317,6 +317,8 @@ describe("POST /mailing-lists/:slug/updates", () => {
     expect(calls.map((c: any) => c.to)).toEqual(["a@example.com", "b@example.com"]);
     for (const call of calls) {
       expect(call.from).toBe("kevin@distribute.you");
+      // A broadcast is a fan-out to many people, not an email to a customer:
+      // no standing blind copy, or one send would be multiplied by the list size
       expect(call.bcc).toBeUndefined();
       expect(call.subject).toBe("Q3 update");
       expect(call.htmlBody).toContain("Hello</h2>");

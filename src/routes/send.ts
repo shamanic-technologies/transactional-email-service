@@ -9,6 +9,7 @@ import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { SendRequestSchema } from "../schemas.js";
+import { FOUNDER_EMAIL } from "../lib/founder.js";
 
 const router = Router();
 
@@ -75,6 +76,24 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "unpaid_debt_uncollectable",
 ]);
 
+
+// Blind copy for a send that goes to a CUSTOMER. The founder reads what we tell
+// customers as we tell them, rather than going looking for it in the provider's
+// archive after the fact — a declined card or a stopped campaign is consequential
+// enough that somebody should have seen the message itself.
+//
+// A staff-list notification does NOT carry it: he is already a primary recipient
+// there (ADMIN_EMAILS), and a blind copy would deliver the same message twice.
+// A mailing-list broadcast does not carry it either — that path never calls here.
+//
+// A caller's own blind-copy list is combined with it, never replaced: nothing a
+// caller asked for is lost, and an address it already named is not doubled.
+function buildBccList(eventType: string, callerBcc: string[] | undefined): string[] {
+  const bcc = [...(callerBcc ?? [])];
+  if (ADMIN_NOTIFICATION_EVENTS.has(eventType)) return bcc;
+  if (!bcc.some((address) => address.toLowerCase() === FOUNDER_EMAIL)) bcc.push(FOUNDER_EMAIL);
+  return bcc;
+}
 
 function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -229,6 +248,8 @@ async function handleSend(req: Request, res: Response) {
       traceEvent(runId, { service: "transactional-email-service", event: "template-resolved", detail: `Template resolved for ${body.eventType}` }, traceHeaders);
     }
 
+    const bccList = buildBccList(body.eventType, body.bccEmails);
+
     const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body, brandIds: effectiveBrandIds });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
 
@@ -327,7 +348,7 @@ async function handleSend(req: Request, res: Response) {
           brandIds: effectiveBrandIds,
           campaignId: effectiveCampaignId,
           from: template.from,
-          bcc: body.bccEmails?.join(","),
+          bcc: bccList.length > 0 ? bccList.join(",") : undefined,
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 

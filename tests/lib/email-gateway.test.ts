@@ -280,4 +280,54 @@ describe("sendEmail", () => {
     expect(options.headers["x-workflow-slug"]).toBeUndefined();
     expect(options.headers["x-audience-id"]).toBeUndefined();
   });
+
+  it("invites replies to the founder by default", async () => {
+    await sendEmail({
+      to: "customer@example.com",
+      subject: "Test subject",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "campaign_created",
+      orgId: "org_123",
+      runId: "run_abc",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    // A customer who hits reply reaches a human, not wherever the sending
+    // address happens to route
+    expect(JSON.parse(options.body).replyTo).toBe("kevin@distribute.you");
+  });
+
+  it("keeps a reply address the caller supplied", async () => {
+    await sendEmail({
+      to: "customer@example.com",
+      subject: "Test subject",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "campaign_created",
+      orgId: "org_123",
+      runId: "run_abc",
+      replyTo: "support@example.com",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(JSON.parse(options.body).replyTo).toBe("support@example.com");
+  });
+
+  it("adds no blind copy of its own", async () => {
+    await sendEmail({
+      to: "customer@example.com",
+      subject: "Test subject",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "campaign_created",
+      orgId: "org_123",
+      runId: "run_abc",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0];
+    // The standing blind copy is decided per event type in routes/send.ts, which
+    // is where a customer-facing send can be told apart from a staff-list one
+    expect(JSON.parse(options.body)).not.toHaveProperty("bcc");
+  });
 });
