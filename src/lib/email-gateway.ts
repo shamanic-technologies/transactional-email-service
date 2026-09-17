@@ -1,4 +1,5 @@
 import type { WorkflowHeaders } from "./runs-client.js";
+import { FOUNDER_EMAIL } from "./founder.js";
 
 const EMAIL_GATEWAY_SERVICE_URL = process.env.EMAIL_GATEWAY_SERVICE_URL || "https://email-gateway.distribute.you";
 const EMAIL_GATEWAY_SERVICE_API_KEY = process.env.EMAIL_GATEWAY_SERVICE_API_KEY;
@@ -17,15 +18,22 @@ interface SendEmailParams {
   campaignId?: string;
   from?: string | null;
   bcc?: string;
+  /** Reply address. Omitted means replies are invited to the founder. */
+  replyTo?: string;
   workflowHeaders?: WorkflowHeaders;
 }
 
-// No staff address is blind-copied here. Postmark bills per recipient and
-// counts blind copies, so a standing staff bcc multiplied every send by the
-// size of the staff list. The internal visibility it provided is already
-// covered twice over: Postmark keeps the full message in its Activity archive
-// for 45 days, and postmark-service stores a permanent metadata row per send.
-// Only a caller's own `bcc` reaches the provider, exactly as supplied.
+// This client adds no blind copy of its own: a caller's `bcc` is forwarded
+// exactly as supplied, and a caller that supplies none sends no `bcc` at all.
+// The standing blind copy to the founder is decided in `src/routes/send.ts`,
+// where a customer-facing send can be told apart from a staff-list one — a
+// staff notification already reaches him as a primary recipient, and a
+// mailing-list broadcast is a fan-out to many people rather than an email to a
+// customer, so neither carries it.
+//
+// Every send does carry a reply address, defaulting to the founder, so a
+// customer who hits reply reaches a human instead of wherever the sending
+// address happens to route. A caller that names its own `replyTo` keeps it.
 
 export async function sendEmail(params: SendEmailParams): Promise<void> {
   if (!EMAIL_GATEWAY_SERVICE_API_KEY) {
@@ -33,6 +41,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   }
 
   const bcc = params.bcc;
+  const replyTo = params.replyTo ?? FOUNDER_EMAIL;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -65,6 +74,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       tag: params.tag,
       ...(params.from && { from: params.from }),
       ...(bcc && { bcc }),
+      replyTo,
     }),
   });
 

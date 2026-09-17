@@ -43,7 +43,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | `campaignId`     | No       | Campaign ID for tracking; omitted if not provided |
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
-| `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC, exactly as supplied; not rendered into templates or stored in metadata. Nothing is added to them, and a send that omits them carries no blind copy at all |
+| `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC; not rendered into templates or stored in metadata. On a customer-facing event `kevin@distribute.you` is added to whatever is supplied here (see Blind copy and replies); on a staff-routed event nothing is added |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
@@ -374,7 +374,17 @@ Admin notification events (`signup_notification`, `signin_notification`, `user_a
 
 `staff_daily_digest` is emitted once a day by the customer dashboard, which owns and registers the template under that exact name. It has no acting user, so it arrives on `POST /platform-send`, and it carries no dedup — the dashboard decides when a digest goes out.
 
-No staff address is blind-copied on outbound mail. Postmark bills per recipient and counts blind copies, so a standing staff BCC multiplied every send. Internal visibility comes from Postmark's own 45-day Activity archive and from the permanent metadata row postmark-service writes per send.
+### Blind copy and replies
+
+A **customer-facing** send is blind-copied to `kevin@distribute.you`, so the company sees what it tells a customer as it tells them rather than going looking for the message in a provider archive afterwards. A caller's own `bccEmails` are kept and that one address is added to them, never in place of them, and an address the caller already named is not doubled.
+
+Two sends do **not** carry it. A **staff-routed** event (the list under Staff routing above) already reaches the same person as a primary recipient, so a blind copy would deliver the message twice. A **mailing-list update** is a fan-out to many people rather than an email to a customer: one blind copy per recipient would flood an inbox and multiply the provider bill by the size of the list.
+
+The blind copy is exactly ONE address, hardcoded in `src/lib/founder.ts`. A multi-address staff BCC existed and was removed in PR #126 because Postmark bills per recipient and counts blind copies, so every send was multiplied by the size of the staff list. One address at this service's volume (52 sends across every event type over the 14 days measured 2026-09-17) is a rounding error against that price. Do not grow it back into a list.
+
+**Every** send from this service, staff-routed and customer-facing alike, sets `replyTo: kevin@distribute.you`, so a customer who hits reply reaches a human instead of wherever the sending address happens to route. A caller that names its own reply address keeps it.
+
+Internal visibility does not rest on the blind copy alone: Postmark keeps the full message in its Activity archive for 45 days, and postmark-service writes a permanent metadata row per send.
 
 ## Tech Stack
 
@@ -452,7 +462,8 @@ src/
   lib/
     address-blob.ts     # Lenient parser for a pasted blob of email addresses
     client-service.ts   # Client service user email resolution
-    email-gateway.ts    # Email Gateway client
+    email-gateway.ts    # Email Gateway client; sets the default reply address, adds no blind copy of its own
+    founder.ts          # The founder's address: reply-to on every send, blind copy on customer-facing ones
     mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard; plain-text derivation for authored HTML
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
     runs-client.ts      # Runs service client (create/update runs)

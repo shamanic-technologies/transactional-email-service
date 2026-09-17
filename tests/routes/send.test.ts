@@ -212,8 +212,72 @@ describe("POST /send", () => {
 
     expect(body.brandIds).toBeUndefined();
     expect(body.campaignId).toBeUndefined();
-    // No caller bccEmails means no blind copy at all — no staff address is added
+    // user_active is staff-routed: the founder is already the primary recipient,
+    // so a blind copy to him would deliver the same message twice
     expect(body).not.toHaveProperty("bcc");
+    // Replies reach a human on every send, staff-routed included
+    expect(body.replyTo).toBe("kevin@distribute.you");
+  });
+
+  it("blind-copies the founder on a customer-facing send", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    // The company sees what it tells a customer, as it tells them. One address,
+    // never a staff list: Postmark bills per recipient and counts blind copies.
+    expect(body.to).toBe("customer@example.com");
+    expect(body.bcc).toBe("kevin@distribute.you");
+    expect(body.replyTo).toBe("kevin@distribute.you");
+  });
+
+  it("keeps a caller's bccEmails and adds the founder to them", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+        bccEmails: ["ops@example.com"],
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    // Combined, not replaced — nothing the caller asked for is lost
+    expect(body.bcc).toBe("ops@example.com,kevin@distribute.you");
+  });
+
+  it("does not double the founder when a caller already named him", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+        bccEmails: ["kevin@distribute.you"],
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.bcc).toBe("kevin@distribute.you");
   });
 
   it("forwards bccEmails to the provider payload as bcc", async () => {
@@ -234,8 +298,9 @@ describe("POST /send", () => {
     const body = JSON.parse(options.body);
 
     expect(body.to).toBe("primary@example.com");
-    // Exactly the caller's list, unchanged (and never affecting the primary `to`)
-    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com");
+    // The caller's list in the order it supplied, with the founder appended —
+    // the standing blind copy adds to what a caller asked for, never replaces it
+    expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you");
   });
 
   it("does not render bccEmails into primary-recipient content or metadata", async () => {
