@@ -9,6 +9,7 @@ import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { SendRequestSchema } from "../schemas.js";
+import { FOUNDER_EMAIL } from "../lib/founder.js";
 
 const router = Router();
 
@@ -57,6 +58,10 @@ const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted"]);
 // third-party provider has run out of credits. It is deduped once per org per
 // calendar day (ORG_DAILY_EVENTS) so a service hitting the wall on thousands of
 // consecutive operations cannot mail-bomb.
+// unpaid_debt_uncollectable is emitted by billing-service when an org's balance has
+// gone negative and there is no card on file to collect it on. It belongs to no dedup
+// set above: billing-service decides when a debt is worth reporting, and two orgs
+// going uncollectable on the same day are two separate pieces of news.
 // Hardcoded, never env-configured, so the routing cannot silently drift or be
 // disabled by a missing variable.
 const ADMIN_EMAILS = ["kevin.lourd@gmail.com"];
@@ -68,8 +73,27 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "payment_method_removed",
   "staff_daily_digest",
   "provider_credits_exhausted",
+  "unpaid_debt_uncollectable",
 ]);
 
+
+// Blind copy for a send that goes to a CUSTOMER. The founder reads what we tell
+// customers as we tell them, rather than going looking for it in the provider's
+// archive after the fact — a declined card or a stopped campaign is consequential
+// enough that somebody should have seen the message itself.
+//
+// A staff-list notification does NOT carry it: he is already a primary recipient
+// there (ADMIN_EMAILS), and a blind copy would deliver the same message twice.
+// A mailing-list broadcast does not carry it either — that path never calls here.
+//
+// A caller's own blind-copy list is combined with it, never replaced: nothing a
+// caller asked for is lost, and an address it already named is not doubled.
+function buildBccList(eventType: string, callerBcc: string[] | undefined): string[] {
+  const bcc = [...(callerBcc ?? [])];
+  if (ADMIN_NOTIFICATION_EVENTS.has(eventType)) return bcc;
+  if (!bcc.some((address) => address.toLowerCase() === FOUNDER_EMAIL)) bcc.push(FOUNDER_EMAIL);
+  return bcc;
+}
 
 function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -224,6 +248,8 @@ async function handleSend(req: Request, res: Response) {
       traceEvent(runId, { service: "transactional-email-service", event: "template-resolved", detail: `Template resolved for ${body.eventType}` }, traceHeaders);
     }
 
+    const bccList = buildBccList(body.eventType, body.bccEmails);
+
     const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body, brandIds: effectiveBrandIds });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
 
@@ -322,7 +348,7 @@ async function handleSend(req: Request, res: Response) {
           brandIds: effectiveBrandIds,
           campaignId: effectiveCampaignId,
           from: template.from,
-          bcc: body.bccEmails?.join(","),
+          bcc: bccList.length > 0 ? bccList.join(",") : undefined,
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 

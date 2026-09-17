@@ -29,7 +29,7 @@ export const SendRequestSchema = z
     recipientEmail: z.string().email().optional().openapi({ description: "Direct recipient email (overrides client-service resolution if provided)" }),
     bccEmails: z.array(z.string().email()).optional().openapi({
       description:
-        "Blind-copy recipient email addresses. These are forwarded as provider-level BCC recipients and are not rendered into templates or stored in metadata.",
+        "Blind-copy recipient email addresses, forwarded as provider-level BCC recipients and never rendered into templates or stored in metadata. On a customer-facing event kevin@distribute.you is added to whatever is supplied here; on a staff-routed event nothing is added.",
     }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
@@ -452,10 +452,11 @@ registry.registerPath({
     "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n" +
     "- **Monthly per-brand** (audience_fully_contacted): sent at most once per org per brand per calendar month. Brand + month derive from the existing request (x-brand-id header / brandIds body). Dedup key: `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}`.\n" +
     "- **Org-daily** (provider_credits_exhausted): sent at most once per org per calendar day. No recipient and no user in the key, so a machine caller deduplicates exactly like one with an acting user. Dedup key: `{orgId}:{eventType}:{YYYY-MM-DD}`.\n" +
-    "- **No dedup** (all other event types, including brand_daily_budget_changed, payment_method_removed and staff_daily_digest): sends every time with no dedup.\n\n" +
-    "**Staff routing:** `signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest` and `provider_credits_exhausted` are delivered to the internal staff recipient list instead of the customer resolved from `x-user-id`. Their metadata is enriched with the acting user's email under `email` when not already supplied — a caller with no acting user sends no actor metadata at all.\n\n" +
+    "- **No dedup** (all other event types, including brand_daily_budget_changed, payment_method_removed, staff_daily_digest and unpaid_debt_uncollectable): sends every time with no dedup.\n\n" +
+    "**Staff routing:** `signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted` and `unpaid_debt_uncollectable` (billing-service: an org owes money and has no card to collect it on) are delivered to the internal staff recipient list instead of the customer resolved from `x-user-id`. Their metadata is enriched with the acting user's email under `email` when not already supplied — a caller with no acting user sends no actor metadata at all.\n\n" +
     "**`provider_credits_exhausted`** reports that a paid third-party provider has run out of credits, so work depending on it now produces nothing. `metadata.provider` (which provider) and `metadata.reason` (why we concluded it is dry) are required and must be non-empty; `metadata.detail` carries any raw upstream status or response body and is optional. `metadata.orgId` is filled in from `x-org-id` and needs no supplying. It accepts no `recipientEmail` and no `bccEmails` on any route, so it cannot reach a customer address.\n\n" +
-    "`bccEmails` are delivered as provider-level BCC recipients on the primary email, exactly as supplied. No staff address is added to them. They are not rendered into templates and do not affect primary-recipient deduplication.\n\n" +
+    "`bccEmails` are delivered as provider-level BCC recipients on the primary email. They are not rendered into templates and do not affect primary-recipient deduplication.\n\n" +
+    "**Blind copy and replies:** a customer-facing send is blind-copied to kevin@distribute.you, so the company sees what it tells a customer as it tells them. A caller's own `bccEmails` are kept and that one address is added to them, never in place of them. A staff-routed event carries no such blind copy — the same person is already a primary recipient on the staff list, and a second copy would deliver the message twice. Every send, staff or customer, invites replies to kevin@distribute.you so a customer who hits reply reaches a human.\n\n" +
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
   security: [{ apiKey: [] }],
