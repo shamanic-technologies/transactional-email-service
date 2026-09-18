@@ -33,7 +33,7 @@ import { fetchSuppressed } from "../../src/lib/suppression.js";
 import { fetchDeliveryOutcomes } from "../../src/lib/release-health.js";
 import { resetReleaseWorkerState, runReleaseTick } from "../../src/lib/release-worker.js";
 import { seedStaffTemplates } from "../../src/templates/staff-alerts.js";
-import { MAX_TICK_BATCH } from "../../src/lib/release-pacing.js";
+import { MAX_DAILY_LIMIT, MAX_TICK_BATCH } from "../../src/lib/release-pacing.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 const AUTH = { "x-api-key": API_KEY, "x-org-id": "org_test", "x-user-id": "user_staff" };
@@ -98,6 +98,10 @@ async function drain(maxTicks = 3000): Promise<number> {
     if (report.sent === 0 && report.failed === 0 && report.skippedOptedOut === 0) break;
   }
   return ticks;
+}
+
+async function setPace(releaseId: string, dailyLimit: number) {
+  return request(app).patch(`/mailing-lists/releases/${releaseId}/pace`).set(AUTH).send({ dailyLimit });
 }
 
 async function readRelease(releaseId: string) {
@@ -574,5 +578,175 @@ describe("the tick route", () => {
 
   it("refuses an unauthenticated caller", async () => {
     await request(app).post("/internal/mailing-lists/releases/tick").expect(401);
+  });
+});
+
+describe("changing the pace while a release is running", () => {
+  it("lets more go out the same day when the pace is raised, and repeats nobody", async () => {
+    await seedList(LIST_SIZE);
+    const created = await createRelease({ subject: "Cautious start", body: "hi", dailyLimit: 20 });
+    const releaseId = created.body.releaseId;
+
+    await drain();
+    const cautious = mailed().length;
+    expect(cautious).toBe(20);
+    expect((await readRelease(releaseId)).nextSliceSize).toBe(0);
+
+    // Day one came back clean. Go faster, without waiting for tomorrow.
+    const repaced = await setPace(releaseId, 200);
+    expect(repaced.status).toBe(200);
+    expect(repaced.body.dailyLimit).toBe(200);
+
+    await drain();
+    expect(mailed().length).toBeGreaterThan(cautious);
+    expect(mailed().length).toBe(200);
+    // The raise is an allowance, not a licence: the new pace still bounds the day.
+    expect(new Set(mailed()).size).toBe(mailed().length);
+  });
+
+  it("reports the new pace and a revised estimate of how long it has left", async () => {
+    await seedList(LIST_SIZE);
+    const created = await createRelease({ subject: "Estimate", body: "hi", dailyLimit: 100 });
+    const releaseId = created.body.releaseId;
+
+    expect((await readRelease(releaseId)).estimatedDaysRemaining).toBe(3);
+
+    await setPace(releaseId, LIST_SIZE).then((r) => expect(r.status).toBe(200));
+
+    const after = await readRelease(releaseId);
+    expect(after.dailyLimit).toBe(LIST_SIZE);
+    expect(after.estimatedDaysRemaining).toBe(1);
+  });
+
+  it("claws nothing back when the pace is lowered below what the day already sent: the day rests", async () => {
+    await seedList(LIST_SIZE);
+    const created = await createRelease({ subject: "Too fast", body: "hi", dailyLimit: 100 });
+    const releaseId = created.body.releaseId;
+
+    await drain();
+    expect(mailed().length).toBe(100);
+
+    const repaced = await setPace(releaseId, 10);
+    expect(repaced.status).toBe(200);
+    expect(repaced.body.dailyLimit).toBe(10);
+    expect(repaced.body.reached).toBe(100);
+    expect(repaced.body.todayUsed).toBe(100);
+    expect(repaced.body.nextSliceSize).toBe(0);
+    // 150 still waiting, today spent: fifteen days from tomorrow.
+    expect(repaced.body.estimatedDaysRemaining).toBe(15);
+
+    await drain();
+    expect(mailed().length).toBe(100);
+
+    const [sent] = await sql`
+      SELECT count(*)::int AS n FROM mailing_list_release_recipients
+      WHERE release_id = ${releaseId} AND status = 'sent'
+    `;
+    expect(sent.n).toBe(100);
+  });
+
+  it("repeats nobody and drops nobody across several pace changes", async () => {
+    await seedList(LIST_SIZE);
+    const created = await createRelease({ subject: "Repaced twice", body: "hi", dailyLimit: 20 });
+    const releaseId = created.body.releaseId;
+
+    await drain();
+    await setPace(releaseId, 60).then((r) => expect(r.status).toBe(200));
+    await drain();
+    await setPace(releaseId, LIST_SIZE).then((r) => expect(r.status).toBe(200));
+    await drain();
+
+    const everybody = addresses().sort();
+    expect([...mailed()].sort()).toEqual(everybody);
+    expect(new Set(mailed()).size).toBe(LIST_SIZE);
+
+    const progress = await readRelease(releaseId);
+    expect(progress.status).toBe("completed");
+    expect(progress.reached).toBe(LIST_SIZE);
+    expect(progress.remaining).toBe(0);
+    expect(progress.estimatedDaysRemaining).toBe(0);
+
+    const [pending] = await sql`
+      SELECT count(*)::int AS n FROM mailing_list_release_recipients
+      WHERE release_id = ${releaseId} AND status = 'pending'
+    `;
+    expect(pending.n).toBe(0);
+  });
+
+  it("takes a new pace while paused, and it governs when the release resumes", async () => {
+    await seedList(LIST_SIZE);
+    const created = await createRelease({ subject: "Paused repace", body: "hi", dailyLimit: 20 });
+    const releaseId = created.body.releaseId;
+
+    await request(app).post(`/mailing-lists/releases/${releaseId}/pause`).set(AUTH).expect(200);
+    expect((await setPace(releaseId, 150)).status).toBe(200);
+
+    await request(app).post(`/mailing-lists/releases/${releaseId}/resume`).set(AUTH).expect(200);
+    await drain();
+
+    expect(mailed().length).toBe(150);
+    expect(new Set(mailed()).size).toBe(150);
+  });
+
+  it("refuses a pace the worker cannot deliver, exactly as creating one does", async () => {
+    await seedList(5);
+    const created = await createRelease({ subject: "x", body: "y", dailyLimit: 5 });
+
+    const tooFast = await setPace(created.body.releaseId, MAX_DAILY_LIMIT + 1);
+    expect(tooFast.status).toBe(400);
+    expect((await setPace(created.body.releaseId, 0)).status).toBe(400);
+
+    // Refused, not partly applied.
+    expect((await readRelease(created.body.releaseId)).dailyLimit).toBe(5);
+  });
+
+  it("refuses a cancelled release, and says it never resumes", async () => {
+    await seedList(5);
+    const created = await createRelease({ subject: "x", body: "y", dailyLimit: 5 });
+    await request(app).post(`/mailing-lists/releases/${created.body.releaseId}/cancel`).set(AUTH).expect(200);
+
+    const res = await setPace(created.body.releaseId, 3);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("never resumes");
+  });
+
+  it("refuses a completed release, and says there is nobody left to pace", async () => {
+    await seedList(5);
+    const created = await createRelease({ subject: "x", body: "y", dailyLimit: 5 });
+    await drain();
+    expect((await readRelease(created.body.releaseId)).status).toBe("completed");
+
+    const res = await setPace(created.body.releaseId, 3);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("nobody left");
+  });
+
+  it("refuses a release that stopped itself on the provider's outcomes", async () => {
+    await seedList(20);
+    const created = await createRelease({ subject: "Going badly", body: "hi", dailyLimit: 20 });
+    const releaseId = created.body.releaseId;
+
+    await sql`
+      INSERT INTO mailing_list_release_recipients (id, release_id, email, status, settled_at)
+      SELECT gen_random_uuid(), ${releaseId}::uuid, 'reached' || g || '@example.com', 'sent', now()
+      FROM generate_series(1, 600) AS g
+    `;
+    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 600, bounced: 120, unsubscribed: 2 });
+    await tick();
+    expect((await readRelease(releaseId)).status).toBe("halted");
+
+    const res = await setPace(releaseId, 1);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("delivery outcomes");
+  });
+
+  it("answers 404 for a release that does not exist, and 401 without a key", async () => {
+    const missing = await setPace("11111111-2222-4333-8444-999999999999", 5);
+    expect(missing.status).toBe(404);
+
+    await request(app)
+      .patch("/mailing-lists/releases/11111111-2222-4333-8444-999999999999/pace")
+      .send({ dailyLimit: 5 })
+      .expect(401);
   });
 });

@@ -402,6 +402,27 @@ export const CreateReleaseRequestSchema = z
   .superRefine(bodyKindRefinement)
   .openapi("CreateReleaseRequest");
 
+/**
+ * Changing the pace of a release that is already under way.
+ *
+ * The same number the create route takes, under the same ceiling, because it is
+ * the same promise to the worker: a pace stated above what the worker can
+ * deliver in a day would be accepted and then quietly missed every day. There
+ * is no other field — a release's content, its list and the identity it sends
+ * under are fixed at creation, and the pace is the one decision that is honestly
+ * made on evidence the release itself produces.
+ */
+export const UpdateReleasePaceRequestSchema = z
+  .object({
+    dailyLimit: z.number().int().min(1).max(MAX_DAILY_LIMIT).openapi({
+      description:
+        "The new most-messages-per-UTC-day for this release, governing from the moment it is accepted. Raising it makes more of today's allowance available at once, without waiting for tomorrow. Lowering it below what today has already sent claws nothing back and fails nothing: the day simply rests and the new pace governs from the next one. The ceiling is " +
+        `${MAX_DAILY_LIMIT}` +
+        ", the same one the create route applies, for the same reason.",
+    }),
+  })
+  .openapi("UpdateReleasePaceRequest");
+
 export const ReleaseSchema = z
   .object({
     releaseId: z.string(),
@@ -427,6 +448,10 @@ export const ReleaseSchema = z
     inFlight: z.number().openapi({ description: "Addresses a worker is holding right now" }),
     todayAllowance: z.number().openapi({ description: "Messages this release may send today: its daily limit" }),
     todayUsed: z.number().openapi({ description: "How much of today's allowance is spent, in-flight addresses included" }),
+    estimatedDaysRemaining: z.number().openapi({
+      description:
+        "How many more UTC days the addresses still waiting need at the release's current pace, today included when today can still carry somebody. 0 when nobody is waiting, and 0 for a release that is not going to run again. It is arithmetic over the pace and the ledger: it says nothing about the provider's outcomes.",
+    }),
     nextSliceSize: z.number().openapi({
       description: "How many the next tick would take, which is 0 when today's allowance is spent or the release is not running",
     }),
@@ -1014,6 +1039,34 @@ registry.registerPath({
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
     409: { description: "The release is not paused", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/mailing-lists/releases/{releaseId}/pace",
+  summary: "Change how fast a release goes out, while it is going out",
+  description:
+    `${releasesDescription} The pace a release was created with is a guess made before the first message went out; ` +
+    "this changes it on the evidence the release has since produced. It governs from the moment it is accepted: " +
+    "raising it lets more go out the same day, up to the new allowance, and lowering it below what the day has " +
+    "already sent claws nothing back and fails nothing — the day rests and the new pace governs from the next one. " +
+    "Nobody already reached is mailed again and nobody waiting is dropped, because the ledger is untouched. Only a " +
+    "running or paused release takes a new pace: one that completed, was cancelled, or stopped itself on the " +
+    "provider's delivery outcomes is refused, and the refusal says which it is.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ releaseId: z.string() }),
+    body: { required: true, content: { "application/json": { schema: UpdateReleasePaceRequestSchema } } },
+  },
+  parameters: [releaseIdParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: { description: "The release at its new pace, with a revised estimate of how long it has left", content: { "application/json": { schema: ReleaseSchema } } },
+    400: { description: "Invalid release id, missing x-org-id, or a pace the worker cannot deliver", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "The release has ended or stopped itself, and its decision stands", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
