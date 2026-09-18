@@ -281,15 +281,52 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
   const last = release.lastHealthCheckAt?.getTime() ?? 0;
   if (now.getTime() - last < HEALTH_CHECK_INTERVAL_MS) return false;
 
-  let verdict;
+  let outcomes;
   try {
-    verdict = assessOutcomes(await fetchDeliveryOutcomes(release.runId));
+    outcomes = await fetchDeliveryOutcomes(release.runId);
   } catch (err: any) {
     console.error(
       `[transactional-email-service] release ${release.id}: delivery outcomes unavailable, no verdict this tick: ${err.message}`
     );
     return false;
   }
+
+  // The ledger says this release has reached hundreds of people and the
+  // provider says it sent nobody. Those cannot both be true, so this is not a
+  // healthy release — it is a release whose outcomes this service cannot see,
+  // and reading it as healthy would make the whole self-halt quietly inert.
+  //
+  // It is the live state as of v0.22.0: every message carries the release's run
+  // id, but the gateway mints a CHILD run per send and records that against the
+  // message, so a query keyed on the release's own run matches nothing. Neither
+  // `/public/stats` nor the status routes filter on a parent run or on a tag,
+  // and enumerating tens of thousands of child runs per probe is not a query.
+  // Tracked in email-gateway and postmark-service; the fix is a `tag` filter,
+  // which every message already carries (see the tag set in releaseSlice).
+  //
+  // Loud and repeatedly, rather than once: a staff member reading the logs of a
+  // release in flight must find this, and nothing here decides anything from an
+  // answer it knows to be blind.
+  if (outcomes.sent === 0 && progress.reached >= HEALTH_MIN_SAMPLE) {
+    console.error(
+      `[transactional-email-service] release ${release.id}: the ledger has reached ${progress.reached} addresses ` +
+        `and the provider reports 0 sent for this run, so its delivery outcomes are NOT VISIBLE and this release ` +
+        `cannot stop itself. Watch it by hand, by the tag mailing-list-release-${release.id}.`
+    );
+    traceEvent(
+      release.runId,
+      {
+        service: "transactional-email-service",
+        event: "mailing-list-release-outcomes-blind",
+        detail: `Reached ${progress.reached}, provider reports 0 sent for this run: outcomes not visible, self-halt inert`,
+        level: "error",
+      },
+      headersOf(release)
+    );
+    return false;
+  }
+
+  const verdict = assessOutcomes(outcomes);
 
   await db
     .update(mailingListReleases)
@@ -359,7 +396,12 @@ async function releaseSlice(
             subject: release.subject,
             htmlBody: release.htmlBody,
             textBody: release.textBody,
-            tag: `mailing-list-${slug}`,
+            // Per release, not per list. The provider stores the tag on every
+            // message, so this is the one handle that identifies exactly this
+            // release's mail in the Postmark archive — and it is what a
+            // by-tag outcomes filter would key on once the gateway offers one
+            // (see checkHealth).
+            tag: `mailing-list-release-${release.id}`,
             orgId: release.orgId,
             userId: release.userId,
             runId: release.runId,
