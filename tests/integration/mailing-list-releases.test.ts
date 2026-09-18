@@ -486,6 +486,28 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
     expect(mailed().length).toBe(sentAfter);
   });
 
+  it("asks the provider about this release under the run its messages are sent with", async () => {
+    // The handle is the release's own run, which every send carries as
+    // x-run-id and the provider persists as each message's parent run. Not the
+    // release id, and not the send tag: a tag is per-template in storage, so a
+    // tag-keyed aggregate answers for every release that used the same one.
+    await seedList(20);
+    const created = await createRelease({ subject: "By run", body: "hi", dailyLimit: 20 });
+
+    await sql`
+      INSERT INTO mailing_list_release_recipients (id, release_id, email, status, settled_at)
+      SELECT gen_random_uuid(), ${created.body.releaseId}::uuid, 'reached' || g || '@example.com', 'sent', now()
+      FROM generate_series(1, 600) AS g
+    `;
+    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 600, bounced: 1, unsubscribed: 1 });
+
+    await tick();
+
+    const [row] = await sql`SELECT run_id FROM mailing_list_releases WHERE id = ${created.body.releaseId}`;
+    expect(vi.mocked(fetchDeliveryOutcomes)).toHaveBeenCalledWith(row.run_id);
+    expect(vi.mocked(fetchDeliveryOutcomes)).not.toHaveBeenCalledWith(created.body.releaseId);
+  });
+
   it("keeps going when the outcomes are fine", async () => {
     await seedList(20);
     const created = await createRelease({ subject: "Going fine", body: "hi", dailyLimit: 20 });
@@ -503,16 +525,16 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
   });
 
   it("refuses to read a release it cannot see as a healthy one", async () => {
-    // The gateway answers that nothing carries this release's operation handle.
+    // The gateway answers that no message is recorded under this release's run.
     // The ledger says hundreds were reached, so both cannot be true: this is a
     // release whose outcomes are not visible, not a healthy release. It must
     // not stamp a health check and must not be treated as assessed.
     //
-    // Under v0.22.x this case arrived as a well-formed { sent: 0 } — the probe
-    // was keyed on the release's run, and the run recorded against each message
-    // downstream is a child run minted per send, so it matched nothing and
-    // answered zero. The probe now reports an empty match as an empty match,
-    // which is why it surfaces here as a refusal rather than as a number.
+    // Under v0.22.x this case arrived as a well-formed { sent: 0 }, because the
+    // only per-operation filter available then was the CHILD run the provider
+    // mints per send — so the question matched nothing and answered zero. The
+    // probe now reports an empty match as an empty match, which is why it
+    // surfaces here as a refusal rather than as a number.
     await seedList(20);
     const created = await createRelease({ subject: "Invisible", body: "hi", dailyLimit: 20 });
 
@@ -522,7 +544,7 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
       FROM generate_series(1, 600) AS g
     `;
     vi.mocked(fetchDeliveryOutcomes).mockRejectedValue(
-      new Error("email-gateway reports no message under operation mailing-list-release-x — the question found nothing, which is not a verdict")
+      new Error("email-gateway reports no message under run 11111111-2222-4333-8444-000000000001 — the question found nothing, which is not a verdict")
     );
 
     await tick();
@@ -534,7 +556,7 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
     expect(row.last_health_check_at).toBeNull();
   });
 
-  it("tags every message with the release, which is the only handle that names exactly this release's mail", async () => {
+  it("tags every message with the release, so its mail is findable on its own in the provider's archive", async () => {
     await seedList(5);
     const created = await createRelease({ subject: "Tagged", body: "hi", dailyLimit: 5 });
 

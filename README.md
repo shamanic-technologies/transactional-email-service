@@ -354,13 +354,17 @@ The pace is an in-process interval armed after the port is bound, not a cron. A 
 
 The day's allowance is spread across the ticks left in the day rather than spent at midnight, and a day whose allowance is reached simply rests until the next one. One tick takes at most 20 addresses, which is also the point past which the provider's suppression read stops being per-address and becomes a dump of the whole broadcast stream. That ceiling every minute is **28,800 a day**, and a `dailyLimit` above it is refused rather than silently under-delivered.
 
-A release reads its own delivery outcomes back from email-gateway (`GET /public/stats/by-operation?operationId=mailing-list-release-<releaseId>`). Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too. A probe that cannot be answered decides nothing — it is logged and asked again next tick, never read as healthy.
+A release reads its own delivery outcomes back from email-gateway (`GET /public/stats/by-operation?operationRunId=<the release's run>`). Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too. A probe that cannot be answered decides nothing — it is logged and asked again next tick, never read as healthy.
 
-> **Why the read is keyed on the release's tag and not on its run.** Every message carries the release's run id, but email-gateway mints a **child** run per send and records *that* against the message, so a query keyed on the release's own run matches nothing — measured in production on v0.22.0: the release run returned `sent: 0` while its child returned `sent: 1`. The self-halt was inert for the whole of v0.22.x because of it: an empty match and a real zero came back identically, so the probe saw zero every tick and never had grounds to stop anything.
+> **Why the read is keyed on the release's RUN.** Two other handles were tried first, and each was wrong in the direction that reads as healthy.
 >
-> The handle is instead the tag every one of a release's messages already carries, `mailing-list-release-<releaseId>` — per release, never per list — written by `releaseOperationId` in `src/lib/release-operation.ts` and read back through the same helper. One indexed lookup on the provider whatever the release's size.
+> `runIds` on the general stats read means the **child** run the provider mints per send, not the run the caller tracks — so a query keyed on the release's own run matched nothing and answered a well-formed zero. Measured in production on v0.22.0: the release run returned `sent: 0` while its child returned `sent: 1`. The self-halt was inert for the whole of v0.22.x because of it, seeing zero every tick and never having grounds to stop anything.
 >
-> **An operation that matches no message is now reported as matching none**, not as zero outcomes: email-gateway answers `matched: false` with no stats at all, and `fetchDeliveryOutcomes` throws on it. The worker treats that exactly like an unreachable gateway — it logs and asks again next tick, and decides nothing. A release created before the per-release tag shipped therefore never self-halts and says so every tick, rather than reading as clean.
+> Keying on the send **tag** then matched too much. A tag is per-TEMPLATE in storage, not per-operation, so one release's question returned every release that ever used the same template — measured on the provider's side as 11 messages for an operation of 1. postmark-service withdrew that read before it reached prod for exactly that reason.
+>
+> What holds is the release's own run, which every send carries as `x-run-id` and postmark-service persists as each message's **parent** run. It is exactly this release's mail, no more and no less, in one indexed lookup whatever the release's size. The per-release tag stays on every message and is still how a human finds one release's mail in the Postmark Activity archive; it is simply not what an aggregate is keyed on.
+>
+> **An operation that matches no message is reported as matching none**, not as zero outcomes: email-gateway answers `matched: false` with no stats at all, and `fetchDeliveryOutcomes` throws on it. The worker treats that exactly like an unreachable gateway — it logs and asks again next tick, and decides nothing.
 
 #### `POST /mailing-lists/{slug}/releases`
 
@@ -558,8 +562,8 @@ src/
     mailing-list-sender.ts # The address an update leaves from when the caller states none
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
-    release-operation.ts # The handle every message of one release carries; written at send, read back by the probe
-    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on that handle
+    release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
+    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
