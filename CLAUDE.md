@@ -2,6 +2,36 @@
 
 Transactional email service that sends event-triggered emails. Resolves recipients via client-service, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
 
+## A release's outcomes are read by its TAG, never by its run — and an empty match is not a zero
+
+The run id this service puts on a release's sends is not the run recorded
+against the message downstream: email-gateway mints a CHILD run per send. So
+`GET /public/stats?runIds=<the release's run>` matched nothing and answered a
+well-formed zero, and the mailing-list self-halt — the only thing standing
+between a 30,013-address newsletter and an account-wide complaint suspension —
+saw that zero every tick for the whole of v0.22.x and never had grounds to stop
+anything. Nothing was red: 283 unit and 67 integration tests were green, and one
+probe against one real send found it.
+
+The handle is the tag every one of a release's messages carries,
+`mailing-list-release-<releaseId>`, read back through
+`GET /public/stats/by-operation`. **Both sides derive it from
+`releaseOperationId` in `src/lib/release-operation.ts`** — a handle written one
+way and read another is a self-halt that never fires.
+
+That helper lives in its own module for a reason that costs a prod incident
+otherwise: the worker's integration tests `vi.mock` the whole of
+`release-health.js`, so a helper exported from there comes back `undefined`
+inside the send path and every message goes out UNTAGGED — silently, because
+each send is caught per address. The suite caught it; the only tell was a send
+count of zero in an unrelated test.
+
+`fetchDeliveryOutcomes` THROWS when the gateway reports `matched: false`. An
+operation nothing belongs to is a question that found nothing, not a release
+with clean outcomes, and the worker treats it exactly like an unreachable
+gateway: log, decide nothing, ask again next tick. Do not "simplify" that into
+reading the absent stats as zeros — that is the original bug.
+
 ## Commands
 
 - `npm test` — run tests (Vitest)
