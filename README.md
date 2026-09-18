@@ -338,6 +338,77 @@ The rendering is the same code path a send takes, so approving a preview is appr
 
 Every update sent to the list, newest first, with the subject, the sender it went out from (`from`), `bodyKind` (`"markdown"` or `"html"`), the markdown as authored in `body` (`null` for an update authored as HTML — there was none), the HTML as sent, the timestamp and the recipient count. Updates sent before the sender could be stated read as `kevin@distribute.you`, which is what they were sent from.
 
+#### Releases: sending one update over several days
+
+`POST /mailing-lists/{slug}/updates` puts the whole list out **inside the request that asked for it**. That is right for `investors` (one address) and impossible for a list of thirty thousand: the send takes 15-25 minutes of wall clock, an HTTP client abandons a response after 300 seconds while the service keeps sending, nothing records which addresses were reached, and there is no way to slow it down or stop it. So that route now refuses any list over **100 subscribers** with a 400 naming the release route, rather than timing out in silence.
+
+A **release** is the same update plus a daily pace. Creating one writes a ledger row per address and answers in about a second, sending nothing. An interval inside the service then releases it over the following days.
+
+Three properties, and each is a consequence of the ledger rather than of care taken at the right moment:
+
+- **Nobody is mailed twice.** A recipient row is claimed by an `UPDATE` that only moves rows out of `pending`, under `FOR UPDATE SKIP LOCKED`, and the unique index on (release, email) means a second row for somebody cannot exist. Issuing the same release twice returns the first one rather than starting a second.
+- **Nobody is lost.** Every address is a row from the moment the release is created and ends in a terminal status with a reason. A claim a killed process left behind is settled as failed, naming what happened, rather than returned to the queue — this service cannot ask the provider whether that one message left, and a newsletter delivered twice is worse than one address reported honestly. A redeploy sends `SIGTERM`, which lets the slice in flight settle first, so a planned restart loses nobody at all.
+- **Suppression is reconciled per slice**, with no cache at all, at the moment that slice is sent. Somebody who unsubscribes on day one is skipped on day five.
+
+The pace is an in-process interval armed after the port is bound, not a cron. A GitHub Actions cron declares a cadence it does not deliver (measured elsewhere in this fleet at 6.2 runs a day against 24 declared, with gaps of 2.5 to 5.7 hours), and a release's pace is the product. `POST /internal/mailing-lists/releases/tick` exists so a cron can be a **backstop** for a process that died, never as the mechanism.
+
+The day's allowance is spread across the ticks left in the day rather than spent at midnight, and a day whose allowance is reached simply rests until the next one. One tick takes at most 20 addresses, which is also the point past which the provider's suppression read stops being per-address and becomes a dump of the whole broadcast stream. That ceiling every minute is **28,800 a day**, and a `dailyLimit` above it is refused rather than silently under-delivered.
+
+A release reads its own delivery outcomes back from email-gateway (`GET /public/stats?type=transactional&runIds=<the release's run>`, which is postmark-service's webhook ingestion keyed on the run every one of its messages carries). Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too. A probe that cannot be answered decides nothing — it is logged and asked again next tick, never read as healthy.
+
+#### `POST /mailing-lists/{slug}/releases`
+
+**Request body:** the same body `POST /mailing-lists/{slug}/updates` takes (`subject`, one of `body` or `htmlBody`, optional `textBody`, optional `from`), plus:
+
+```json
+{
+  "subject": "September update",
+  "htmlBody": "<html>…</html>",
+  "from": "news@news.distribute.you",
+  "dailyLimit": 3000
+}
+```
+
+`dailyLimit` is required and has no default: the pace is the reason a release exists, and this service will not pick one on staff's behalf. Pick it for the sending reputation you have, not the list you hold — a sending subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands.
+
+**201** with `created: true` for a new release. **200** with `created: false` when this exact update is already being released to this list, carrying that release untouched. The response is the release's progress plus `estimatedDays`.
+
+#### `GET /mailing-lists/releases/{releaseId}`
+
+```json
+{
+  "releaseId": "…",
+  "slug": "newsletter",
+  "subject": "September update",
+  "status": "running",
+  "haltedReason": null,
+  "dailyLimit": 3000,
+  "recipientCount": 30013,
+  "reached": 4820,
+  "remaining": 25100,
+  "failed": 3,
+  "skippedOptedOut": 90,
+  "inFlight": 0,
+  "todayAllowance": 3000,
+  "todayUsed": 1820,
+  "nextSliceSize": 20
+}
+```
+
+Counted from the ledger, so a redeploy does not change the answer.
+
+#### `GET /mailing-lists/{slug}/releases`
+
+Every release created for this list, newest first, each with the progress above.
+
+#### `POST /mailing-lists/releases/{releaseId}/pause`, `/resume`, `/cancel`
+
+Pause stops it within one tick. Resume continues where it stopped, and repeats nobody across the gap. Cancel ends it, settles every waiting address as cancelled so the ledger says what happened to all of them, and it never resumes. A release that stopped itself on the provider's outcomes is not resumed either — sending the same update again is a new release, so the decision is made rather than undone. A move that is not a move answers **409**.
+
+#### `POST /internal/mailing-lists/releases/tick`
+
+Runs one pass over every running release and reports what it did (`x-api-key` only). The backstop described above. Safe to call at any time: two ticks never overlap, and a call arriving while one runs answers `skippedBusy: true`.
+
 ### `GET /health`
 
 Returns `{ "status": "ok" }`. No authentication required.
@@ -458,13 +529,19 @@ src/
   schemas.ts            # Zod schemas + OpenAPI registry (single source of truth)
   db/
     index.ts            # Database connection
-    schema.ts           # Drizzle schema (email_events, email_templates, mailing_lists, mailing_list_subscribers, mailing_list_updates)
+    schema.ts           # Drizzle schema (email_events, email_templates, mailing_lists, mailing_list_subscribers, mailing_list_updates, mailing_list_releases, mailing_list_release_recipients)
   lib/
     address-blob.ts     # Lenient parser for a pasted blob of email addresses
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client; sets the default reply address, adds no blind copy of its own
     founder.ts          # The founder's address: reply-to on every send, blind copy on customer-facing ones
     mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard; plain-text derivation for authored HTML
+    mailing-list-sender.ts # The address an update leaves from when the caller states none
+    update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
+    release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
+    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on its run
+    release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
+    staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
     runs-client.ts      # Runs service client (create/update runs)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
@@ -474,13 +551,14 @@ src/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint
     mailing-lists.ts    # Staff mailing lists: subscribers CRUD, send an update, read the history
+    mailing-list-releases.ts # Create / read / pause / resume / cancel a paced release, and the backstop tick
     send.ts             # POST /send + POST /platform-send endpoints with dedup logic
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
-    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted)
+    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted, mailing_list_release_halted)
 tests/
   migrations.test.ts    # Validates migration files use idempotent patterns
   ...

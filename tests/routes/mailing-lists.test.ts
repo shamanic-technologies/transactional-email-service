@@ -563,14 +563,29 @@ describe("POST /mailing-lists/:slug/updates", () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
-  it("sends to a few thousand members in bounded waves", async () => {
-    seedList(Array.from({ length: 2500 }, (_, i) => `member${i}@example.com`));
+  it("sends to the largest list it can finish, in bounded waves", async () => {
+    seedList(Array.from({ length: 100 }, (_, i) => `member${i}@example.com`));
 
     const res = await request(app).post("/mailing-lists/investors/updates").set(AUTH).send({ subject: "s", body: "b" });
 
     expect(res.status).toBe(200);
-    expect(res.body.recipientCount).toBe(2500);
-    expect(sendEmail).toHaveBeenCalledTimes(2500);
+    expect(res.body.recipientCount).toBe(100);
+    expect(sendEmail).toHaveBeenCalledTimes(100);
+  });
+
+  it("refuses a list it cannot finish inside the request, and names the release route", async () => {
+    // This route sends the whole list inside the request that asked for it, so
+    // past a few hundred addresses it outlives the caller's own 300-second
+    // budget: the response is abandoned while the service keeps sending, and a
+    // retry mails everybody again. It refuses rather than walking into that.
+    seedList(Array.from({ length: 2500 }, (_, i) => `member${i}@example.com`));
+
+    const res = await request(app).post("/mailing-lists/investors/updates").set(AUTH).send({ subject: "s", body: "b" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("2500 subscribers");
+    expect(res.body.error).toContain("POST /mailing-lists/investors/releases");
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });
 

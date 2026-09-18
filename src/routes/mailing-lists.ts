@@ -4,12 +4,8 @@ import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "..
 import { db } from "../db/index.js";
 import { mailingLists, mailingListSubscribers, mailingListUpdates } from "../db/schema.js";
 import { parseAddressBlob } from "../lib/address-blob.js";
-import {
-  deriveTextFromHtml,
-  findUnrenderableImages,
-  findUnrenderableImagesInHtml,
-  renderUpdateBody,
-} from "../lib/mailing-list-body.js";
+import { resolveBody } from "../lib/update-body.js";
+import { DEFAULT_MAILING_LIST_FROM_ADDRESS } from "../lib/mailing-list-sender.js";
 import { fetchSuppressed } from "../lib/suppression.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
@@ -33,15 +29,21 @@ const router = Router();
  * in another recipient's headers.
  */
 
-/**
- * The sender an update leaves from when the caller states none. This is the
- * address every update left from before a sender could be stated per send, so
- * a caller that says nothing sends exactly what it sent before.
- */
-const DEFAULT_MAILING_LIST_FROM_ADDRESS = "kevin@distribute.you";
-
 /** Postmark accepts 500 messages per batch; per-recipient sends run in bounded waves. */
 const SEND_CONCURRENCY = 8;
+
+/**
+ * The largest list this route will send inside the request that asked for it.
+ *
+ * Above this it refuses and names the release route instead. The number is not
+ * about politeness: at eight concurrent sends a list of this size finishes in
+ * seconds, and a list ten times larger does not finish inside the 300 seconds
+ * an HTTP client waits before abandoning the response. The service kept sending
+ * anyway, so the caller could learn nothing and could not safely retry — which
+ * is the trap this cap closes. `investors` and `newsletter-test` hold one
+ * address each and are unaffected.
+ */
+const SYNC_SEND_MAX_RECIPIENTS = 100;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -78,66 +80,6 @@ function workflowHeadersOf(identity: PlatformIdentityLocals) {
     workflowSlug: identity.workflowSlug,
     featureSlug: identity.featureSlug,
     audienceId: identity.audienceId,
-  };
-}
-
-interface ResolvedBody {
-  bodyKind: "markdown" | "html";
-  /** The markdown source, or null for a body authored as HTML — there is none. */
-  markdown: string | null;
-  htmlBody: string;
-  textBody: string;
-  /** Image URLs no client renders. A send refuses on these; a preview reports them. */
-  unrenderableImages: string[];
-}
-
-/**
- * Turns whatever the caller stated into the two parts a message carries.
- *
- * Markdown is rendered, exactly as it always was. An authored document is NOT:
- * it is the bytes staff wrote, and re-rendering, re-wrapping or inlining
- * anything into it would break the design it exists to carry. So the html path
- * passes the body through untouched and only decides the text part beside it.
- *
- * A message with no text part is not an option: clients that prefer text show
- * an empty message and filters read the missing alternative as a signal. The
- * caller may write one; otherwise one is derived; and a document that yields
- * neither — an all-image layout, say — is refused with the ask, because the
- * only thing worse than a rough text part is none.
- *
- * Shared by the send and the preview so the preview cannot drift from what
- * lands in the inbox, which is the reason the preview route exists at all.
- */
-function resolveBody(input: { body?: string; htmlBody?: string; textBody?: string }): ResolvedBody | { error: string } {
-  if (input.htmlBody) {
-    const textBody = input.textBody ?? deriveTextFromHtml(input.htmlBody);
-    if (textBody.trim().length === 0) {
-      return {
-        error:
-          "This HTML carries no text a plain-text part could be derived from, and a message with no text part " +
-          "arrives empty in clients that prefer text. Supply `textBody`.",
-      };
-    }
-
-    return {
-      bodyKind: "html",
-      markdown: null,
-      htmlBody: input.htmlBody,
-      textBody,
-      unrenderableImages: findUnrenderableImagesInHtml(input.htmlBody),
-    };
-  }
-
-  // The schema guarantees one of the two, so this is the markdown path.
-  const markdown = input.body as string;
-  const rendered = renderUpdateBody(markdown);
-
-  return {
-    bodyKind: "markdown",
-    markdown,
-    htmlBody: rendered.htmlBody,
-    textBody: rendered.textBody,
-    unrenderableImages: findUnrenderableImages(markdown),
   };
 }
 
@@ -411,6 +353,22 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
 
     if (members.length === 0) {
       res.status(400).json({ error: `Mailing list '${slug}' has no subscribers` });
+      return;
+    }
+
+    // Refused rather than attempted. This route sends the whole list inside
+    // this request, and past a few hundred addresses that outlives the caller's
+    // own timeout: the response is abandoned while the service keeps sending,
+    // so nobody learns what happened and a retry mails everyone again. A
+    // release does the same update at a stated pace, records every address, and
+    // can be watched, paused and stopped.
+    if (members.length > SYNC_SEND_MAX_RECIPIENTS) {
+      res.status(400).json({
+        error:
+          `'${slug}' has ${members.length} subscribers, more than the ${SYNC_SEND_MAX_RECIPIENTS} this route can ` +
+          `finish inside one request. Use POST /mailing-lists/${slug}/releases, which takes the same body plus a ` +
+          `dailyLimit and releases the update over several days without holding a connection open.`,
+      });
       return;
     }
 
