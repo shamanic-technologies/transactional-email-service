@@ -2,25 +2,36 @@
 
 Transactional email service that sends event-triggered emails. Resolves recipients via client-service, deduplicates sends, renders HTML/text templates, and delivers via the Email Gateway.
 
-## A release's outcomes are read by its TAG, never by its run — and an empty match is not a zero
+## A release's outcomes are read by its own RUN — and an empty match is not a zero
 
-The run id this service puts on a release's sends is not the run recorded
-against the message downstream: email-gateway mints a CHILD run per send. So
-`GET /public/stats?runIds=<the release's run>` matched nothing and answered a
-well-formed zero, and the mailing-list self-halt — the only thing standing
-between a 30,013-address newsletter and an account-wide complaint suspension —
-saw that zero every tick for the whole of v0.22.x and never had grounds to stop
-anything. Nothing was red: 283 unit and 67 integration tests were green, and one
-probe against one real send found it.
+The self-halt on a mailing-list release is the only thing standing between a
+30,013-address newsletter and an account-wide complaint suspension that would
+take onboarding and dunning mail with it. It reads the release's outcomes back
+from email-gateway, and the handle it reads them by has been wrong twice, both
+times quietly, both times in the direction that reads as healthy.
 
-The handle is the tag every one of a release's messages carries,
-`mailing-list-release-<releaseId>`, read back through
-`GET /public/stats/by-operation`. **Both sides derive it from
-`releaseOperationId` in `src/lib/release-operation.ts`** — a handle written one
-way and read another is a self-halt that never fires.
+`GET /public/stats?runIds=<the release's run>` matched nothing, because on that
+read `runIds` means the CHILD run the provider mints per send. The answer was a
+well-formed zero, every tick, for the whole of v0.22.x.
 
-That helper lives in its own module for a reason that costs a prod incident
-otherwise: the worker's integration tests `vi.mock` the whole of
+Keying on the send TAG then matched too much. A tag is per-TEMPLATE in storage,
+not per-operation, so one release's question returned every release that ever
+used the same template — measured in production as 11 messages for an operation
+of 1. postmark-service withdrew the tag-keyed read for exactly that reason and
+email-gateway conformed: its parameter is `operationRunId`, and a caller still
+sending `operationId` gets a deliberate **400**.
+
+What holds is the release's own RUN. Every send of a release already carries it
+as `x-run-id`, postmark-service persists it as each message's PARENT run, and
+`GET /public/stats/by-operation?operationRunId=<the release's run>` aggregates
+exactly that set — this release's mail, no more and no less, in one indexed
+lookup whatever the release's size. Nothing extra is written at send time.
+
+The per-release tag (`releaseOperationId` in `src/lib/release-operation.ts`) is
+still written on every message, and is still how a human finds one release's
+mail in the Postmark Activity archive. It is simply not what an aggregate is
+keyed on. That helper lives in its own module for a reason that costs a prod
+incident otherwise: the worker's integration tests `vi.mock` the whole of
 `release-health.js`, so a helper exported from there comes back `undefined`
 inside the send path and every message goes out UNTAGGED — silently, because
 each send is caught per address. The suite caught it; the only tell was a send
@@ -30,7 +41,9 @@ count of zero in an unrelated test.
 operation nothing belongs to is a question that found nothing, not a release
 with clean outcomes, and the worker treats it exactly like an unreachable
 gateway: log, decide nothing, ask again next tick. Do not "simplify" that into
-reading the absent stats as zeros — that is the original bug.
+reading the absent stats as zeros — that is the original bug. There is no
+fallback to the tag handle and no dual read; a second handle answering one
+question with a different number is the contradiction that was just removed.
 
 ## Commands
 
