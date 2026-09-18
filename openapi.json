@@ -670,6 +670,242 @@
           "failures",
           "sentAt"
         ]
+      },
+      "CreateReleaseResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MailingListRelease"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "boolean",
+                "description": "False when this request restated an update already being released to this list, in which case the release the first request created is returned untouched and nothing new was started."
+              },
+              "estimatedDays": {
+                "type": "number",
+                "description": "recipientCount divided by dailyLimit, rounded up"
+              }
+            },
+            "required": [
+              "created",
+              "estimatedDays"
+            ]
+          }
+        ]
+      },
+      "MailingListRelease": {
+        "type": "object",
+        "properties": {
+          "releaseId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "bodyKind": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "paused",
+              "cancelled",
+              "halted",
+              "completed"
+            ],
+            "description": "\"running\" — the worker is releasing it. \"paused\" — staff stopped it and may resume. \"cancelled\" — staff ended it; it never resumes. \"halted\" — it stopped itself because the provider's delivery outcomes for it went bad, and staff were told. \"completed\" — every address is accounted for."
+          },
+          "haltedReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why a halted release stopped, in the words the staff alert repeated. Null otherwise."
+          },
+          "dailyLimit": {
+            "type": "number"
+          },
+          "recipientCount": {
+            "type": "number",
+            "description": "Addresses the list held when the release was created"
+          },
+          "reached": {
+            "type": "number",
+            "description": "Addresses a message has gone out to"
+          },
+          "remaining": {
+            "type": "number",
+            "description": "Addresses still waiting"
+          },
+          "failed": {
+            "type": "number",
+            "description": "Addresses whose send failed, or whose claim outlived the worker holding it"
+          },
+          "skippedOptedOut": {
+            "type": "number",
+            "description": "Addresses the provider was suppressing at the moment their slice was sent — checked per slice, so somebody who unsubscribes on day one is skipped on day five"
+          },
+          "inFlight": {
+            "type": "number",
+            "description": "Addresses a worker is holding right now"
+          },
+          "todayAllowance": {
+            "type": "number",
+            "description": "Messages this release may send today: its daily limit"
+          },
+          "todayUsed": {
+            "type": "number",
+            "description": "How much of today's allowance is spent, in-flight addresses included"
+          },
+          "nextSliceSize": {
+            "type": "number",
+            "description": "How many the next tick would take, which is 0 when today's allowance is spent or the release is not running"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "releaseId",
+          "slug",
+          "subject",
+          "from",
+          "bodyKind",
+          "status",
+          "haltedReason",
+          "dailyLimit",
+          "recipientCount",
+          "reached",
+          "remaining",
+          "failed",
+          "skippedOptedOut",
+          "inFlight",
+          "todayAllowance",
+          "todayUsed",
+          "nextSliceSize",
+          "createdAt",
+          "completedAt"
+        ]
+      },
+      "CreateReleaseRequest": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The update body, authored as markdown, rendered here exactly as the synchronous send renders it. Mutually exclusive with `htmlBody`; exactly one of the two is required."
+          },
+          "htmlBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A complete HTML document staff authored, sent to every recipient byte-for-byte as supplied. Mutually exclusive with `body`; exactly one of the two is required."
+          },
+          "textBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The plain-text part for an `htmlBody` release. Omit it and one is derived from the HTML. Only valid beside `htmlBody`."
+          },
+          "from": {
+            "type": "string",
+            "format": "email",
+            "description": "The address this release goes out from. Omit it and it leaves kevin@distribute.you, the same default the synchronous send takes. It must be a sender Postmark has verified: an unverified one is refused by the provider, and every message in the release fails with its reason rather than falling back to anything."
+          },
+          "dailyLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 28800,
+            "description": "The most messages this release may send per UTC calendar day. Required, with no default: the pace is the reason a release exists and this service will not pick one on staff's behalf. The day's allowance is spread across the day rather than spent at midnight, and a day where the allowance is reached simply stops until the next one. The ceiling is 28800, which is the most the worker's own pace can deliver in a day; a larger number is refused rather than silently under-delivered. Pick it for the sending reputation you have, not the list you hold: a subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands."
+          }
+        },
+        "required": [
+          "subject",
+          "dailyLimit"
+        ]
+      },
+      "ReleasesResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailingListRelease"
+            }
+          }
+        },
+        "required": [
+          "slug",
+          "count",
+          "releases"
+        ]
+      },
+      "ReleaseTickResponse": {
+        "type": "object",
+        "properties": {
+          "releasesConsidered": {
+            "type": "number"
+          },
+          "sent": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "skippedOptedOut": {
+            "type": "number"
+          },
+          "completed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "halted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skippedBusy": {
+            "type": "boolean",
+            "description": "True when another tick was already running and this call did nothing"
+          }
+        },
+        "required": [
+          "releasesConsidered",
+          "sent",
+          "failed",
+          "skippedOptedOut",
+          "completed",
+          "halted",
+          "skippedBusy"
+        ]
       }
     },
     "parameters": {},
@@ -1785,6 +2021,626 @@
           },
           "404": {
             "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/releases": {
+      "post": {
+        "summary": "Release a written update to a mailing list over several days",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. The body is stated exactly as the synchronous send takes it — `body` as markdown or `htmlBody` as a document staff authored — plus `dailyLimit`, which has no default. The answer comes back in about a second whatever the list's size and reports how many recipients the release covers and the pace it will follow. Restating an update already being released to this list returns that release with `created: false` rather than starting a second one over the same people.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReleaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "This update is already being released to this list; the existing release is returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateReleaseResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The release, newly created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateReleaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, an SVG image no mail client renders, or an empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The release could not be tracked, so it was not started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Every release created for a mailing list",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. Newest first, each with its progress.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Releases, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleasesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid slug or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/releases/{releaseId}": {
+      "get": {
+        "summary": "Where one release stands",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. Reports reached, remaining, failed and skipped, plus today's allowance and how much of it is spent. Counted from the ledger, so a redeploy does not change the answer.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The release's id, as returned when it was created."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "releaseId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The release and its progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListRelease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid release id or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/releases/{releaseId}/pause": {
+      "post": {
+        "summary": "Stop a running release",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. It stops within one tick and sends nothing further until it is resumed. Addresses already reached stay reached; nobody is sent to twice when it resumes.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The release's id, as returned when it was created."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "releaseId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The paused release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListRelease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid release id or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The release is not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/releases/{releaseId}/resume": {
+      "post": {
+        "summary": "Continue a paused release where it stopped",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. Only a paused release resumes. A cancelled one never does, and one that stopped itself on the provider's delivery outcomes does not either — sending the same update again is a new release, so that the decision is made rather than undone.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The release's id, as returned when it was created."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "releaseId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The running release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListRelease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid release id or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The release is not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/releases/{releaseId}/cancel": {
+      "post": {
+        "summary": "End a release; it never resumes",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. Every address still waiting is settled as cancelled, so the ledger states what happened to all of them rather than implying they are still queued.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The release's id, as returned when it was created."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "releaseId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cancelled release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListRelease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid release id or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The release has already ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/mailing-lists/releases/tick": {
+      "post": {
+        "summary": "Run one pass of the release worker",
+        "description": "Runs one pass over every running release and reports what it did. The worker already runs on its own interval inside the service, which is what paces a release; this route exists so a cron can act as a backstop for a process that died, and so a caller can drive the pace without waiting on a clock. Safe to call at any time: two ticks never overlap, and a call that arrives while one is running answers `skippedBusy`.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the tick did",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseTickResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
             "content": {
               "application/json": {
                 "schema": {
