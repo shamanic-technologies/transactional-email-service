@@ -284,11 +284,11 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
 
   let outcomes;
   try {
-    outcomes = await fetchDeliveryOutcomes(release.id);
+    outcomes = await fetchDeliveryOutcomes(release.runId);
   } catch (err: any) {
-    // Includes the gateway reporting that nothing carries this release's
-    // operation handle. That is a question which found nothing, not a release
-    // with clean outcomes, and it decides nothing here.
+    // Includes the gateway reporting that no message is recorded under this
+    // release's run. That is a question which found nothing, not a release with
+    // clean outcomes, and it decides nothing here.
     console.error(
       `[transactional-email-service] release ${release.id}: delivery outcomes unavailable, no verdict this tick: ${err.message}`
     );
@@ -366,10 +366,11 @@ async function releaseSlice(
             htmlBody: release.htmlBody,
             textBody: release.textBody,
             // Per release, not per list. The provider stores the tag on every
-            // message, so this is the one handle that identifies exactly this
-            // release's mail — and it is what checkHealth reads the release's
-            // outcomes back by. Same helper on both sides on purpose: a handle
-            // written one way and read another is a self-halt that never fires.
+            // message, so this is what identifies exactly this release's mail in
+            // the Postmark Activity archive, where a human reads one message
+            // rather than an aggregate. The outcomes checkHealth judges the
+            // release on are read by its RUN, not by this — a tag is
+            // per-template in storage, so it answers for more than one release.
             tag: releaseOperationId(release.id),
             orgId: release.orgId,
             userId: release.userId,
