@@ -397,11 +397,12 @@ A release reads its own delivery outcomes back from email-gateway (`GET /public/
   "inFlight": 0,
   "todayAllowance": 3000,
   "todayUsed": 1820,
-  "nextSliceSize": 20
+  "nextSliceSize": 20,
+  "estimatedDaysRemaining": 9
 }
 ```
 
-Counted from the ledger, so a redeploy does not change the answer.
+Counted from the ledger, so a redeploy does not change the answer. `estimatedDaysRemaining` is arithmetic over the pace and what is still waiting, today included when today can still carry somebody: it is 0 when nobody is waiting, and 0 for a release that is not going to run again.
 
 #### `GET /mailing-lists/{slug}/releases`
 
@@ -410,6 +411,18 @@ Every release created for this list, newest first, each with the progress above.
 #### `POST /mailing-lists/releases/{releaseId}/pause`, `/resume`, `/cancel`
 
 Pause stops it within one tick. Resume continues where it stopped, and repeats nobody across the gap. Cancel ends it, settles every waiting address as cancelled so the ledger says what happened to all of them, and it never resumes. A release that stopped itself on the provider's outcomes is not resumed either — sending the same update again is a new release, so the decision is made rather than undone. A move that is not a move answers **409**.
+
+#### `PATCH /mailing-lists/releases/{releaseId}/pace`
+
+```json
+{ "dailyLimit": 500 }
+```
+
+Changes how fast a release goes out **while it is going out**. The pace a release was created with is a guess made before the first message left, and the reason a release is paced at all (sending reputation) is the one thing that guess could not be informed by. This takes the decision again on the evidence the release has since produced, which the service already reads back for itself.
+
+It governs from the moment it is accepted. Raising it makes more of today's allowance available at once, without waiting for tomorrow. Lowering it below what the day has already sent claws nothing back and fails nothing: the day rests and the new pace governs from the next one. Only one column moves and the ledger is untouched, which is why nobody already reached is reached again and nobody waiting is dropped, across any number of changes.
+
+The ceiling is the same **28,800 a day** the create route applies, for the same reason, and a pace above it is **400**. Only a running or paused release takes a new pace: one that has completed, was cancelled, or stopped itself on the provider's delivery outcomes answers **409** naming which it is. The response is the release's progress at the new pace, with a revised `estimatedDaysRemaining`.
 
 #### `POST /internal/mailing-lists/releases/tick`
 
@@ -557,7 +570,7 @@ src/
     health.ts           # Health check endpoint
     openapi.ts          # GET /openapi.json endpoint
     mailing-lists.ts    # Staff mailing lists: subscribers CRUD, send an update, read the history
-    mailing-list-releases.ts # Create / read / pause / resume / cancel a paced release, and the backstop tick
+    mailing-list-releases.ts # Create / read / re-pace / pause / resume / cancel a paced release, and the backstop tick
     send.ts             # POST /send + POST /platform-send endpoints with dedup logic
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration

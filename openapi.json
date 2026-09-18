@@ -768,6 +768,10 @@
             "type": "number",
             "description": "How much of today's allowance is spent, in-flight addresses included"
           },
+          "estimatedDaysRemaining": {
+            "type": "number",
+            "description": "How many more UTC days the addresses still waiting need at the release's current pace, today included when today can still carry somebody. 0 when nobody is waiting, and 0 for a release that is not going to run again. It is arithmetic over the pace and the ledger: it says nothing about the provider's outcomes."
+          },
           "nextSliceSize": {
             "type": "number",
             "description": "How many the next tick would take, which is 0 when today's allowance is spent or the release is not running"
@@ -799,6 +803,7 @@
           "inFlight",
           "todayAllowance",
           "todayUsed",
+          "estimatedDaysRemaining",
           "nextSliceSize",
           "createdAt",
           "completedAt"
@@ -863,6 +868,20 @@
           "slug",
           "count",
           "releases"
+        ]
+      },
+      "UpdateReleasePaceRequest": {
+        "type": "object",
+        "properties": {
+          "dailyLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 28800,
+            "description": "The new most-messages-per-UTC-day for this release, governing from the moment it is accepted. Raising it makes more of today's allowance available at once, without waiting for tomorrow. Lowering it below what today has already sent claws nothing back and fails nothing: the day simply rests and the new pace governs from the next one. The ceiling is 28800, the same one the create route applies, for the same reason."
+          }
+        },
+        "required": [
+          "dailyLimit"
         ]
       },
       "ReleaseTickResponse": {
@@ -2510,6 +2529,120 @@
           },
           "409": {
             "description": "The release is not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/releases/{releaseId}/pace": {
+      "patch": {
+        "summary": "Change how fast a release goes out, while it is going out",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. The pace a release was created with is a guess made before the first message went out; this changes it on the evidence the release has since produced. It governs from the moment it is accepted: raising it lets more go out the same day, up to the new allowance, and lowering it below what the day has already sent claws nothing back and fails nothing — the day rests and the new pace governs from the next one. Nobody already reached is mailed again and nobody waiting is dropped, because the ledger is untouched. Only a running or paused release takes a new pace: one that completed, was cancelled, or stopped itself on the provider's delivery outcomes is refused, and the refusal says which it is.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The release's id, as returned when it was created."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "releaseId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReleasePaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The release at its new pace, with a revised estimate of how long it has left",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailingListRelease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid release id, missing x-org-id, or a pace the worker cannot deliver",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The release has ended or stopped itself, and its decision stands",
             "content": {
               "application/json": {
                 "schema": {
