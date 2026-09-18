@@ -171,3 +171,31 @@ export function assessOutcomes(outcomes: DeliveryOutcomes): HealthVerdict {
 
   return { halt: false, reason: null, bounceRate, unsubscribeRate };
 }
+
+/**
+ * How many more UTC days this release needs at its current pace.
+ *
+ * Stated from where the release actually stands rather than from its size, so
+ * it answers the question a staff member asks after changing the pace: given
+ * what is left and what today has already spent, how much longer. Today counts
+ * as one of those days only when today can still carry somebody — a release
+ * whose allowance is spent, including one whose pace was just lowered below
+ * what the day already sent, rests until tomorrow and says so.
+ *
+ * Zero means nobody is waiting. It is deliberately arithmetic over the pace and
+ * the ledger and nothing else: it makes no claim about the worker's health, the
+ * provider's outcomes, or a release that is not going to run again.
+ */
+export function estimateDaysRemaining(input: {
+  dailyLimit: number;
+  remaining: number;
+  todayUsed: number;
+}): number {
+  const { dailyLimit, remaining, todayUsed } = input;
+  if (remaining <= 0) return 0;
+
+  const todayLeft = Math.max(0, Math.min(dailyLimit - todayUsed, remaining));
+  const afterToday = remaining - todayLeft;
+
+  return (todayLeft > 0 ? 1 : 0) + Math.ceil(afterToday / dailyLimit);
+}

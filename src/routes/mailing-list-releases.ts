@@ -14,8 +14,8 @@ import { resolveBody } from "../lib/update-body.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { readProgress, runReleaseTick } from "../lib/release-worker.js";
-import { tickAllowance } from "../lib/release-pacing.js";
-import { CreateReleaseRequestSchema } from "../schemas.js";
+import { estimateDaysRemaining, tickAllowance } from "../lib/release-pacing.js";
+import { CreateReleaseRequestSchema, UpdateReleasePaceRequestSchema } from "../schemas.js";
 import { DEFAULT_MAILING_LIST_FROM_ADDRESS } from "../lib/mailing-list-sender.js";
 
 /**
@@ -40,6 +40,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Statuses a release can still be worked on from. */
 const LIVE_STATUSES = ["running", "paused"];
+
+/** Why a release that has ended, or stopped itself, does not take a new pace. */
+function paceRefusal(status: string): string {
+  if (status === "completed") return "This release has finished. There is nobody left to pace.";
+  if (status === "cancelled") return "A cancelled release never resumes, so its pace cannot be changed. Create a new release to send this update again.";
+  if (status === "halted")
+    return "This release stopped itself on the provider's own delivery outcomes. Its pace is not changed: that decision stands until the reason has been dealt with and a new release is created.";
+  return `A release that is ${status} cannot have its pace changed`;
+}
 
 function identityOf(res: Response): PlatformIdentityLocals {
   return res.locals as PlatformIdentityLocals;
@@ -124,6 +133,16 @@ async function describe(release: MailingListRelease, slug: string, now = new Dat
     inFlight: progress.inFlight,
     todayAllowance: release.dailyLimit,
     todayUsed: progress.todayUsed,
+    // Stated from where the release stands rather than from its size, so it
+    // answers the question staff ask right after changing the pace. A release
+    // that will not run again has no days left whatever is still pending.
+    estimatedDaysRemaining: LIVE_STATUSES.includes(release.status)
+      ? estimateDaysRemaining({
+          dailyLimit: release.dailyLimit,
+          remaining: progress.remaining,
+          todayUsed: progress.todayUsed,
+        })
+      : 0,
     nextSliceSize:
       release.status === "running"
         ? Math.min(
@@ -483,6 +502,85 @@ router.post("/mailing-lists/releases/:releaseId/resume", requireApiKey, requireO
         : `A release that is ${status} cannot be resumed`
   )
 );
+
+/**
+ * PATCH /mailing-lists/releases/:releaseId/pace
+ *
+ * Change how fast a release goes out, while it is going out.
+ *
+ * The pace a release was created with is a guess made before a single message
+ * had left, and the reason a release is paced at all — sending reputation — is
+ * the one thing that guess could not be informed by. This takes the decision
+ * again on the evidence the release has since produced.
+ *
+ * It writes one column and touches the ledger not at all, which is what makes
+ * the two guarantees hold across any number of changes: nobody already reached
+ * is reached again, and nobody still waiting is dropped. The worker re-reads
+ * the pace on its next wake, so a raise is spendable within a tick rather than
+ * at midnight, and a lowering below what today already sent needs no special
+ * case — `tickAllowance` returns 0 for a day whose allowance is already spent,
+ * which is exactly a day that rests.
+ *
+ * Only a running or paused release takes a new pace. A completed one has
+ * nothing left to pace, a cancelled one never resumes, and a halted one stopped
+ * on the provider's own outcomes — re-pacing that would be overriding a
+ * decision with nothing new to go on, which is the same reasoning that refuses
+ * to resume it.
+ */
+router.patch("/mailing-lists/releases/:releaseId/pace", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  try {
+    const releaseId = readReleaseId(req, res);
+    if (!releaseId) return;
+
+    const parsed = UpdateReleasePaceRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+    const { dailyLimit } = parsed.data;
+
+    const found = await findRelease(releaseId);
+    if (!found) {
+      res.status(404).json({ error: `No release '${releaseId}'` });
+      return;
+    }
+
+    if (!LIVE_STATUSES.includes(found.release.status)) {
+      res.status(409).json({ error: paceRefusal(found.release.status) });
+      return;
+    }
+
+    const previous = found.release.dailyLimit;
+    const now = new Date();
+    const [updated] = await db
+      .update(mailingListReleases)
+      .set({ dailyLimit, updatedAt: now })
+      .where(and(eq(mailingListReleases.id, releaseId), inArray(mailingListReleases.status, LIVE_STATUSES)))
+      .returning();
+
+    if (!updated) {
+      // Somebody ended it between the read and the write. Its decision stands.
+      const current = await findRelease(releaseId);
+      res.status(409).json({ error: paceRefusal(current?.release.status ?? found.release.status) });
+      return;
+    }
+
+    traceEvent(
+      updated.runId,
+      {
+        service: "transactional-email-service",
+        event: "mailing-list-release-repaced",
+        detail: `'${updated.subject}' goes from ${previous} to ${dailyLimit} a day`,
+      },
+      { "x-org-id": updated.orgId, "x-user-id": updated.userId }
+    );
+
+    res.json(await describe(updated, found.slug, now));
+  } catch (error: any) {
+    console.error("[transactional-email-service] Release pace error:", error);
+    res.status(500).json({ error: error.message || "Failed to change release pace" });
+  }
+});
 
 /** POST /mailing-lists/releases/:releaseId/cancel — ends it; it never resumes. */
 router.post("/mailing-lists/releases/:releaseId/cancel", requireApiKey, requireOrgIdOnly, (req, res) =>
