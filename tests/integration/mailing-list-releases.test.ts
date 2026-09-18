@@ -502,6 +502,41 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
     expect((await readRelease(created.body.releaseId)).status).not.toBe("halted");
   });
 
+  it("refuses to read a release it cannot see as a healthy one", async () => {
+    // The ledger says hundreds reached; the provider says it sent nobody for
+    // this run. Both cannot be true, so this is a release whose outcomes are
+    // invisible — not a healthy release. It must not stamp a health check and
+    // must not be treated as assessed.
+    await seedList(20);
+    const created = await createRelease({ subject: "Invisible", body: "hi", dailyLimit: 20 });
+
+    await sql`
+      INSERT INTO mailing_list_release_recipients (id, release_id, email, status, settled_at)
+      SELECT gen_random_uuid(), ${created.body.releaseId}::uuid, 'reached' || g || '@example.com', 'sent', now()
+      FROM generate_series(1, 600) AS g
+    `;
+    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 0, bounced: 0, unsubscribed: 0 });
+
+    await tick();
+
+    expect((await readRelease(created.body.releaseId)).status).toBe("running");
+    const [row] = await sql`
+      SELECT last_health_check_at FROM mailing_list_releases WHERE id = ${created.body.releaseId}
+    `;
+    expect(row.last_health_check_at).toBeNull();
+  });
+
+  it("tags every message with the release, which is the only handle that names exactly this release's mail", async () => {
+    await seedList(5);
+    const created = await createRelease({ subject: "Tagged", body: "hi", dailyLimit: 5 });
+
+    await tick();
+
+    const tags = vi.mocked(sendEmail).mock.calls.map(([p]) => p.tag);
+    expect(tags.length).toBeGreaterThan(0);
+    expect(new Set(tags)).toEqual(new Set([`mailing-list-release-${created.body.releaseId}`]));
+  });
+
   it("decides nothing when the provider cannot be asked, rather than calling the release healthy", async () => {
     await seedList(20);
     const created = await createRelease({ subject: "Unknowable", body: "hi", dailyLimit: 20 });
