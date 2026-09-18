@@ -503,10 +503,16 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
   });
 
   it("refuses to read a release it cannot see as a healthy one", async () => {
-    // The ledger says hundreds reached; the provider says it sent nobody for
-    // this run. Both cannot be true, so this is a release whose outcomes are
-    // invisible — not a healthy release. It must not stamp a health check and
-    // must not be treated as assessed.
+    // The gateway answers that nothing carries this release's operation handle.
+    // The ledger says hundreds were reached, so both cannot be true: this is a
+    // release whose outcomes are not visible, not a healthy release. It must
+    // not stamp a health check and must not be treated as assessed.
+    //
+    // Under v0.22.x this case arrived as a well-formed { sent: 0 } — the probe
+    // was keyed on the release's run, and the run recorded against each message
+    // downstream is a child run minted per send, so it matched nothing and
+    // answered zero. The probe now reports an empty match as an empty match,
+    // which is why it surfaces here as a refusal rather than as a number.
     await seedList(20);
     const created = await createRelease({ subject: "Invisible", body: "hi", dailyLimit: 20 });
 
@@ -515,7 +521,9 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
       SELECT gen_random_uuid(), ${created.body.releaseId}::uuid, 'reached' || g || '@example.com', 'sent', now()
       FROM generate_series(1, 600) AS g
     `;
-    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 0, bounced: 0, unsubscribed: 0 });
+    vi.mocked(fetchDeliveryOutcomes).mockRejectedValue(
+      new Error("email-gateway reports no message under operation mailing-list-release-x — the question found nothing, which is not a verdict")
+    );
 
     await tick();
 
