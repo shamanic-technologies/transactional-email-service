@@ -9,7 +9,7 @@ process.env.EMAIL_GATEWAY_SERVICE_API_KEY = "fake-email-gateway-key";
 
 const { fetchDeliveryOutcomes } = await import("../../src/lib/release-health.js");
 
-const RUN_ID = "11111111-2222-4333-8444-555555555555";
+const OPERATION_ID = "mailing-list-release-11111111-2222-4333-8444-555555555555";
 
 function respond(body: unknown, status = 200) {
   return {
@@ -29,39 +29,55 @@ describe("fetchDeliveryOutcomes", () => {
     vi.restoreAllMocks();
   });
 
-  it("reads this release's own outcomes, keyed on the run every one of its messages carries", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        respond({ transactional: { emailStats: { sent: 1200, bounced: 14, unsubscribed: 9, delivered: 1186 } } })
-      );
+  it("reads this release's own outcomes, keyed on the tag every one of its messages carries", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      respond({
+        operationId: OPERATION_ID,
+        matched: true,
+        messageCount: 1200,
+        transactional: {
+          recipientStats: { contacted: 1200, sent: 1200 },
+          emailStats: { sent: 1200, bounced: 14, unsubscribed: 9, delivered: 1186 },
+        },
+      })
+    );
 
-    const outcomes = await fetchDeliveryOutcomes(RUN_ID);
+    const outcomes = await fetchDeliveryOutcomes(OPERATION_ID);
 
     expect(outcomes).toEqual({ sent: 1200, bounced: 14, unsubscribed: 9 });
 
     const [url] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain(`runIds=${RUN_ID}`);
-    // Transactional only: this release's messages are, and the broadcast half
-    // of the same answer belongs to other sending entirely.
-    expect(String(url)).toContain("type=transactional");
+    expect(String(url)).toContain("/public/stats/by-operation");
+    expect(String(url)).toContain(`operationId=${encodeURIComponent(OPERATION_ID)}`);
   });
 
   it("reads a release with no bounces and no unsubscribes as zero of each, not as absent", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(respond({ transactional: { emailStats: { sent: 800 } } }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      respond({ operationId: OPERATION_ID, matched: true, messageCount: 800, transactional: { emailStats: { sent: 800 } } })
+    );
 
-    expect(await fetchDeliveryOutcomes(RUN_ID)).toEqual({ sent: 800, bounced: 0, unsubscribed: 0 });
+    expect(await fetchDeliveryOutcomes(OPERATION_ID)).toEqual({ sent: 800, bounced: 0, unsubscribed: 0 });
+  });
+
+  it("answers no-evidence-yet when nothing is recorded under the operation, which is not a zero", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      respond({ operationId: OPERATION_ID, matched: false, messageCount: 0 })
+    );
+
+    expect(await fetchDeliveryOutcomes(OPERATION_ID)).toBeNull();
   });
 
   it("throws when the provider's answer cannot be had, rather than reporting a healthy release", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(respond({ error: "upstream down" }, 502));
 
-    await expect(fetchDeliveryOutcomes(RUN_ID)).rejects.toThrow(/502/);
+    await expect(fetchDeliveryOutcomes(OPERATION_ID)).rejects.toThrow(/502/);
   });
 
-  it("throws on an answer carrying no sent count — a shape it cannot read is not a zero", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(respond({ broadcast: { emailStats: { sent: 5 } } }));
+  it("throws on a match carrying no sent count — a shape it cannot read is not a zero", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      respond({ operationId: OPERATION_ID, matched: true, messageCount: 5, transactional: {} })
+    );
 
-    await expect(fetchDeliveryOutcomes(RUN_ID)).rejects.toThrow(/emailStats\.sent/);
+    await expect(fetchDeliveryOutcomes(OPERATION_ID)).rejects.toThrow(/emailStats\.sent/);
   });
 });

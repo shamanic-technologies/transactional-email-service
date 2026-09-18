@@ -266,13 +266,27 @@ async function alertStaff(release: MailingListRelease, slug: string, reason: str
 }
 
 /**
+ * The handle this release's mail is known by on the provider's side.
+ *
+ * It is the tag every one of its messages carries, and email-gateway keys its
+ * per-operation outcomes read on it. One string, in one place: the tag a
+ * message is sent under and the tag its outcomes are read back by cannot drift
+ * apart.
+ */
+function operationIdOf(release: MailingListRelease): string {
+  return `mailing-list-release-${release.id}`;
+}
+
+/**
  * Read this release's delivery outcomes back from the provider and stop the
  * release if they have gone bad.
  *
  * A probe that cannot be answered decides nothing: it is logged and asked again
  * on the next tick. Turning an unanswerable question into "healthy" is the
  * failure this feature exists to prevent, and turning it into "halt" would stop
- * every release the first time email-gateway restarted.
+ * every release the first time email-gateway restarted. An operation the
+ * provider has nothing under yet is the same kind of silence, and is treated
+ * the same way.
  */
 async function checkHealth(release: MailingListRelease, slug: string, now: Date): Promise<boolean> {
   const progress = await readProgress(release.id, now);
@@ -283,7 +297,7 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
 
   let outcomes;
   try {
-    outcomes = await fetchDeliveryOutcomes(release.runId);
+    outcomes = await fetchDeliveryOutcomes(operationIdOf(release));
   } catch (err: any) {
     console.error(
       `[transactional-email-service] release ${release.id}: delivery outcomes unavailable, no verdict this tick: ${err.message}`
@@ -291,37 +305,15 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
     return false;
   }
 
-  // The ledger says this release has reached hundreds of people and the
-  // provider says it sent nobody. Those cannot both be true, so this is not a
-  // healthy release — it is a release whose outcomes this service cannot see,
-  // and reading it as healthy would make the whole self-halt quietly inert.
-  //
-  // It is the live state as of v0.22.0: every message carries the release's run
-  // id, but the gateway mints a CHILD run per send and records that against the
-  // message, so a query keyed on the release's own run matches nothing. Neither
-  // `/public/stats` nor the status routes filter on a parent run or on a tag,
-  // and enumerating tens of thousands of child runs per probe is not a query.
-  // Tracked in email-gateway and postmark-service; the fix is a `tag` filter,
-  // which every message already carries (see the tag set in releaseSlice).
-  //
-  // Loud and repeatedly, rather than once: a staff member reading the logs of a
-  // release in flight must find this, and nothing here decides anything from an
-  // answer it knows to be blind.
-  if (outcomes.sent === 0 && progress.reached >= HEALTH_MIN_SAMPLE) {
-    console.error(
-      `[transactional-email-service] release ${release.id}: the ledger has reached ${progress.reached} addresses ` +
-        `and the provider reports 0 sent for this run, so its delivery outcomes are NOT VISIBLE and this release ` +
-        `cannot stop itself. Watch it by hand, by the tag mailing-list-release-${release.id}.`
-    );
-    traceEvent(
-      release.runId,
-      {
-        service: "transactional-email-service",
-        event: "mailing-list-release-outcomes-blind",
-        detail: `Reached ${progress.reached}, provider reports 0 sent for this run: outcomes not visible, self-halt inert`,
-        level: "error",
-      },
-      headersOf(release)
+  // Nothing belongs to this operation on the provider's side yet, which an
+  // empty match says in a different shape from a measured zero. A release whose
+  // first messages have not landed is in exactly that state: there is no
+  // evidence to judge, so there is no verdict, and the next tick asks again.
+  // Nothing is recorded as checked either — a question nobody could answer is
+  // not a health check that happened.
+  if (outcomes === null) {
+    console.warn(
+      `[transactional-email-service] release ${release.id}: no messages recorded under this release yet, no verdict this tick`
     );
     return false;
   }
@@ -398,10 +390,9 @@ async function releaseSlice(
             textBody: release.textBody,
             // Per release, not per list. The provider stores the tag on every
             // message, so this is the one handle that identifies exactly this
-            // release's mail in the Postmark archive — and it is what a
-            // by-tag outcomes filter would key on once the gateway offers one
-            // (see checkHealth).
-            tag: `mailing-list-release-${release.id}`,
+            // release's mail in the Postmark archive — and it is what the
+            // gateway's per-operation outcomes read keys on (see checkHealth).
+            tag: operationIdOf(release),
             orgId: release.orgId,
             userId: release.userId,
             runId: release.runId,

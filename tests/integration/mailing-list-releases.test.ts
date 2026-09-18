@@ -502,20 +502,20 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
     expect((await readRelease(created.body.releaseId)).status).not.toBe("halted");
   });
 
-  it("refuses to read a release it cannot see as a healthy one", async () => {
-    // The ledger says hundreds reached; the provider says it sent nobody for
-    // this run. Both cannot be true, so this is a release whose outcomes are
-    // invisible — not a healthy release. It must not stamp a health check and
-    // must not be treated as assessed.
+  it("gives no verdict on a release the provider has nothing under yet", async () => {
+    // No message of this release has landed on the provider's side, which comes
+    // back as an empty match rather than as a measured zero. There is nothing to
+    // judge, so nothing is judged: the release keeps going, and no health check
+    // is recorded as having happened.
     await seedList(20);
-    const created = await createRelease({ subject: "Invisible", body: "hi", dailyLimit: 20 });
+    const created = await createRelease({ subject: "Not landed yet", body: "hi", dailyLimit: 20 });
 
     await sql`
       INSERT INTO mailing_list_release_recipients (id, release_id, email, status, settled_at)
       SELECT gen_random_uuid(), ${created.body.releaseId}::uuid, 'reached' || g || '@example.com', 'sent', now()
       FROM generate_series(1, 600) AS g
     `;
-    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 0, bounced: 0, unsubscribed: 0 });
+    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue(null);
 
     await tick();
 
@@ -524,6 +524,22 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
       SELECT last_health_check_at FROM mailing_list_releases WHERE id = ${created.body.releaseId}
     `;
     expect(row.last_health_check_at).toBeNull();
+  });
+
+  it("reads its outcomes by the tag its own messages carry, not by its run", async () => {
+    await seedList(20);
+    const created = await createRelease({ subject: "By operation", body: "hi", dailyLimit: 20 });
+
+    await sql`
+      INSERT INTO mailing_list_release_recipients (id, release_id, email, status, settled_at)
+      SELECT gen_random_uuid(), ${created.body.releaseId}::uuid, 'reached' || g || '@example.com', 'sent', now()
+      FROM generate_series(1, 600) AS g
+    `;
+    vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 600, bounced: 1, unsubscribed: 1 });
+
+    await tick();
+
+    expect(vi.mocked(fetchDeliveryOutcomes)).toHaveBeenCalledWith(`mailing-list-release-${created.body.releaseId}`);
   });
 
   it("tags every message with the release, which is the only handle that names exactly this release's mail", async () => {

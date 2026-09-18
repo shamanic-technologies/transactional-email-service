@@ -354,13 +354,11 @@ The pace is an in-process interval armed after the port is bound, not a cron. A 
 
 The day's allowance is spread across the ticks left in the day rather than spent at midnight, and a day whose allowance is reached simply rests until the next one. One tick takes at most 20 addresses, which is also the point past which the provider's suppression read stops being per-address and becomes a dump of the whole broadcast stream. That ceiling every minute is **28,800 a day**, and a `dailyLimit` above it is refused rather than silently under-delivered.
 
-A release reads its own delivery outcomes back from email-gateway (`GET /public/stats?type=transactional&runIds=<the release's run>`). Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too. A probe that cannot be answered decides nothing — it is logged and asked again next tick, never read as healthy.
+A release reads its own delivery outcomes back from email-gateway (`GET /public/stats/by-operation?operationId=mailing-list-release-<releaseId>`), keyed on the tag every one of its messages carries. Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too.
 
-> **The outcomes read does not resolve yet, so the self-halt is currently inert.** Every message carries the release's run id, but email-gateway mints a **child** run per send and records *that* against the message, so a query keyed on the release's own run matches nothing — measured in production on v0.22.0: the release run returns `sent: 0` while its child returns `sent: 1`. Neither `/public/stats` nor the status routes filter on a parent run or on a tag, and enumerating tens of thousands of child runs per probe is not a query.
->
-> Until a producer-side filter exists, a release whose ledger says it has reached 500 or more addresses while the provider reports none **logs an error every tick and raises an `mailing-list-release-outcomes-blind` trace event**, rather than reading as healthy. It does not stop itself, because halting every release on a missing filter would make the feature unusable — so a release in flight needs watching by hand, by the tag `mailing-list-release-<releaseId>` that every one of its messages carries.
->
-> The fix is a `tag` filter on the stats endpoints, since the tag is already stored on every message. Tracked in email-gateway and postmark-service.
+The tag, rather than the release's run: the gateway records against each message a **child** run it mints per send, so a query keyed on the release's own run matches nothing and answers a well-formed zero — measured in production on v0.22.0, where the release run returned `sent: 0` while its child returned `sent: 1`. The per-operation read refuses to answer in that shape: an operation nothing is recorded under comes back `matched: false` with no stats block at all, so an empty question cannot be mistaken for a measured one.
+
+Two silences, one treatment. A probe that cannot be answered, and an operation the provider has nothing under yet, each decide nothing: no verdict, no halt, nothing recorded as checked, and the question asked again on the next tick. Neither is ever read as healthy.
 
 #### `POST /mailing-lists/{slug}/releases`
 
@@ -558,7 +556,7 @@ src/
     mailing-list-sender.ts # The address an update leaves from when the caller states none
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
-    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on its run
+    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on its tag
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
