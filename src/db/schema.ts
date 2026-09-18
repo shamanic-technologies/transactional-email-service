@@ -145,3 +145,128 @@ export const mailingListUpdates = pgTable(
 );
 
 export type MailingListUpdate = typeof mailingListUpdates.$inferSelect;
+
+/**
+ * A written update being released to a list over several days at a stated pace.
+ *
+ * The synchronous send (`POST /mailing-lists/:slug/updates`) puts the whole
+ * list out inside the request that asked for it. That is right for a list of
+ * one and impossible for a list of thirty thousand: the caller's HTTP client
+ * abandons the response long before the send finishes, nothing records which
+ * addresses were reached, and there is no way to slow it down or stop it. A
+ * release is the same update with those four properties added.
+ *
+ * The row holds everything a send needs, because the thing that will perform
+ * the send has no inbound request to read it from. An identity does not survive
+ * an async boundary, so the acting organisation, the acting user and the run
+ * this release is tracked under are captured here when the release is created
+ * and replayed by the worker days later. The same goes for the sender, the
+ * body, and the workflow-attribution headers.
+ */
+export const mailingListReleases = pgTable(
+  "mailing_list_releases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => mailingLists.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    /** The address every message in this release leaves from, as stated at creation. */
+    fromAddress: text("from_address").notNull(),
+    /** "markdown" was rendered by this service; "html" is the document staff authored. */
+    bodyKind: text("body_kind").notNull(),
+    /** Markdown as authored, and null for a release whose body was authored as HTML. */
+    bodyMarkdown: text("body_markdown"),
+    /** The HTML every recipient receives, byte-for-byte. */
+    htmlBody: text("html_body").notNull(),
+    /** The plain-text part every recipient receives. */
+    textBody: text("text_body").notNull(),
+    /**
+     * Content fingerprint over (subject, htmlBody, textBody, fromAddress). A
+     * second request stating the same update for the same list returns the
+     * release the first one created rather than starting a parallel one over
+     * the same addresses.
+     */
+    dedupKey: text("dedup_key").notNull(),
+    /** How many messages this release may send per UTC calendar day. */
+    dailyLimit: integer("daily_limit").notNull(),
+    /**
+     * "running" — the worker is releasing it. "paused" — staff stopped it and
+     * may resume. "cancelled" — staff ended it; it never resumes. "halted" —
+     * the release stopped itself because the provider's delivery outcomes went
+     * bad, and staff were told. "completed" — every recipient is accounted for.
+     */
+    status: text("status").notNull(),
+    /** Why a halted release halted, in the words a staff alert repeated. Null otherwise. */
+    haltedReason: text("halted_reason"),
+    /** How many addresses the list held when the release was created. */
+    recipientCount: integer("recipient_count").notNull(),
+    // The identity a send is performed under, captured at creation because the
+    // worker has no request to read it from. Never defaulted, never guessed: a
+    // release missing any of these halts rather than mailing from something
+    // nobody chose.
+    orgId: text("org_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** The run every message in this release is tracked under, and the key its delivery outcomes are read by. */
+    runId: uuid("run_id").notNull(),
+    campaignId: text("campaign_id"),
+    brandIds: text("brand_ids").array(),
+    workflowSlug: text("workflow_slug"),
+    featureSlug: text("feature_slug"),
+    audienceId: text("audience_id"),
+    /** When the delivery-outcome health of this release was last read from the provider. */
+    lastHealthCheckAt: timestamp("last_health_check_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_mailing_list_releases_list").on(table.listId, table.createdAt),
+    index("idx_mailing_list_releases_status").on(table.status),
+    index("idx_mailing_list_releases_dedup").on(table.listId, table.dedupKey),
+  ]
+);
+
+export type MailingListRelease = typeof mailingListReleases.$inferSelect;
+
+/**
+ * One address on one release, and the ledger that makes never-mailing-anyone
+ * twice structural rather than careful.
+ *
+ * The rows are written once, when the release is created, as a snapshot of the
+ * list at that moment. From then on the only thing that changes is a row's
+ * status, and the unique index on (release, email) means no second row for the
+ * same person can exist however many times a release is issued or a worker
+ * restarts. Progress — reached, remaining, failed, today's allowance used — is
+ * read from here rather than counted in memory, so it survives a redeploy.
+ *
+ * "pending" has not been picked up. "sending" is claimed by a worker and its
+ * outcome is not yet known. "sent" reached the gateway. "failed" did not, with
+ * the reason. "skipped_opted_out" was suppressed by the provider at the moment
+ * its slice was sent, which is why the check belongs here and not once at the
+ * start: somebody who unsubscribes on day 1 is skipped on day 5.
+ */
+export const mailingListReleaseRecipients = pgTable(
+  "mailing_list_release_recipients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    releaseId: uuid("release_id")
+      .notNull()
+      .references(() => mailingListReleases.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    status: text("status").notNull().default("pending"),
+    /** The provider's reason for a failure, or its suppression reason for a skip. */
+    reason: text("reason"),
+    /** When a worker claimed this row. Used to notice a claim a crash left behind. */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    /** When this row reached a terminal status. Today's usage is counted from it. */
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("idx_mailing_list_release_recipients_unique").on(table.releaseId, table.email),
+    index("idx_mailing_list_release_recipients_claim").on(table.releaseId, table.status),
+    index("idx_mailing_list_release_recipients_settled").on(table.releaseId, table.settledAt),
+  ]
+);
+
+export type MailingListReleaseRecipient = typeof mailingListReleaseRecipients.$inferSelect;

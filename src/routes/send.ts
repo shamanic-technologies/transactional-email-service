@@ -10,6 +10,7 @@ import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { SendRequestSchema } from "../schemas.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
+import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
 
 const router = Router();
 
@@ -62,9 +63,10 @@ const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted"]);
 // gone negative and there is no card on file to collect it on. It belongs to no dedup
 // set above: billing-service decides when a debt is worth reporting, and two orgs
 // going uncollectable on the same day are two separate pieces of news.
-// Hardcoded, never env-configured, so the routing cannot silently drift or be
-// disabled by a missing variable.
-const ADMIN_EMAILS = ["kevin.lourd@gmail.com"];
+// The recipient list itself lives in lib/staff-recipients.ts, hardcoded rather
+// than env-configured so the routing cannot silently drift or be disabled by a
+// variable nobody set; the mailing-list release worker sends there too and has
+// no request to read one from.
 const ADMIN_NOTIFICATION_EVENTS = new Set([
   "signup_notification",
   "signin_notification",

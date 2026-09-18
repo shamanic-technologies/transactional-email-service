@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_DAILY_LIMIT } from "./lib/release-pacing.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -364,6 +365,106 @@ export const MailingListUpdatesResponseSchema = z
   })
   .openapi("MailingListUpdatesResponse");
 
+// --- Mailing-list releases (paced, staff-only) ---
+
+/**
+ * A release is the same update the synchronous send takes, plus the one thing
+ * that route cannot express: how fast. Everything else is deliberately
+ * identical, so an author who has approved a body in the preview is approving
+ * the same bytes either way.
+ */
+export const CreateReleaseRequestSchema = z
+  .object({
+    subject: z.string().min(1),
+    body: z.string().min(1).optional().openapi({
+      description:
+        "The update body, authored as markdown, rendered here exactly as the synchronous send renders it. Mutually exclusive with `htmlBody`; exactly one of the two is required.",
+    }),
+    htmlBody: z.string().min(1).optional().openapi({
+      description:
+        "A complete HTML document staff authored, sent to every recipient byte-for-byte as supplied. Mutually exclusive with `body`; exactly one of the two is required.",
+    }),
+    textBody: z.string().min(1).optional().openapi({
+      description:
+        "The plain-text part for an `htmlBody` release. Omit it and one is derived from the HTML. Only valid beside `htmlBody`.",
+    }),
+    from: z.string().email().optional().openapi({
+      description:
+        "The address this release goes out from. Omit it and it leaves kevin@distribute.you, the same default the synchronous send takes. It must be a sender Postmark has verified: an unverified one is refused by the provider, and every message in the release fails with its reason rather than falling back to anything.",
+    }),
+    dailyLimit: z.number().int().min(1).max(MAX_DAILY_LIMIT).openapi({
+      description:
+        "The most messages this release may send per UTC calendar day. Required, with no default: the pace is the reason a release exists and this service will not pick one on staff's behalf. The day's allowance is spread across the day rather than spent at midnight, and a day where the allowance is reached simply stops until the next one. The ceiling is " +
+        `${MAX_DAILY_LIMIT}` +
+        ", which is the most the worker's own pace can deliver in a day; a larger number is refused rather than silently under-delivered. Pick it for the sending reputation you have, not the list you hold: a subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands.",
+    }),
+  })
+  .superRefine(bodyKindRefinement)
+  .openapi("CreateReleaseRequest");
+
+export const ReleaseSchema = z
+  .object({
+    releaseId: z.string(),
+    slug: z.string(),
+    subject: z.string(),
+    from: z.string(),
+    bodyKind: z.enum(["markdown", "html"]),
+    status: z.enum(["running", "paused", "cancelled", "halted", "completed"]).openapi({
+      description:
+        '"running" — the worker is releasing it. "paused" — staff stopped it and may resume. "cancelled" — staff ended it; it never resumes. "halted" — it stopped itself because the provider\'s delivery outcomes for it went bad, and staff were told. "completed" — every address is accounted for.',
+    }),
+    haltedReason: z.string().nullable().openapi({
+      description: "Why a halted release stopped, in the words the staff alert repeated. Null otherwise.",
+    }),
+    dailyLimit: z.number(),
+    recipientCount: z.number().openapi({ description: "Addresses the list held when the release was created" }),
+    reached: z.number().openapi({ description: "Addresses a message has gone out to" }),
+    remaining: z.number().openapi({ description: "Addresses still waiting" }),
+    failed: z.number().openapi({ description: "Addresses whose send failed, or whose claim outlived the worker holding it" }),
+    skippedOptedOut: z.number().openapi({
+      description: "Addresses the provider was suppressing at the moment their slice was sent — checked per slice, so somebody who unsubscribes on day one is skipped on day five",
+    }),
+    inFlight: z.number().openapi({ description: "Addresses a worker is holding right now" }),
+    todayAllowance: z.number().openapi({ description: "Messages this release may send today: its daily limit" }),
+    todayUsed: z.number().openapi({ description: "How much of today's allowance is spent, in-flight addresses included" }),
+    nextSliceSize: z.number().openapi({
+      description: "How many the next tick would take, which is 0 when today's allowance is spent or the release is not running",
+    }),
+    createdAt: z.string().openapi({ format: "date-time" }),
+    completedAt: z.string().nullable().openapi({ format: "date-time" }),
+  })
+  .openapi("MailingListRelease");
+
+export const CreateReleaseResponseSchema = ReleaseSchema.extend({
+  created: z.boolean().openapi({
+    description:
+      "False when this request restated an update already being released to this list, in which case the release the first request created is returned untouched and nothing new was started.",
+  }),
+  estimatedDays: z.number().openapi({ description: "recipientCount divided by dailyLimit, rounded up" }),
+}).openapi("CreateReleaseResponse");
+
+export const ReleasesResponseSchema = z
+  .object({
+    slug: z.string(),
+    count: z.number(),
+    releases: z.array(ReleaseSchema),
+  })
+  .openapi("ReleasesResponse");
+
+export const ReleaseTickResponseSchema = z
+  .object({
+    releasesConsidered: z.number(),
+    sent: z.number(),
+    failed: z.number(),
+    skippedOptedOut: z.number(),
+    completed: z.array(z.string()),
+    halted: z.array(z.string()),
+    skippedBusy: z.boolean().openapi({
+      description: "True when another tick was already running and this call did nothing",
+    }),
+  })
+  .openapi("ReleaseTickResponse");
+
 // --- Shared header parameters ---
 
 const orgIdHeader = {
@@ -647,6 +748,14 @@ const mailingListSlugParam = {
   description: "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens.",
 };
 
+const releaseIdParam = {
+  name: "releaseId",
+  in: "path" as const,
+  required: true,
+  schema: { type: "string" as const, format: "uuid" as const },
+  description: "The release's id, as returned when it was created.",
+};
+
 const platformOrgIdHeader = {
   ...orgIdHeader,
   description:
@@ -794,6 +903,154 @@ registry.registerPath({
     400: { description: "Invalid slug or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+const releasesDescription =
+  "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. " +
+  "Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller " +
+  "holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the " +
+  "release is created, which is what makes never mailing anybody twice structural rather than careful, and what " +
+  "progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent.";
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/{slug}/releases",
+  summary: "Release a written update to a mailing list over several days",
+  description:
+    `${releasesDescription} The body is stated exactly as the synchronous send takes it — \`body\` as markdown or ` +
+    "`htmlBody` as a document staff authored — plus `dailyLimit`, which has no default. The answer comes back in " +
+    "about a second whatever the list's size and reports how many recipients the release covers and the pace it " +
+    "will follow. Restating an update already being released to this list returns that release with " +
+    "`created: false` rather than starting a second one over the same people.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: { required: true, content: { "application/json": { schema: CreateReleaseRequestSchema } } },
+  },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    201: { description: "The release, newly created", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
+    200: { description: "This update is already being released to this list; the existing release is returned", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
+    400: { description: "Validation error, an SVG image no mail client renders, or an empty list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "The release could not be tracked, so it was not started", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/mailing-lists/{slug}/releases",
+  summary: "Every release created for a mailing list",
+  description: `${releasesDescription} Newest first, each with its progress.`,
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ slug: z.string() }) },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    200: { description: "Releases, newest first", content: { "application/json": { schema: ReleasesResponseSchema } } },
+    400: { description: "Invalid slug or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/mailing-lists/releases/{releaseId}",
+  summary: "Where one release stands",
+  description:
+    `${releasesDescription} Reports reached, remaining, failed and skipped, plus today's allowance and how much of ` +
+    "it is spent. Counted from the ledger, so a redeploy does not change the answer.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ releaseId: z.string() }) },
+  parameters: [releaseIdParam, platformOrgIdHeader],
+  responses: {
+    200: { description: "The release and its progress", content: { "application/json": { schema: ReleaseSchema } } },
+    400: { description: "Invalid release id or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/releases/{releaseId}/pause",
+  summary: "Stop a running release",
+  description:
+    `${releasesDescription} It stops within one tick and sends nothing further until it is resumed. Addresses ` +
+    "already reached stay reached; nobody is sent to twice when it resumes.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ releaseId: z.string() }) },
+  parameters: [releaseIdParam, platformOrgIdHeader],
+  responses: {
+    200: { description: "The paused release", content: { "application/json": { schema: ReleaseSchema } } },
+    400: { description: "Invalid release id or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "The release is not running", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/releases/{releaseId}/resume",
+  summary: "Continue a paused release where it stopped",
+  description:
+    `${releasesDescription} Only a paused release resumes. A cancelled one never does, and one that stopped itself ` +
+    "on the provider's delivery outcomes does not either — sending the same update again is a new release, so that " +
+    "the decision is made rather than undone.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ releaseId: z.string() }) },
+  parameters: [releaseIdParam, platformOrgIdHeader],
+  responses: {
+    200: { description: "The running release", content: { "application/json": { schema: ReleaseSchema } } },
+    400: { description: "Invalid release id or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "The release is not paused", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/releases/{releaseId}/cancel",
+  summary: "End a release; it never resumes",
+  description:
+    `${releasesDescription} Every address still waiting is settled as cancelled, so the ledger states what happened ` +
+    "to all of them rather than implying they are still queued.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ releaseId: z.string() }) },
+  parameters: [releaseIdParam, platformOrgIdHeader],
+  responses: {
+    200: { description: "The cancelled release", content: { "application/json": { schema: ReleaseSchema } } },
+    400: { description: "Invalid release id or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "The release has already ended", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/mailing-lists/releases/tick",
+  summary: "Run one pass of the release worker",
+  description:
+    "Runs one pass over every running release and reports what it did. The worker already runs on its own interval " +
+    "inside the service, which is what paces a release; this route exists so a cron can act as a backstop for a " +
+    "process that died, and so a caller can drive the pace without waiting on a clock. Safe to call at any time: " +
+    "two ticks never overlap, and a call that arrives while one is running answers `skippedBusy`.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  responses: {
+    200: { description: "What the tick did", content: { "application/json": { schema: ReleaseTickResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

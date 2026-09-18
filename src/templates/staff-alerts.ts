@@ -62,7 +62,53 @@ export const PROVIDER_CREDITS_EXHAUSTED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
-export const STAFF_TEMPLATES: StaffTemplate[] = [PROVIDER_CREDITS_EXHAUSTED_TEMPLATE];
+/**
+ * A paced mailing-list release stopped itself because the provider's own
+ * delivery outcomes for it went bad. Nobody asked for this message, which is
+ * exactly why it exists: the release is already stopped by the time it is sent,
+ * and without it the first anyone would know is the day somebody wondered why
+ * the remaining recipients never got the update.
+ */
+export const MAILING_LIST_RELEASE_HALTED_TEMPLATE: StaffTemplate = {
+  name: "mailing_list_release_halted",
+  subject: "Release of \u201c{{subject}}\u201d to {{slug}} stopped itself",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">A mailing-list release stopped itself</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">No further messages will go out for it. Nothing resumes on its own.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Update</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{subject}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">List</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{slug}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Why it stopped</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{reason}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Reached before stopping</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{reached}} of {{recipientCount}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Release</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{releaseId}}</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "A mailing-list release stopped itself.",
+    "",
+    "No further messages will go out for it. Nothing resumes on its own.",
+    "",
+    "Update: {{subject}}",
+    "List: {{slug}}",
+    "Why it stopped: {{reason}}",
+    "Reached before stopping: {{reached}} of {{recipientCount}}",
+    "Release: {{releaseId}}",
+  ].join("\n"),
+};
+
+export const STAFF_TEMPLATES: StaffTemplate[] = [
+  PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
+  MAILING_LIST_RELEASE_HALTED_TEMPLATE,
+];
 
 /**
  * Register the staff-alert templates. Runs on boot, after migrations and

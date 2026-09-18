@@ -113,6 +113,13 @@
       "when": 1789430000000,
       "tag": "0015_authored_html_updates",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789734000892,
+      "tag": "0016_paced_mailing_list_releases",
+      "breakpoints": true
     }
   ]
 }
