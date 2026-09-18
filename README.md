@@ -354,13 +354,13 @@ The pace is an in-process interval armed after the port is bound, not a cron. A 
 
 The day's allowance is spread across the ticks left in the day rather than spent at midnight, and a day whose allowance is reached simply rests until the next one. One tick takes at most 20 addresses, which is also the point past which the provider's suppression read stops being per-address and becomes a dump of the whole broadcast stream. That ceiling every minute is **28,800 a day**, and a `dailyLimit` above it is refused rather than silently under-delivered.
 
-A release reads its own delivery outcomes back from email-gateway (`GET /public/stats?type=transactional&runIds=<the release's run>`). Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too. A probe that cannot be answered decides nothing — it is logged and asked again next tick, never read as healthy.
+A release reads its own delivery outcomes back from email-gateway (`GET /public/stats/by-operation?operationId=mailing-list-release-<releaseId>`). Past 500 sends, a bounce rate above 5% or an unsubscribe rate above 3% stops the release and raises the `mailing_list_release_halted` staff alert. The stake is not this send: the provider's complaint threshold applies to the whole account, so a spike here suspends onboarding and dunning mail too. A probe that cannot be answered decides nothing — it is logged and asked again next tick, never read as healthy.
 
-> **The outcomes read does not resolve yet, so the self-halt is currently inert.** Every message carries the release's run id, but email-gateway mints a **child** run per send and records *that* against the message, so a query keyed on the release's own run matches nothing — measured in production on v0.22.0: the release run returns `sent: 0` while its child returns `sent: 1`. Neither `/public/stats` nor the status routes filter on a parent run or on a tag, and enumerating tens of thousands of child runs per probe is not a query.
+> **Why the read is keyed on the release's tag and not on its run.** Every message carries the release's run id, but email-gateway mints a **child** run per send and records *that* against the message, so a query keyed on the release's own run matches nothing — measured in production on v0.22.0: the release run returned `sent: 0` while its child returned `sent: 1`. The self-halt was inert for the whole of v0.22.x because of it: an empty match and a real zero came back identically, so the probe saw zero every tick and never had grounds to stop anything.
 >
-> Until a producer-side filter exists, a release whose ledger says it has reached 500 or more addresses while the provider reports none **logs an error every tick and raises an `mailing-list-release-outcomes-blind` trace event**, rather than reading as healthy. It does not stop itself, because halting every release on a missing filter would make the feature unusable — so a release in flight needs watching by hand, by the tag `mailing-list-release-<releaseId>` that every one of its messages carries.
+> The handle is instead the tag every one of a release's messages already carries, `mailing-list-release-<releaseId>` — per release, never per list — written by `releaseOperationId` in `src/lib/release-operation.ts` and read back through the same helper. One indexed lookup on the provider whatever the release's size.
 >
-> The fix is a `tag` filter on the stats endpoints, since the tag is already stored on every message. Tracked in email-gateway and postmark-service.
+> **An operation that matches no message is now reported as matching none**, not as zero outcomes: email-gateway answers `matched: false` with no stats at all, and `fetchDeliveryOutcomes` throws on it. The worker treats that exactly like an unreachable gateway — it logs and asks again next tick, and decides nothing. A release created before the per-release tag shipped therefore never self-halts and says so every tick, rather than reading as clean.
 
 #### `POST /mailing-lists/{slug}/releases`
 
@@ -558,7 +558,8 @@ src/
     mailing-list-sender.ts # The address an update leaves from when the caller states none
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
-    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on its run
+    release-operation.ts # The handle every message of one release carries; written at send, read back by the probe
+    release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on that handle
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
