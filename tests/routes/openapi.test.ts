@@ -26,4 +26,19 @@ describe("GET /openapi.json", () => {
       format: "email",
     });
   });
+
+  it("documents lifecycle visible-copy recipients", async () => {
+    const res = await request(app).get("/openapi.json");
+    const sendRequest = res.body.components.schemas.SendRequest;
+
+    expect(sendRequest.properties.ccEmails).toMatchObject({
+      type: "array",
+    });
+    expect(sendRequest.properties.ccEmails.items).toMatchObject({
+      type: "string",
+      format: "email",
+    });
+    // Optional: a caller that names none is unchanged, so it can never be required
+    expect(sendRequest.required ?? []).not.toContain("ccEmails");
+  });
 });

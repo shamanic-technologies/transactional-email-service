@@ -32,6 +32,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
   "campaignId": "campaign_xxx",
   "productId": "webinar-2026-03-01",
   "bccEmails": ["ops@example.com"],
+  "ccEmails": ["rep@client.com"],
   "metadata": { "name": "Alice" }
 }
 ```
@@ -44,6 +45,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | `productId`      | No       | Product/instance ID for product-scoped dedup (e.g. webinar ID) |
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
 | `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC; not rendered into templates or stored in metadata. On a customer-facing event `kevin@distribute.you` is added to whatever is supplied here (see Blind copy and replies); on a staff-routed event nothing is added |
+| `ccEmails`       | No       | Visible-copy recipient emails delivered as provider-level Cc; not rendered into templates or stored in metadata. Nothing is ever added to this list, and omitting it sends no Cc header at all (see Visible copy). Rejected on the staff-routed events that already refuse a caller-supplied recipient list |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
@@ -57,7 +59,7 @@ When present, these are stored in the `email_events` table and forwarded to all 
 
 Same body, dedup, template resolution, run tracking and response shape as `POST /send`, for callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.
 
-Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`), so no request on this path can reach a customer. `recipientEmail` and `bccEmails` are rejected for the same reason.
+Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails` and `ccEmails` are rejected for the same reason.
 
 With no acting user, the `email_events` row stores `user_id = NULL`, the runs-service run is created org-only, no `x-user-id` is forwarded downstream, and no actor email is added to metadata.
 
@@ -101,7 +103,7 @@ A missing or blank `provider` or `reason` is a 400: a staff alert with blanks wh
 
 | Status | Condition |
 | ------ | --------- |
-| 400    | Missing `x-org-id`, missing `eventType`, a non-staff-bound `eventType`, `recipientEmail`/`bccEmails` supplied, or a `provider_credits_exhausted` with no `provider` or no `reason` |
+| 400    | Missing `x-org-id`, missing `eventType`, a non-staff-bound `eventType`, `recipientEmail`/`bccEmails`/`ccEmails` supplied, or a `provider_credits_exhausted` with no `provider` or no `reason` |
 | 401    | Missing or invalid `x-api-key` |
 | 404    | No template found for the given `eventType` |
 
@@ -462,7 +464,7 @@ Admin notification events (`signup_notification`, `signin_notification`, `user_a
 
 `payment_method_removed` is emitted by stripe-service when a customer detaches a card in Stripe's billing portal. There is no acting user of ours, so it arrives on `POST /platform-send`. It carries no dedup: losing one of two cards and going to zero chargeable cards are different situations and staff needs both.
 
-`provider_credits_exhausted` is raised by any backend service that detects a paid third-party provider has run out of credits — apollo-service on Apollo.io credit exhaustion is the first. There is no acting user, so it arrives on `POST /platform-send`. Its dedup key holds neither a recipient nor a user, so a machine caller deduplicates exactly like one with an acting user: one alert per org per calendar day, however many operations hit the wall. It accepts no `recipientEmail` and no `bccEmails` on any route, so it cannot reach a customer address, and unlike the product templates its own template ships in this repo (`src/templates/staff-alerts.ts`) and is registered on boot — no consuming app owns a staff alert, and leaving it to callers would mean every future caller shipping its own copy of the same email.
+`provider_credits_exhausted` is raised by any backend service that detects a paid third-party provider has run out of credits — apollo-service on Apollo.io credit exhaustion is the first. There is no acting user, so it arrives on `POST /platform-send`. Its dedup key holds neither a recipient nor a user, so a machine caller deduplicates exactly like one with an acting user: one alert per org per calendar day, however many operations hit the wall. It accepts no `recipientEmail`, no `bccEmails` and no `ccEmails` on any route, so it cannot reach a customer address, and unlike the product templates its own template ships in this repo (`src/templates/staff-alerts.ts`) and is registered on boot — no consuming app owns a staff alert, and leaving it to callers would mean every future caller shipping its own copy of the same email.
 
 `unpaid_debt_uncollectable` is emitted by billing-service when an org's balance has gone negative and no card is on file to collect it on. It carries no dedup: billing-service decides when a debt is worth reporting.
 
@@ -479,6 +481,16 @@ The blind copy is exactly ONE address, hardcoded in `src/lib/founder.ts`. A mult
 **Every** send from this service, staff-routed and customer-facing alike, sets `replyTo: kevin@distribute.you`, so a customer who hits reply reaches a human instead of wherever the sending address happens to route. A caller that names its own reply address keeps it.
 
 Internal visibility does not rest on the blind copy alone: Postmark keeps the full message in its Activity archive for 45 days, and postmark-service writes a permanent metadata row per send.
+
+### Visible copy
+
+`ccEmails` puts an address on the Cc header, which every recipient of the message can see and a reply-all reaches. That is the difference from a blind copy, and it is a difference about the reader rather than about the plumbing: somebody blind-copied receives an email addressed to a stranger, which reads as mis-sent, and their reply-all reaches nobody on our side. So a person who is a PARTY to the conversation goes in Cc, and a person who is only watching it goes in Bcc.
+
+The case it was built for: a prospect replies to a cold campaign saying they are interested, the thread is forwarded to the agency inbox, and the client's own sales rep has to be on that forward as a participant.
+
+Nothing is ever added here. There is no default address and none is inferred, at any layer: a caller that names nobody sends a message with no Cc header at all, byte for byte what it sent before this existed. The blind copy is untouched by it — a customer-facing send still carries the founder in Bcc, and he is never added to the Cc.
+
+It is refused with a 400 on the same staff-routed events that already refuse `recipientEmail` and `bccEmails`: `provider_credits_exhausted` on both routes, and every staff-bound event on `POST /platform-send`.
 
 ## Tech Stack
 
