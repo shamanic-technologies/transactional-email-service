@@ -303,6 +303,137 @@ describe("POST /send", () => {
     expect(body.bcc).toBe("alpha1@example.com,alpha2@example.com,kevin@distribute.you");
   });
 
+  it("forwards ccEmails to the provider payload as cc", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "prospect@example.com",
+        ccEmails: ["rep@client.com", "manager@client.com"],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "prospect@example.com", sent: true }]);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.to).toBe("prospect@example.com");
+    // Visible: the addresses land on a header every recipient reads, in the
+    // order the caller supplied, and a reply-all reaches them
+    expect(body.cc).toBe("rep@client.com,manager@client.com");
+  });
+
+  it("adds nothing to a caller's ccEmails — no founder, no standing address", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "prospect@example.com",
+        ccEmails: ["rep@client.com"],
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.cc).toBe("rep@client.com");
+    // The blind copy is untouched by the visible one: the founder is still
+    // blind-copied on a customer-facing send and is NOT added to the Cc
+    expect(body.bcc).toBe("kevin@distribute.you");
+  });
+
+  it("sends no cc at all when a caller names none", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    // Byte for byte what a send looked like before visible copy existed:
+    // the key is absent from the payload, not present and empty
+    expect("cc" in body).toBe(false);
+    expect(body.bcc).toBe("kevin@distribute.you");
+  });
+
+  it("sends no cc when a caller supplies an empty ccEmails list", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+        ccEmails: [],
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect("cc" in JSON.parse(options.body)).toBe(false);
+  });
+
+  it("refuses a malformed ccEmails address rather than dropping it", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+        ccEmails: ["rep@client.com", "not-an-email"],
+      });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not render ccEmails into primary-recipient content or metadata", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      name: "welcome",
+      subject: "Welcome {{name}}",
+      htmlBody: "<p>Hello {{name}}</p>",
+      textBody: "Hello {{name}}",
+      fromAddress: null,
+    }]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "primary@example.com",
+        ccEmails: ["rep@client.com"],
+        metadata: { name: "Primary" },
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.subject).toBe("Welcome Primary");
+    expect(body.htmlBody).not.toContain("rep@client.com");
+    expect(body.textBody).not.toContain("rep@client.com");
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.metadata).toEqual({ name: "Primary" });
+  });
+
   it("does not render bccEmails into primary-recipient content or metadata", async () => {
     mockSelectLimit.mockResolvedValueOnce([{
       name: "welcome",
@@ -1021,7 +1152,7 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects recipientEmail and bccEmails", async () => {
+  it("rejects recipientEmail, bccEmails and ccEmails", async () => {
     const withRecipient = await request(app)
       .post("/platform-send")
       .set("X-API-Key", "test-service-key")
@@ -1034,8 +1165,15 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
       .set(ORG_ONLY)
       .send({ eventType: "payment_method_removed", bccEmails: ["customer@example.com"] });
 
+    const withCc = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", ccEmails: ["customer@example.com"] });
+
     expect(withRecipient.status).toBe(400);
     expect(withBcc.status).toBe(400);
+    expect(withCc.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
@@ -1216,8 +1354,15 @@ describe("provider_credits_exhausted — a paid provider has run out of credits"
         .set(headers)
         .send({ ...ALERT, bccEmails: ["customer@example.com"] });
 
+      const withCc = await request(app)
+        .post(route)
+        .set("X-API-Key", "test-service-key")
+        .set(headers)
+        .send({ ...ALERT, ccEmails: ["customer@example.com"] });
+
       expect(withRecipient.status).toBe(400);
       expect(withBcc.status).toBe(400);
+      expect(withCc.status).toBe(400);
     }
 
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -1320,6 +1465,17 @@ describe("staff_daily_digest", () => {
       .set("X-API-Key", "test-service-key")
       .set(ORG_ONLY)
       .send({ eventType: "staff_daily_digest", bccEmails: ["customer@example.com"] });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("cannot carry a customer visible copy in on the platform route", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "staff_daily_digest", ccEmails: ["customer@example.com"] });
 
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();

@@ -18,6 +18,8 @@ interface SendEmailParams {
   campaignId?: string;
   from?: string | null;
   bcc?: string;
+  /** Visible copy, comma-separated. Omitted means the message carries no Cc header. */
+  cc?: string;
   /** Reply address. Omitted means replies are invited to the founder. */
   replyTo?: string;
   workflowHeaders?: WorkflowHeaders;
@@ -25,6 +27,8 @@ interface SendEmailParams {
 
 // This client adds no blind copy of its own: a caller's `bcc` is forwarded
 // exactly as supplied, and a caller that supplies none sends no `bcc` at all.
+// The same holds for `cc`, with nothing standing behind it at any layer — a
+// visible copy is only ever the addresses a caller named.
 // The standing blind copy to the founder is decided in `src/routes/send.ts`,
 // where a customer-facing send can be told apart from a staff-list one — a
 // staff notification already reaches him as a primary recipient, and a
@@ -41,6 +45,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   }
 
   const bcc = params.bcc;
+  const cc = params.cc;
   const replyTo = params.replyTo ?? FOUNDER_EMAIL;
 
   const headers: Record<string, string> = {
@@ -74,6 +79,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       tag: params.tag,
       ...(params.from && { from: params.from }),
       ...(bcc && { bcc }),
+      ...(cc && { cc }),
       replyTo,
     }),
   });

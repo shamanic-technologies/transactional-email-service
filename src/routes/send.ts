@@ -41,9 +41,9 @@ const REQUIRED_METADATA: Record<string, string[]> = {
   provider_credits_exhausted: ["provider", "reason"],
 };
 
-// Staff-bound events that must never carry a caller-supplied recipient or blind
-// copy on ANY route, /send included — a "provider is dry" alert is internal and
-// has no customer-facing form.
+// Staff-bound events that must never carry a caller-supplied recipient, blind
+// copy or visible copy on ANY route, /send included — a "provider is dry" alert
+// is internal and has no customer-facing form.
 const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted"]);
 
 // Events where recipient is hardcoded to admin.
@@ -166,9 +166,12 @@ async function handleSend(req: Request, res: Response) {
     const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug, audienceId } = res.locals as PlatformIdentityLocals;
 
     // Staff-only alerts carry no caller-chosen destination on any route
-    if (STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType) && (body.recipientEmail !== undefined || body.bccEmails !== undefined)) {
+    if (
+      STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType) &&
+      (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined)
+    ) {
       res.status(400).json({
-        error: `'${body.eventType}' does not accept recipientEmail or bccEmails: it is delivered to the internal staff recipient list only`,
+        error: `'${body.eventType}' does not accept recipientEmail, bccEmails or ccEmails: it is delivered to the internal staff recipient list only`,
       });
       return;
     }
@@ -251,6 +254,14 @@ async function handleSend(req: Request, res: Response) {
     }
 
     const bccList = buildBccList(body.eventType, body.bccEmails);
+
+    // Visible copy is exactly what the caller asked for and nothing else. Unlike
+    // the blind copy above, no standing address is ever added: a Cc is read by
+    // every recipient of the message and a reply-all reaches it, so putting
+    // somebody there is a statement about who is party to the conversation —
+    // only the caller knows that. No caller-supplied list means no Cc header at
+    // all, which is byte for byte what a send looked like before this existed.
+    const ccList = body.ccEmails ?? [];
 
     const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body, brandIds: effectiveBrandIds });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
@@ -351,6 +362,7 @@ async function handleSend(req: Request, res: Response) {
           campaignId: effectiveCampaignId,
           from: template.from,
           bcc: bccList.length > 0 ? bccList.join(",") : undefined,
+          cc: ccList.length > 0 ? ccList.join(",") : undefined,
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 
@@ -412,10 +424,10 @@ async function handlePlatformSend(req: Request, res: Response) {
     return;
   }
 
-  const body = req.body as { recipientEmail?: unknown; bccEmails?: unknown };
-  if (body.recipientEmail !== undefined || body.bccEmails !== undefined) {
+  const body = req.body as { recipientEmail?: unknown; bccEmails?: unknown; ccEmails?: unknown };
+  if (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined) {
     res.status(400).json({
-      error: "platform-send does not accept recipientEmail or bccEmails: staff-bound notifications are delivered to the internal staff recipient list only",
+      error: "platform-send does not accept recipientEmail, bccEmails or ccEmails: staff-bound notifications are delivered to the internal staff recipient list only",
     });
     return;
   }

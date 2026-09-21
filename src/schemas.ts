@@ -32,6 +32,10 @@ export const SendRequestSchema = z
       description:
         "Blind-copy recipient email addresses, forwarded as provider-level BCC recipients and never rendered into templates or stored in metadata. On a customer-facing event kevin@distribute.you is added to whatever is supplied here; on a staff-routed event nothing is added.",
     }),
+    ccEmails: z.array(z.string().email()).optional().openapi({
+      description:
+        "Visible-copy recipient email addresses, forwarded as provider-level Cc recipients and never rendered into templates or stored in metadata. Every recipient of the message can see them on the Cc header, and a reply-all reaches them. Nothing is ever added here: a caller that names none gets no Cc at all. Rejected on the staff-routed events that already refuse a caller-supplied recipient list.",
+    }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
   })
   .openapi("SendRequest");
@@ -580,8 +584,9 @@ registry.registerPath({
     "- **Org-daily** (provider_credits_exhausted): sent at most once per org per calendar day. No recipient and no user in the key, so a machine caller deduplicates exactly like one with an acting user. Dedup key: `{orgId}:{eventType}:{YYYY-MM-DD}`.\n" +
     "- **No dedup** (all other event types, including brand_daily_budget_changed, payment_method_removed, staff_daily_digest and unpaid_debt_uncollectable): sends every time with no dedup.\n\n" +
     "**Staff routing:** `signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted` and `unpaid_debt_uncollectable` (billing-service: an org owes money and has no card to collect it on) are delivered to the internal staff recipient list instead of the customer resolved from `x-user-id`. Their metadata is enriched with the acting user's email under `email` when not already supplied — a caller with no acting user sends no actor metadata at all.\n\n" +
-    "**`provider_credits_exhausted`** reports that a paid third-party provider has run out of credits, so work depending on it now produces nothing. `metadata.provider` (which provider) and `metadata.reason` (why we concluded it is dry) are required and must be non-empty; `metadata.detail` carries any raw upstream status or response body and is optional. `metadata.orgId` is filled in from `x-org-id` and needs no supplying. It accepts no `recipientEmail` and no `bccEmails` on any route, so it cannot reach a customer address.\n\n" +
-    "`bccEmails` are delivered as provider-level BCC recipients on the primary email. They are not rendered into templates and do not affect primary-recipient deduplication.\n\n" +
+    "**`provider_credits_exhausted`** reports that a paid third-party provider has run out of credits, so work depending on it now produces nothing. `metadata.provider` (which provider) and `metadata.reason` (why we concluded it is dry) are required and must be non-empty; `metadata.detail` carries any raw upstream status or response body and is optional. `metadata.orgId` is filled in from `x-org-id` and needs no supplying. It accepts no `recipientEmail`, no `bccEmails` and no `ccEmails` on any route, so it cannot reach a customer address.\n\n" +
+    "`bccEmails` are delivered as provider-level BCC recipients on the primary email, and `ccEmails` as provider-level Cc recipients. Neither is rendered into templates and neither affects primary-recipient deduplication.\n\n" +
+    "**Visible copy:** `ccEmails` puts an address on the Cc header, where every recipient of the message can see it and a reply-all reaches it — the right instrument when somebody is a party to the conversation rather than an observer of it. Nothing is ever added to this list: a caller that names none gets a message with no Cc at all, byte for byte as before. It is refused on the same staff-routed events that refuse `recipientEmail` and `bccEmails`.\n\n" +
     "**Blind copy and replies:** a customer-facing send is blind-copied to kevin@distribute.you, so the company sees what it tells a customer as it tells them. A caller's own `bccEmails` are kept and that one address is added to them, never in place of them. A staff-routed event carries no such blind copy — the same person is already a primary recipient on the staff list, and a second copy would deliver the message twice. Every send, staff or customer, invites replies to kevin@distribute.you so a customer who hits reply reaches a human.\n\n" +
     "Duplicate sends return `{ sent: false, reason: 'duplicate' }`. To add a new event type to dedup, add it to the corresponding set in send.ts.",
   tags: ["Email"],
@@ -617,7 +622,7 @@ registry.registerPath({
     "For machine callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.\n\n" +
     "**Required headers:** `x-org-id`. `x-user-id` and `x-run-id` are honoured when present but never required, and are never substituted with a placeholder when absent.\n\n" +
     "**Accepted event types:** staff-bound events only (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`). Any other event type is rejected with 400, so no request on this path can reach a customer.\n\n" +
-    "`recipientEmail` and `bccEmails` are rejected with 400: delivery is to the internal staff recipient list only.\n\n" +
+    "`recipientEmail`, `bccEmails` and `ccEmails` are rejected with 400: delivery is to the internal staff recipient list only.\n\n" +
     "**`provider_credits_exhausted`** — the event type a backend service raises when it detects that a paid third-party provider has run out of credits (e.g. apollo-service on Apollo.io credit exhaustion). Send it here: an org and an API key are enough, no acting user is needed.\n\n" +
     "```json\n" +
     "{\n" +
@@ -654,7 +659,7 @@ registry.registerPath({
       content: { "application/json": { schema: SendResponseSchema } },
     },
     400: {
-      description: "Validation error, missing x-org-id, non-staff event type, or recipientEmail/bccEmails supplied",
+      description: "Validation error, missing x-org-id, non-staff event type, or recipientEmail/bccEmails/ccEmails supplied",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     401: {
