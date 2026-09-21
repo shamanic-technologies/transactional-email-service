@@ -45,6 +45,24 @@ reading the absent stats as zeros — that is the original bug. There is no
 fallback to the tag handle and no dual read; a second handle answering one
 question with a different number is the contradiction that was just removed.
 
+## Finding a send you just made: the provider's SEARCH is lagging, our own row is not
+
+Verifying a real send means reading the raw delivered message, and that needs a
+message id. Postmark's `/messages/outbound?recipient=…&tag=…` search is the
+obvious way to get one and it is not reliable seconds after a send: the same
+query returned five messages one minute and an empty list the next, and a
+`tag=` filter for a send made 90 seconds earlier returned nothing across ten
+polls. An empty result there is not evidence the send did not happen.
+
+postmark-service writes a permanent row per send, immediately. Take the id from
+there instead — `docker exec distribute-postgres-1 psql -U postgres -d
+postmark_service -c "SELECT message_id, to_email, subject, submitted_at FROM
+postmark_messages WHERE submitted_at > now() - interval '30 minutes' ORDER BY
+submitted_at DESC"` — then read the headers with
+`/messages/outbound/{id}/dump`, which is the RFC 5322 source. Not `/details`:
+it carries no `Cc` and no `ReplyTo` key at all, so a header that IS set reads
+as absent.
+
 ## Commands
 
 - `npm test` — run tests (Vitest)
