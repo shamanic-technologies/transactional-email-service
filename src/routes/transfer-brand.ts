@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { requireApiKey } from "../middleware/auth.js";
-import { db } from "../db/index.js";
-import { emailEvents } from "../db/schema.js";
-import { eq, and, sql } from "drizzle-orm";
 import { TransferBrandRequestSchema } from "../schemas.js";
+import { transferBrand } from "../lib/brand-transfer.js";
+import { listSoloBrandCampaignIds } from "../lib/campaign-service.js";
 
 const router = Router();
 
@@ -17,40 +16,23 @@ router.post("/internal/transfer-brand", requireApiKey, async (req, res) => {
 
     const { sourceBrandId, sourceOrgId, targetOrgId, targetBrandId } = parsed.data;
 
-    // Step 1: Move solo-brand rows from sourceOrg to targetOrg
-    const moved = await db
-      .update(emailEvents)
-      .set({ orgId: targetOrgId })
-      .where(
-        and(
-          eq(emailEvents.orgId, sourceOrgId),
-          sql`array_length(${emailEvents.brandIds}, 1) = 1`,
-          sql`${emailEvents.brandIds}[1] = ${sourceBrandId}`
-        )
-      )
-      .returning({ id: emailEvents.id });
+    // The brand's campaigns, wherever campaign-service holds them right now: the
+    // orchestrator calls every service independently, so campaign-service may
+    // already have moved (and re-branded) them, or not yet.
+    const lookups: Array<[string, string]> = [[sourceOrgId, sourceBrandId], [targetOrgId, sourceBrandId]];
+    if (targetBrandId && targetBrandId !== sourceBrandId) lookups.push([targetOrgId, targetBrandId]);
+    const campaignIds = [...new Set((await Promise.all(
+      lookups.map(([orgId, brandId]) => listSoloBrandCampaignIds(orgId, brandId)),
+    )).flat())];
 
-    // Step 2: If targetBrandId provided, rewrite brand reference globally (no org filter)
-    let rewritten: { id: string }[] = [];
-    if (targetBrandId) {
-      rewritten = await db
-        .update(emailEvents)
-        .set({ brandIds: [targetBrandId] })
-        .where(
-          and(
-            sql`array_length(${emailEvents.brandIds}, 1) = 1`,
-            sql`${emailEvents.brandIds}[1] = ${sourceBrandId}`
-          )
-        )
-        .returning({ id: emailEvents.id });
+    const result = await transferBrand({ sourceBrandId, sourceOrgId, targetOrgId, targetBrandId, campaignIds });
+
+    if (result.coBrandedSkipped > 0) {
+      console.warn(`[transactional-email-service] transfer-brand: ${result.coBrandedSkipped} co-branded email_events row(s) of org ${sourceOrgId} name brand ${sourceBrandId} AND another brand — left in the source org`);
     }
+    console.log(`[transactional-email-service] transfer-brand: sourceBrandId=${sourceBrandId} targetBrandId=${targetBrandId ?? "none"} ${sourceOrgId} -> ${targetOrgId} campaigns=${campaignIds.length} ${JSON.stringify(result.updatedTables)}`);
 
-    const totalUpdated = Math.max(moved.length, rewritten.length);
-    console.log(`[transactional-email-service] transfer-brand: moved ${moved.length} email_events rows (${sourceOrgId} -> ${targetOrgId})${targetBrandId ? `, rewrote ${rewritten.length} rows (${sourceBrandId} -> ${targetBrandId})` : ""}`);
-
-    res.json({
-      updatedTables: [{ tableName: "email_events", count: totalUpdated }],
-    });
+    res.json({ updatedTables: result.updatedTables });
   } catch (error: any) {
     console.error("[transactional-email-service] transfer-brand error:", error);
     res.status(500).json({ error: error.message || "Failed to transfer brand" });

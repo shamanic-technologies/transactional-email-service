@@ -204,7 +204,7 @@ export async function register() {
 
 **Internal endpoint** — requires `x-api-key` only, no identity headers.
 
-Re-assigns `email_events` rows from one org to another for a given brand. Only updates solo-brand rows (where `brand_ids` contains exactly one element matching `sourceBrandId`). When `targetBrandId` is provided, also rewrites the brand reference. Co-branding rows are skipped. Idempotent.
+Moves every `email_events` row of a brand from `sourceOrgId` to `targetOrgId`, in one transaction. A row is the brand's when it sits under the source org and its `brand_ids` is the source brand alone, or it carries no `brand_ids` and either its `metadata.brandId` is the brand or its `campaign_id` / `metadata.campaignId` is one of the brand's solo-brand campaigns (read from campaign-service in both orgs, since the orchestrator may call campaign-service before or after this service). On each moved row the org id is also carried in `metadata.orgId` and in the `<orgId>:` prefix of `dedup_key`, so an event already sent for the brand stays deduplicated under the new org. When `targetBrandId` is given, the brand id is rewritten (`brand_ids`, `metadata.brandId`, `dedup_key`) only on rows under the target org, because two orgs can claim the same brand. Co-branded rows are never moved (counted and logged). The other tables hold no brand: mailing lists are platform-level, and a mailing-list release's `org_id` is the sending identity of a staff broadcast. Idempotent: a second call reports 0. Fails with 500 (moving nothing) when campaign-service cannot answer.
 
 **Request body:**
 
@@ -535,6 +535,8 @@ database with another run or with a deployed environment.
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |
 | `CLIENT_SERVICE_API_KEY` | Client service API key |
+| `CAMPAIGN_SERVICE_URL` | Campaign service endpoint. Required by `POST /internal/transfer-brand` to list a brand's campaigns |
+| `CAMPAIGN_SERVICE_API_KEY` | Campaign service API key |
 | `KEY_SERVICE_URL` | Key service endpoint (default: http://localhost:3001). Used to resolve the Postmark token and broadcast stream for mailing-list suppression reads |
 | `KEY_SERVICE_API_KEY` | Key service API key |
 | `SERVICE_URL` | Public URL used in OpenAPI spec (default: http://localhost:3000) |
@@ -567,6 +569,8 @@ src/
     schema.ts           # Drizzle schema (email_events, email_templates, mailing_lists, mailing_list_subscribers, mailing_list_updates, mailing_list_releases, mailing_list_release_recipients)
   lib/
     address-blob.ts     # Lenient parser for a pasted blob of email addresses
+    brand-transfer.ts   # Moves a brand's email_events rows to another org (POST /internal/transfer-brand)
+    campaign-service.ts # Campaign service client: a brand's solo-brand campaigns, for the brand transfer
     client-service.ts   # Client service user email resolution
     email-gateway.ts    # Email Gateway client; sets the default reply address, adds no blind copy of its own
     founder.ts          # The founder's address: reply-to on every send, blind copy on customer-facing ones
