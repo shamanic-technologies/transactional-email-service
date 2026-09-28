@@ -8,6 +8,7 @@ import {
 } from "../db/schema.js";
 import { sendEmail } from "../lib/email-gateway.js";
 import { fetchSuppressed } from "../lib/suppression.js";
+import { fetchVerdicts, SENDABLE_VERDICT } from "../lib/email-verification.js";
 import { fetchDeliveryOutcomes } from "../lib/release-health.js";
 import { releaseOperationId } from "../lib/release-operation.js";
 import { getTemplate } from "../templates/index.js";
@@ -53,6 +54,13 @@ import {
  *  - **Suppression is reconciled per slice.** Each slice re-reads the provider
  *    for exactly its own addresses with no cache at all, so somebody who
  *    unsubscribes on day one is skipped on day five.
+ *  - **Nobody is mailed unverified.** After suppression, every remaining
+ *    address of the slice gets an apollo-service verdict, and only `valid` is
+ *    sent. Every other verdict settles the row as `skipped_undeliverable` with
+ *    the verdict on it. If the verdicts cannot be had, the slice sends NOTHING
+ *    and its unsent rows go back to pending for the next tick — safe because
+ *    none of them reached the gateway, which is the one thing the no-return
+ *    rule for stale claims protects.
  */
 
 /** The releases a tick will act on. The other statuses are waiting or over. */
@@ -81,6 +89,10 @@ export interface TickReport {
   sent: number;
   failed: number;
   skippedOptedOut: number;
+  /** Verified before sending with any verdict other than `valid`, and not sent. */
+  skippedUndeliverable: number;
+  /** Slices whose verdicts could not be had, so nothing in them was sent this tick. */
+  verificationUnavailable: number;
   completed: string[];
   halted: string[];
   /** True when another tick was already running and this call did nothing. */
@@ -92,6 +104,8 @@ const EMPTY_REPORT = (): TickReport => ({
   sent: 0,
   failed: 0,
   skippedOptedOut: 0,
+  skippedUndeliverable: 0,
+  verificationUnavailable: 0,
   completed: [],
   halted: [],
   skippedBusy: false,
@@ -123,6 +137,7 @@ export interface ReleaseProgress {
   reached: number;
   failed: number;
   skippedOptedOut: number;
+  skippedUndeliverable: number;
   inFlight: number;
   remaining: number;
   todayUsed: number;
@@ -140,6 +155,7 @@ export async function readProgress(releaseId: string, now = new Date()): Promise
       count(*) FILTER (WHERE status = 'sent') AS reached,
       count(*) FILTER (WHERE status = 'failed') AS failed,
       count(*) FILTER (WHERE status = 'skipped_opted_out') AS skipped,
+      count(*) FILTER (WHERE status = 'skipped_undeliverable') AS skipped_undeliverable,
       count(*) FILTER (WHERE status = 'sending') AS in_flight,
       count(*) FILTER (WHERE status = 'pending') AS remaining,
       count(*) FILTER (WHERE status IN ('sent', 'failed') AND settled_at >= ${dayStart.toISOString()}::timestamptz) AS today_used
@@ -159,6 +175,7 @@ export async function readProgress(releaseId: string, now = new Date()): Promise
     reached: num("reached"),
     failed: num("failed"),
     skippedOptedOut: num("skipped"),
+    skippedUndeliverable: num("skipped_undeliverable"),
     inFlight,
     remaining: num("remaining"),
     todayUsed: num("today_used") + inFlight,
@@ -353,7 +370,8 @@ async function releaseSlice(
   }
   report.skippedOptedOut += suppressed.length;
 
-  const sendable = slice.filter((r) => !suppression.isSuppressed(r.email));
+  const unsuppressed = slice.filter((r) => !suppression.isSuppressed(r.email));
+  const sendable = await verifySlice(release, unsuppressed, report, now);
 
   for (let offset = 0; offset < sendable.length; offset += SEND_CONCURRENCY) {
     const wave = sendable.slice(offset, offset + SEND_CONCURRENCY);
@@ -397,6 +415,88 @@ async function releaseSlice(
   }
 }
 
+/**
+ * Verdicts for the slice's unsuppressed addresses; returns the ones that may
+ * be sent (verdict `valid`) and settles every other one as
+ * `skipped_undeliverable`, verdict stored on the row.
+ *
+ * Skipped rows do NOT consume the day's allowance (it counts sent + failed,
+ * exactly as an opted-out skip never did): the allowance is a pace of mail
+ * handed to the provider, and a skipped address hands it nothing. The cost is
+ * one more verification per skip, and the day's sends stay at the pace staff
+ * chose for the sending domain.
+ *
+ * When the verdicts cannot be had, nothing is sent: the rows go back to
+ * pending (none reached the gateway), the failure is logged and traced, and
+ * the next tick asks again.
+ */
+async function verifySlice(
+  release: MailingListRelease,
+  rows: Array<{ id: string; email: string }>,
+  report: TickReport,
+  now: Date
+): Promise<Array<{ id: string; email: string }>> {
+  if (rows.length === 0) return [];
+
+  let verdicts;
+  try {
+    verdicts = await fetchVerdicts(release, rows.map((r) => r.email));
+  } catch (err: any) {
+    await db
+      .update(mailingListReleaseRecipients)
+      .set({ status: "pending", claimedAt: null })
+      .where(
+        and(
+          inArray(
+            mailingListReleaseRecipients.id,
+            rows.map((r) => r.id)
+          ),
+          eq(mailingListReleaseRecipients.status, "sending")
+        )
+      );
+    report.verificationUnavailable += 1;
+    console.error(
+      `[transactional-email-service] release ${release.id}: VERIFICATION UNAVAILABLE, ${rows.length} address(es) NOT sent, returned to pending for the next tick: ${err.message}`
+    );
+    traceEvent(
+      release.runId,
+      {
+        service: "transactional-email-service",
+        event: "mailing-list-release-verification-unavailable",
+        detail: `${rows.length} address(es) not sent this tick: ${err.message}`,
+        level: "error",
+      },
+      headersOf(release)
+    );
+    return [];
+  }
+
+  const sendable: Array<{ id: string; email: string }> = [];
+  for (const row of rows) {
+    const v = verdicts.get(row.email.toLowerCase())!;
+    if (v.verdict === SENDABLE_VERDICT) {
+      await db
+        .update(mailingListReleaseRecipients)
+        .set({ verdict: v.verdict, verificationId: v.verificationId })
+        .where(eq(mailingListReleaseRecipients.id, row.id));
+      sendable.push(row);
+    } else {
+      await db
+        .update(mailingListReleaseRecipients)
+        .set({
+          status: "skipped_undeliverable",
+          reason: `Not sent: verifier verdict "${v.verdict}" (only "valid" is sent).`,
+          verdict: v.verdict,
+          verificationId: v.verificationId,
+          settledAt: now,
+        })
+        .where(eq(mailingListReleaseRecipients.id, row.id));
+      report.skippedUndeliverable += 1;
+    }
+  }
+  return sendable;
+}
+
 /** Mark a release finished once no address is still waiting or in flight. */
 async function completeIfDone(release: MailingListRelease, report: TickReport, now: Date): Promise<void> {
   const progress = await readProgress(release.id, now);
@@ -414,7 +514,7 @@ async function completeIfDone(release: MailingListRelease, report: TickReport, n
     {
       service: "transactional-email-service",
       event: "mailing-list-release-done",
-      detail: `'${release.subject}' reached ${progress.reached} of ${release.recipientCount}; ${progress.failed} failed, ${progress.skippedOptedOut} opted out`,
+      detail: `'${release.subject}' reached ${progress.reached} of ${release.recipientCount}; ${progress.failed} failed, ${progress.skippedOptedOut} opted out, ${progress.skippedUndeliverable} skipped as undeliverable`,
       ...(progress.failed > 0 ? { level: "error" as const } : {}),
     },
     headersOf(release)
