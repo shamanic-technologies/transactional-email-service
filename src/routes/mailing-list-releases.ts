@@ -130,6 +130,7 @@ async function describe(release: MailingListRelease, slug: string, now = new Dat
     remaining: progress.remaining,
     failed: progress.failed,
     skippedOptedOut: progress.skippedOptedOut,
+    skippedUndeliverable: progress.skippedUndeliverable,
     inFlight: progress.inFlight,
     todayAllowance: release.dailyLimit,
     todayUsed: progress.todayUsed,

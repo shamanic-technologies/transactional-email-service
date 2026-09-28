@@ -764,6 +764,10 @@
             "type": "number",
             "description": "Addresses the provider was suppressing at the moment their slice was sent — checked per slice, so somebody who unsubscribes on day one is skipped on day five"
           },
+          "skippedUndeliverable": {
+            "type": "number",
+            "description": "Addresses verified (apollo-service BounceVerify) just before their slice was sent and NOT sent because the verdict was anything but `valid` (catch_all, unknown, risky, invalid). The verdict is stored per recipient. They do not consume the daily allowance."
+          },
           "inFlight": {
             "type": "number",
             "description": "Addresses a worker is holding right now"
@@ -808,6 +812,7 @@
           "remaining",
           "failed",
           "skippedOptedOut",
+          "skippedUndeliverable",
           "inFlight",
           "todayAllowance",
           "todayUsed",
@@ -907,6 +912,13 @@
           "skippedOptedOut": {
             "type": "number"
           },
+          "skippedUndeliverable": {
+            "type": "number"
+          },
+          "verificationUnavailable": {
+            "type": "number",
+            "description": "Slices whose verdicts could not be obtained; nothing in them was sent and they return to pending."
+          },
           "completed": {
             "type": "array",
             "items": {
@@ -929,6 +941,8 @@
           "sent",
           "failed",
           "skippedOptedOut",
+          "skippedUndeliverable",
+          "verificationUnavailable",
           "completed",
           "halted",
           "skippedBusy"

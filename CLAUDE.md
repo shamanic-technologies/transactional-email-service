@@ -45,6 +45,20 @@ reading the absent stats as zeros — that is the original bug. There is no
 fallback to the tag handle and no dual read; a second handle answering one
 question with a different number is the contradiction that was just removed.
 
+## A release sends ONLY verdict `valid` — and no verdict means no send
+
+Every slice is verified by apollo-service `POST /email-verifications` after the
+suppression check (`src/lib/email-verification.ts`, called from
+`verifySlice` in the worker). Only `valid` is sent; anything else settles as
+`skipped_undeliverable` with `verdict` + `verification_id` on the row. A
+failure to get verdicts sends NOTHING and returns the slice to `pending` — the
+one place a claim goes back to the queue, and it is safe only because none of
+those rows reached the gateway. Do not add an "assume deliverable" branch, do
+not filter on Apollo `email_status` (97% of the list is `verified`, and so were
+132 of the first 138 bounces). Skips do not consume the daily allowance. The
+integration suite mocks `fetchVerdicts` (valid by default) the same way it
+mocks release-health — keep the helper in its own module.
+
 ## Finding a send you just made: the provider's SEARCH is lagging, our own row is not
 
 Verifying a real send means reading the raw delivered message, and that needs a

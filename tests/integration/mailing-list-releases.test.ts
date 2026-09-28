@@ -25,12 +25,18 @@ vi.mock("../../src/lib/release-health.js", () => ({
   fetchDeliveryOutcomes: vi.fn(),
 }));
 
+vi.mock("../../src/lib/email-verification.js", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  fetchVerdicts: vi.fn(),
+}));
+
 import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
 import { createRun } from "../../src/lib/runs-client.js";
 import { fetchSuppressed } from "../../src/lib/suppression.js";
 import { fetchDeliveryOutcomes } from "../../src/lib/release-health.js";
+import { fetchVerdicts, VerificationUnavailableError, type Verdict } from "../../src/lib/email-verification.js";
 import { resetReleaseWorkerState, runReleaseTick } from "../../src/lib/release-worker.js";
 import { seedStaffTemplates } from "../../src/templates/staff-alerts.js";
 import { MAX_DAILY_LIMIT, MAX_TICK_BATCH } from "../../src/lib/release-pacing.js";
@@ -55,6 +61,17 @@ function mailed(): string[] {
 
 function nobodySuppressed() {
   return { isSuppressed: () => false, reasonFor: () => null };
+}
+
+/** Verdicts for whatever the worker asks about: `valid` unless named otherwise. */
+function verdicts(overrides: Record<string, Verdict["verdict"]> = {}) {
+  return async (_release: unknown, emails: string[]) =>
+    new Map<string, Verdict>(
+      emails.map((email, i) => [
+        email.toLowerCase(),
+        { email: email.toLowerCase(), verdict: overrides[email] ?? "valid", verificationId: `ver-${email}-${i}` },
+      ])
+    );
 }
 
 /** A suppression answer that suppresses exactly the addresses named. */
@@ -95,7 +112,7 @@ async function drain(maxTicks = 3000): Promise<number> {
   let ticks = 0;
   for (; ticks < maxTicks; ticks++) {
     const report = await tick();
-    if (report.sent === 0 && report.failed === 0 && report.skippedOptedOut === 0) break;
+    if (report.sent === 0 && report.failed === 0 && report.skippedOptedOut === 0 && report.skippedUndeliverable === 0) break;
   }
   return ticks;
 }
@@ -126,6 +143,8 @@ beforeEach(async () => {
   vi.mocked(fetchSuppressed).mockResolvedValue(nobodySuppressed());
   vi.mocked(fetchDeliveryOutcomes).mockReset();
   vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 0, bounced: 0, unsubscribed: 0 });
+  vi.mocked(fetchVerdicts).mockReset();
+  vi.mocked(fetchVerdicts).mockImplementation(verdicts());
   vi.mocked(createRun).mockReset();
   vi.mocked(createRun).mockImplementation(async () => {
     runSeq += 1;
@@ -450,6 +469,99 @@ describe("provider suppression is reconciled per slice", () => {
 
     const [, , , options] = vi.mocked(fetchSuppressed).mock.calls[0];
     expect(options).toEqual({ maxAgeMs: 0 });
+  });
+});
+
+describe("every address is verified before its slice is sent", () => {
+  it("sends only `valid`, settles every other verdict as skipped_undeliverable with the verdict stored, and counts them on the release", async () => {
+    await seedList(20);
+    const all = addresses(20);
+    const overrides: Record<string, Verdict["verdict"]> = {
+      [all[1]]: "catch_all",
+      [all[2]]: "unknown",
+      [all[3]]: "risky",
+      [all[4]]: "invalid",
+    };
+    vi.mocked(fetchVerdicts).mockImplementation(verdicts(overrides));
+    const created = await createRelease({ subject: "Verified", body: "hi", dailyLimit: 20 });
+
+    await drain();
+
+    const skipped = Object.keys(overrides);
+    for (const email of skipped) expect(mailed()).not.toContain(email);
+    expect(mailed().sort()).toEqual(all.filter((e) => !skipped.includes(e)).sort());
+
+    const rows = await sql`
+      SELECT email, status, verdict, verification_id, reason FROM mailing_list_release_recipients
+      WHERE release_id = ${created.body.releaseId} ORDER BY email
+    `;
+    for (const row of rows) {
+      expect(row.verification_id).toBeTruthy();
+      if (skipped.includes(row.email)) {
+        expect(row.status).toBe("skipped_undeliverable");
+        expect(row.verdict).toBe(overrides[row.email]);
+        expect(row.reason).toContain(overrides[row.email]);
+      } else {
+        expect(row.status).toBe("sent");
+        expect(row.verdict).toBe("valid");
+      }
+    }
+
+    const release = await readRelease(created.body.releaseId);
+    expect(release.skippedUndeliverable).toBe(4);
+    expect(release.reached).toBe(16);
+    expect(release.status).toBe("completed");
+  });
+
+  it("asks only about addresses the provider is not suppressing, under the release's own identity", async () => {
+    await seedList(3);
+    const all = addresses(3);
+    vi.mocked(fetchSuppressed).mockResolvedValue(suppressing(all[0]));
+    const created = await createRelease({ subject: "Order", body: "hi", dailyLimit: 3 });
+
+    await drain();
+
+    const asked = vi.mocked(fetchVerdicts).mock.calls.flatMap(([, emails]) => emails);
+    expect(asked).not.toContain(all[0]);
+    expect(asked.sort()).toEqual([all[1], all[2]]);
+    const [release] = vi.mocked(fetchVerdicts).mock.calls[0];
+    expect(release).toMatchObject({ id: created.body.releaseId, orgId: "org_test", userId: "user_staff" });
+  });
+
+  it("sends NOTHING from a slice whose verdicts cannot be had, returns it to pending, and sends it once they can", async () => {
+    await seedList(5);
+    const created = await createRelease({ subject: "Loud", body: "hi", dailyLimit: 5 });
+    vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError("apollo-service POST /email-verifications 502"));
+
+    const report = await tick();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(report.sent).toBe(0);
+    expect(report.verificationUnavailable).toBe(1);
+    const rows = await sql`
+      SELECT status, verdict, claimed_at FROM mailing_list_release_recipients WHERE release_id = ${created.body.releaseId}
+    `;
+    expect(rows.every((r: any) => r.status === "pending" && r.verdict === null && r.claimed_at === null)).toBe(true);
+    expect((await readRelease(created.body.releaseId)).status).toBe("running");
+
+    vi.mocked(fetchVerdicts).mockImplementation(verdicts());
+    await drain();
+    expect(mailed().sort()).toEqual(addresses(5));
+  });
+
+  it("does not spend the day's allowance on a skipped address", async () => {
+    await seedList(10);
+    const all = addresses(10);
+    vi.mocked(fetchVerdicts).mockImplementation(verdicts({ [all[0]]: "catch_all", [all[1]]: "catch_all", [all[2]]: "invalid" }));
+    const created = await createRelease({ subject: "Allowance", body: "hi", dailyLimit: 5 });
+
+    await drain();
+
+    expect(mailed()).toHaveLength(5);
+    const release = await readRelease(created.body.releaseId);
+    expect(release.todayUsed).toBe(5);
+    expect(release.skippedUndeliverable).toBe(3);
+    expect(release.remaining).toBe(2);
   });
 });
 
