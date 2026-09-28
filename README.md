@@ -346,11 +346,12 @@ Every update sent to the list, newest first, with the subject, the sender it wen
 
 A **release** is the same update plus a daily pace. Creating one writes a ledger row per address and answers in about a second, sending nothing. An interval inside the service then releases it over the following days.
 
-Three properties, and each is a consequence of the ledger rather than of care taken at the right moment:
+Four properties, and each is a consequence of the ledger rather than of care taken at the right moment:
 
 - **Nobody is mailed twice.** A recipient row is claimed by an `UPDATE` that only moves rows out of `pending`, under `FOR UPDATE SKIP LOCKED`, and the unique index on (release, email) means a second row for somebody cannot exist. Issuing the same release twice returns the first one rather than starting a second.
 - **Nobody is lost.** Every address is a row from the moment the release is created and ends in a terminal status with a reason. A claim a killed process left behind is settled as failed, naming what happened, rather than returned to the queue — this service cannot ask the provider whether that one message left, and a newsletter delivered twice is worse than one address reported honestly. A redeploy sends `SIGTERM`, which lets the slice in flight settle first, so a planned restart loses nobody at all.
 - **Suppression is reconciled per slice**, with no cache at all, at the moment that slice is sent. Somebody who unsubscribes on day one is skipped on day five.
+- **Nobody is mailed unverified.** After the suppression check, every remaining address of the slice is verified by apollo-service (`POST /email-verifications`, BounceVerify real SMTP + catch-all detection, billed to the release's org under the release's run, a verdict under 30 days old reused for free). Only verdict `valid` is sent. `catch_all`, `unknown`, `risky` and `invalid` settle as `skipped_undeliverable` with the verdict stored on the recipient row. Apollo's own `email_status: verified` is not used: 97% of the newsletter list carried it and 132 of its first 138 bounces did too. If the verdicts cannot be obtained (apollo-service error, timeout, missing verdict), that slice sends **nothing**, its rows go back to `pending` (none reached the gateway), and the next tick asks again. A skipped address does not consume the day's allowance: the allowance is a pace of mail handed to the provider, which a skip hands nothing.
 
 The pace is an in-process interval armed after the port is bound, not a cron. A GitHub Actions cron declares a cadence it does not deliver (measured elsewhere in this fleet at 6.2 runs a day against 24 declared, with gaps of 2.5 to 5.7 hours), and a release's pace is the product. `POST /internal/mailing-lists/releases/tick` exists so a cron can be a **backstop** for a process that died, never as the mechanism.
 
@@ -400,6 +401,7 @@ A release reads its own delivery outcomes back from email-gateway (`GET /public/
   "remaining": 25100,
   "failed": 3,
   "skippedOptedOut": 90,
+  "skippedUndeliverable": 610,
   "inFlight": 0,
   "todayAllowance": 3000,
   "todayUsed": 1820,
@@ -531,6 +533,8 @@ database with another run or with a deployed environment.
 | `TRANSACTIONAL_EMAIL_SERVICE_API_KEY` | API key for authenticating requests |
 | `EMAIL_GATEWAY_SERVICE_URL` | Email Gateway endpoint (default: https://email-gateway.distribute.you) |
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
+| `APOLLO_SERVICE_URL` | apollo-service base URL (pre-send verification of every release slice; a missing value sends nothing) |
+| `APOLLO_SERVICE_API_KEY` | apollo-service API key |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |

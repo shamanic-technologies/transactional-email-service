@@ -449,6 +449,9 @@ export const ReleaseSchema = z
     skippedOptedOut: z.number().openapi({
       description: "Addresses the provider was suppressing at the moment their slice was sent — checked per slice, so somebody who unsubscribes on day one is skipped on day five",
     }),
+    skippedUndeliverable: z.number().openapi({
+      description: "Addresses verified (apollo-service BounceVerify) just before their slice was sent and NOT sent because the verdict was anything but `valid` (catch_all, unknown, risky, invalid). The verdict is stored per recipient. They do not consume the daily allowance.",
+    }),
     inFlight: z.number().openapi({ description: "Addresses a worker is holding right now" }),
     todayAllowance: z.number().openapi({ description: "Messages this release may send today: its daily limit" }),
     todayUsed: z.number().openapi({ description: "How much of today's allowance is spent, in-flight addresses included" }),
@@ -486,6 +489,8 @@ export const ReleaseTickResponseSchema = z
     sent: z.number(),
     failed: z.number(),
     skippedOptedOut: z.number(),
+    skippedUndeliverable: z.number(),
+    verificationUnavailable: z.number().openapi({ description: "Slices whose verdicts could not be obtained; nothing in them was sent and they return to pending." }),
     completed: z.array(z.string()),
     halted: z.array(z.string()),
     skippedBusy: z.boolean().openapi({

@@ -245,6 +245,8 @@ export type MailingListRelease = typeof mailingListReleases.$inferSelect;
  * the reason. "skipped_opted_out" was suppressed by the provider at the moment
  * its slice was sent, which is why the check belongs here and not once at the
  * start: somebody who unsubscribes on day 1 is skipped on day 5.
+ * "skipped_undeliverable" was verified for its slice before sending and came
+ * back with any verdict other than `valid` (the verdict is on the row).
  */
 export const mailingListReleaseRecipients = pgTable(
   "mailing_list_release_recipients",
@@ -261,6 +263,15 @@ export const mailingListReleaseRecipients = pgTable(
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     /** When this row reached a terminal status. Today's usage is counted from it. */
     settledAt: timestamp("settled_at", { withTimezone: true }),
+    /**
+     * apollo-service's BounceVerify verdict for this address, taken for its
+     * slice before anything was sent: valid | invalid | catch_all | risky |
+     * unknown. Only `valid` is sent. Null for rows settled before verification
+     * existed (2026-09-28) and for rows still pending.
+     */
+    verdict: text("verdict"),
+    /** apollo-service's email_verifications row the verdict came from. */
+    verificationId: text("verification_id"),
   },
   (table) => [
     uniqueIndex("idx_mailing_list_release_recipients_unique").on(table.releaseId, table.email),

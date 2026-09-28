@@ -1,0 +1,2 @@
+ALTER TABLE "mailing_list_release_recipients" ADD COLUMN IF NOT EXISTS "verdict" text;--> statement-breakpoint
+ALTER TABLE "mailing_list_release_recipients" ADD COLUMN IF NOT EXISTS "verification_id" text;

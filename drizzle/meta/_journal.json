@@ -120,6 +120,13 @@
       "when": 1789734000892,
       "tag": "0016_paced_mailing_list_releases",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790574577033,
+      "tag": "0017_release_recipient_verdict",
+      "breakpoints": true
     }
   ]
 }
