@@ -216,6 +216,17 @@ export const mailingListReleases = pgTable(
     audienceId: text("audience_id"),
     /** When the delivery-outcome health of this release was last read from the provider. */
     lastHealthCheckAt: timestamp("last_health_check_at", { withTimezone: true }),
+    /**
+     * The current stall: consecutive ticks that had addresses to send and sent
+     * none of them because a dependency failed (verification unavailable, or
+     * the tick itself threw). Reset by the first tick that gets verdicts. A
+     * stall that outlasts the thresholds in release-pacing is mailed to staff
+     * ONCE, and `stallAlertedAt` is what makes it once.
+     */
+    stalledSince: timestamp("stalled_since", { withTimezone: true }),
+    stallTicks: integer("stall_ticks").notNull().default(0),
+    stallReason: text("stall_reason"),
+    stallAlertedAt: timestamp("stall_alerted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),

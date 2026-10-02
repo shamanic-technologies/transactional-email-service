@@ -549,6 +549,115 @@ describe("every address is verified before its slice is sent", () => {
     expect(mailed().sort()).toEqual(addresses(5));
   });
 
+  describe("a release that keeps failing to verify", () => {
+    // A fixed morning, so the day's allowance never runs out under the test and
+    // every tick has a slice to verify. One tick a minute, as in production.
+    const START = Date.parse("2026-10-01T08:00:00Z");
+    const at = (minute: number) => new Date(START + minute * 60_000);
+    const BALANCE_502 =
+      'apollo-service POST /email-verifications 502: {"error":"billing-service: insufficient balance for org"}';
+
+    function stallAlerts() {
+      return vi.mocked(sendEmail).mock.calls.filter(([p]) => p.tag === "mailing-list-release-stalled");
+    }
+
+    it("tells staff exactly once, with the upstream reason, after half an hour of nothing sent", async () => {
+      await seedList(50);
+      const created = await createRelease({ subject: "Stuck newsletter", body: "hi", dailyLimit: 1000 });
+      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
+
+      // 29 minutes of failing ticks: not yet.
+      for (let minute = 0; minute < 30; minute++) await runReleaseTick(at(minute));
+      expect(stallAlerts()).toHaveLength(0);
+
+      // The 31st consecutive failure, 30 minutes after the first: now.
+      await runReleaseTick(at(30));
+      expect(stallAlerts()).toHaveLength(1);
+
+      // And never again for the same stall, however long it lasts.
+      for (let minute = 31; minute < 180; minute++) await runReleaseTick(at(minute));
+      expect(stallAlerts()).toHaveLength(1);
+
+      const [[alert]] = stallAlerts();
+      expect(alert.to).toBe("kevin.lourd@gmail.com");
+      expect(alert.subject).toContain("Stuck newsletter");
+      expect(alert.htmlBody).toContain("insufficient balance");
+      expect(alert.textBody).toContain("insufficient balance");
+      expect(alert.textBody).toContain("2026-10-01T08:00:00.000Z");
+      expect(alert.textBody).toContain("0 of 50, 50 waiting");
+      expect(alert.textBody).not.toContain("{{");
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+
+      const [row] = await sql`
+        SELECT stall_ticks, stall_reason, stall_alerted_at FROM mailing_list_releases WHERE id = ${created.body.releaseId}
+      `;
+      expect(row.stall_ticks).toBe(180);
+      expect(row.stall_reason).toContain("insufficient balance");
+      expect(row.stall_alerted_at).not.toBeNull();
+    });
+
+    it("raises nothing for a single transient 502, and a recovery starts the clock over", async () => {
+      await seedList(200);
+      const created = await createRelease({ subject: "Blip", body: "hi", dailyLimit: 5000 });
+
+      // Fails for 20 minutes, recovers, fails again for 20: never 30 in a row.
+      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
+      for (let minute = 0; minute < 20; minute++) await runReleaseTick(at(minute));
+      vi.mocked(fetchVerdicts).mockImplementation(verdicts());
+      await runReleaseTick(at(20));
+      const [cleared] = await sql`
+        SELECT stall_ticks, stalled_since FROM mailing_list_releases WHERE id = ${created.body.releaseId}
+      `;
+      expect(cleared.stall_ticks).toBe(0);
+      expect(cleared.stalled_since).toBeNull();
+
+      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
+      for (let minute = 21; minute < 41; minute++) await runReleaseTick(at(minute));
+
+      expect(stallAlerts()).toHaveLength(0);
+    });
+
+    it("raises nothing on normal ticks", async () => {
+      await seedList(50);
+      await createRelease({ subject: "Normal", body: "hi", dailyLimit: 1000 });
+
+      for (let minute = 0; minute < 60; minute++) await runReleaseTick(at(minute));
+
+      expect(stallAlerts()).toHaveLength(0);
+      expect(mailed()).toHaveLength(50);
+    });
+
+    it("alerts again for a NEW stall after a recovery", async () => {
+      await seedList(200);
+      await createRelease({ subject: "Twice", body: "hi", dailyLimit: 5000 });
+
+      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
+      for (let minute = 0; minute <= 30; minute++) await runReleaseTick(at(minute));
+      expect(stallAlerts()).toHaveLength(1);
+
+      vi.mocked(fetchVerdicts).mockImplementation(verdicts());
+      await runReleaseTick(at(31));
+
+      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
+      for (let minute = 32; minute <= 62; minute++) await runReleaseTick(at(minute));
+      expect(stallAlerts()).toHaveLength(2);
+    });
+
+    it("retries the alert on the next tick when sending it failed", async () => {
+      await seedList(50);
+      await createRelease({ subject: "Alert lost", body: "hi", dailyLimit: 1000 });
+      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
+      vi.mocked(sendEmail).mockRejectedValueOnce(new Error("email-gateway 503"));
+
+      for (let minute = 0; minute <= 31; minute++) await runReleaseTick(at(minute));
+
+      // First attempt (minute 30) threw, second (minute 31) went out; nothing after.
+      expect(stallAlerts()).toHaveLength(2);
+      for (let minute = 32; minute < 40; minute++) await runReleaseTick(at(minute));
+      expect(stallAlerts()).toHaveLength(2);
+    });
+  });
+
   it("does not spend the day's allowance on a skipped address", async () => {
     await seedList(10);
     const all = addresses(10);

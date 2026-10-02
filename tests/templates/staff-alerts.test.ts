@@ -9,7 +9,12 @@ const { mockOnConflictDoUpdate, mockValues, mockInsert } = vi.hoisted(() => {
 
 vi.mock("../../src/db/index.js", () => ({ db: { insert: mockInsert } }));
 
-import { PROVIDER_CREDITS_EXHAUSTED_TEMPLATE, STAFF_TEMPLATES, seedStaffTemplates } from "../../src/templates/staff-alerts.js";
+import {
+  MAILING_LIST_RELEASE_STALLED_TEMPLATE,
+  PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
+  STAFF_TEMPLATES,
+  seedStaffTemplates,
+} from "../../src/templates/staff-alerts.js";
 import { interpolate } from "../../src/templates/index.js";
 
 const TPL = PROVIDER_CREDITS_EXHAUSTED_TEMPLATE;
@@ -61,6 +66,34 @@ describe("provider_credits_exhausted template", () => {
   it("carries a plain-text part, so the alert is readable with images and HTML off", () => {
     expect(TPL.textBody.length).toBeGreaterThan(0);
     expect(TPL.textBody).not.toContain("<");
+  });
+});
+
+describe("mailing_list_release_stalled template", () => {
+  const STALLED = MAILING_LIST_RELEASE_STALLED_TEMPLATE;
+
+  it("is registered and renders every fact, with no em-dash and nothing left blank", () => {
+    expect(STAFF_TEMPLATES).toContain(STALLED);
+    const vars = {
+      subject: "October update",
+      slug: "newsletter",
+      reason: "apollo-service POST /email-verifications 502: insufficient balance",
+      stalledSince: "2026-10-01T13:45:00.000Z",
+      stallTicks: 31,
+      reached: 9649,
+      remaining: 20364,
+      recipientCount: 30013,
+      releaseId: "06333361-524a-4827-8f01-4a235b5c1e85",
+    };
+    for (const body of [STALLED.htmlBody, STALLED.textBody]) {
+      const out = interpolate(body, vars);
+      for (const value of Object.values(vars)) expect(out).toContain(String(value));
+      expect(out).not.toContain("{{");
+      expect(out).not.toMatch(/[\u2013\u2014]/);
+    }
+    expect(interpolate(STALLED.subject, vars)).toBe("Release of \u201cOctober update\u201d to newsletter is not sending");
+    expect(STALLED.htmlBody).toContain("table-layout:fixed");
+    expect(STALLED.htmlBody).not.toContain("class=");
   });
 });
 
