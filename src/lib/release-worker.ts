@@ -21,6 +21,7 @@ import {
   HEALTH_CHECK_INTERVAL_MS,
   HEALTH_MIN_SAMPLE,
   INTERRUPTED_REASON,
+  shouldAlertStall,
   startOfUtcDay,
   tickAllowance,
   WORKER_INTERVAL_MS,
@@ -61,6 +62,9 @@ import {
  *    and its unsent rows go back to pending for the next tick — safe because
  *    none of them reached the gateway, which is the one thing the no-return
  *    rule for stale claims protects.
+ *  - **Nobody is left stuck in silence.** A release whose ticks keep sending
+ *    nothing because a dependency fails is a stall, counted on the release row
+ *    and mailed to staff once it has lasted (`recordStall`).
  */
 
 /** The releases a tick will act on. The other statuses are waiting or over. */
@@ -256,15 +260,18 @@ async function settle(ids: string[], status: string, reason: string | null, now:
  * already been marked halted, so a failure to send the alert cannot leave the
  * release running.
  */
-async function alertStaff(release: MailingListRelease, slug: string, reason: string, reached: number): Promise<void> {
-  const template = await getTemplate("mailing_list_release_halted");
+async function alertStaff(
+  release: MailingListRelease,
+  templateName: string,
+  tag: string,
+  vars: Record<string, string | number>
+): Promise<void> {
+  const template = await getTemplate(templateName);
   const rendered = template({
     subject: release.subject,
-    slug,
-    reason,
-    reached,
     recipientCount: release.recipientCount,
     releaseId: release.id,
+    ...vars,
   });
 
   for (const email of ADMIN_EMAILS) {
@@ -273,7 +280,7 @@ async function alertStaff(release: MailingListRelease, slug: string, reason: str
       subject: rendered.subject,
       htmlBody: rendered.htmlBody,
       textBody: rendered.textBody,
-      tag: "mailing-list-release-halted",
+      tag,
       orgId: release.orgId,
       userId: release.userId,
       runId: release.runId,
@@ -281,6 +288,93 @@ async function alertStaff(release: MailingListRelease, slug: string, reason: str
       workflowHeaders: workflowHeadersOf(release),
     });
   }
+}
+
+/**
+ * Count one more tick in which this release had addresses to send and sent
+ * none of them because a dependency failed, and tell staff once the stall has
+ * lasted (thresholds and why in release-pacing).
+ *
+ * Without this the worker retries forever and the only trace is a log line per
+ * tick: on 2026-10-01 every verification for the newsletter came back 402 from
+ * billing for 15 hours, 3,279 refusals, and the first anyone heard was the next
+ * morning's brief.
+ *
+ * One alert per stall: `stall_alerted_at` is set only once the alert is sent,
+ * so a failed alert is retried on the next tick rather than lost, and a sent
+ * one is not repeated until a tick gets verdicts again and clears the stall.
+ * A failure to SEND the alert is logged and traced, never thrown: the caller is
+ * already handling a failure, and throwing would count this tick twice.
+ */
+async function recordStall(release: MailingListRelease, slug: string, reason: string, now: Date): Promise<void> {
+  const [stall] = await db
+    .update(mailingListReleases)
+    .set({
+      stallTicks: raw`${mailingListReleases.stallTicks} + 1`,
+      stalledSince: raw`coalesce(${mailingListReleases.stalledSince}, ${now.toISOString()}::timestamptz)`,
+      stallReason: reason,
+      updatedAt: now,
+    })
+    .where(eq(mailingListReleases.id, release.id))
+    .returning({
+      stallTicks: mailingListReleases.stallTicks,
+      stalledSince: mailingListReleases.stalledSince,
+      stallAlertedAt: mailingListReleases.stallAlertedAt,
+    });
+
+  if (
+    !stall ||
+    !shouldAlertStall({
+      stallTicks: stall.stallTicks,
+      stalledSince: stall.stalledSince!,
+      alreadyAlerted: stall.stallAlertedAt !== null,
+      now,
+    })
+  ) {
+    return;
+  }
+
+  try {
+    const progress = await readProgress(release.id, now);
+    await alertStaff(release, "mailing_list_release_stalled", "mailing-list-release-stalled", {
+      slug,
+      reason,
+      stalledSince: stall.stalledSince!.toISOString(),
+      stallTicks: stall.stallTicks,
+      reached: progress.reached,
+      remaining: progress.remaining,
+    });
+    await db
+      .update(mailingListReleases)
+      .set({ stallAlertedAt: now, updatedAt: now })
+      .where(eq(mailingListReleases.id, release.id));
+    console.warn(
+      `[transactional-email-service] release ${release.id}: STALLED for ${stall.stallTicks} ticks since ${stall.stalledSince!.toISOString()}, staff alerted: ${reason}`
+    );
+    traceEvent(
+      release.runId,
+      {
+        service: "transactional-email-service",
+        event: "mailing-list-release-stalled",
+        detail: `nothing sent for ${stall.stallTicks} ticks since ${stall.stalledSince!.toISOString()}: ${reason}`,
+        level: "error",
+      },
+      headersOf(release)
+    );
+  } catch (err: any) {
+    console.error(
+      `[transactional-email-service] release ${release.id}: STALL ALERT NOT SENT, retrying next tick: ${err.message}`
+    );
+  }
+}
+
+/** The first tick that gets verdicts ends the stall, so a later one alerts afresh. */
+async function clearStall(release: MailingListRelease, now: Date): Promise<void> {
+  if (release.stallTicks === 0 && release.stalledSince === null) return;
+  await db
+    .update(mailingListReleases)
+    .set({ stallTicks: 0, stalledSince: null, stallReason: null, stallAlertedAt: null, updatedAt: now })
+    .where(eq(mailingListReleases.id, release.id));
 }
 
 /**
@@ -338,7 +432,11 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
     headersOf(release)
   );
 
-  await alertStaff(release, slug, verdict.reason!, progress.reached);
+  await alertStaff(release, "mailing_list_release_halted", "mailing-list-release-halted", {
+    slug,
+    reason: verdict.reason!,
+    reached: progress.reached,
+  });
   return true;
 }
 
@@ -371,7 +469,7 @@ async function releaseSlice(
   report.skippedOptedOut += suppressed.length;
 
   const unsuppressed = slice.filter((r) => !suppression.isSuppressed(r.email));
-  const sendable = await verifySlice(release, unsuppressed, report, now);
+  const sendable = await verifySlice(release, slug, unsuppressed, report, now);
 
   for (let offset = 0; offset < sendable.length; offset += SEND_CONCURRENCY) {
     const wave = sendable.slice(offset, offset + SEND_CONCURRENCY);
@@ -432,6 +530,7 @@ async function releaseSlice(
  */
 async function verifySlice(
   release: MailingListRelease,
+  slug: string,
   rows: Array<{ id: string; email: string }>,
   report: TickReport,
   now: Date
@@ -468,8 +567,11 @@ async function verifySlice(
       },
       headersOf(release)
     );
+    await recordStall(release, slug, err.message, now);
     return [];
   }
+
+  await clearStall(release, now);
 
   const sendable: Array<{ id: string; email: string }> = [];
   for (const row of rows) {
@@ -585,6 +687,13 @@ export async function runReleaseTick(now = new Date()): Promise<TickReport> {
         // tick retries, and nothing has been claimed that a stale-claim sweep
         // will not account for.
         console.error(`[transactional-email-service] release ${release.id} tick failed: ${err.message}`);
+        // A tick that throws every time is a stall too (a suppression read that
+        // keeps failing, say), and is reported on the same terms.
+        try {
+          await recordStall(release, slug, err.message, now);
+        } catch (stallErr: any) {
+          console.error(`[transactional-email-service] release ${release.id}: could not record stall: ${stallErr.message}`);
+        }
       }
     }
   } finally {
