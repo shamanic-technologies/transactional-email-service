@@ -105,9 +105,56 @@ export const MAILING_LIST_RELEASE_HALTED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * A running release has sent nothing for a sustained stretch because something
+ * it depends on keeps failing (email verification, most often). Unlike a halt,
+ * nothing has been stopped: the worker keeps retrying every minute and resumes
+ * on its own the moment the dependency answers. The message exists so that
+ * "retrying" is not mistaken for "fine" for a whole night.
+ */
+export const MAILING_LIST_RELEASE_STALLED_TEMPLATE: StaffTemplate = {
+  name: "mailing_list_release_stalled",
+  subject: "Release of \u201c{{subject}}\u201d to {{slug}} is not sending",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">A mailing-list release is not sending</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">Every attempt since the time below sent nothing. It retries every minute and resumes by itself once the cause is fixed. You will not get this email again for the same stall.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Update</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{subject}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">List</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{slug}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Nothing sent since</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{stalledSince}} ({{stallTicks}} attempts)</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Reached so far</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{reached}} of {{recipientCount}}, {{remaining}} waiting</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Why, as the last attempt reported it</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{reason}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Release</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{releaseId}}</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "A mailing-list release is not sending.",
+    "",
+    "Every attempt since the time below sent nothing. It retries every minute and resumes by itself once the cause is fixed. You will not get this email again for the same stall.",
+    "",
+    "Update: {{subject}}",
+    "List: {{slug}}",
+    "Nothing sent since: {{stalledSince}} ({{stallTicks}} attempts)",
+    "Reached so far: {{reached}} of {{recipientCount}}, {{remaining}} waiting",
+    "Why, as the last attempt reported it: {{reason}}",
+    "Release: {{releaseId}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
+  MAILING_LIST_RELEASE_STALLED_TEMPLATE,
 ];
 
 /**

@@ -7,6 +7,9 @@ import {
   MAX_DAILY_LIMIT,
   MAX_TICK_BATCH,
   MAX_UNSUBSCRIBE_RATE,
+  shouldAlertStall,
+  STALL_ALERT_AFTER_MS,
+  STALL_ALERT_MIN_TICKS,
   startOfUtcDay,
   tickAllowance,
   WORKER_INTERVAL_MS,
@@ -217,5 +220,24 @@ describe("estimateDaysRemaining", () => {
   it("never claims a day for fewer people than a day can carry", () => {
     expect(estimateDaysRemaining({ dailyLimit: 1_000, remaining: 1, todayUsed: 0 })).toBe(1);
     expect(estimateDaysRemaining({ dailyLimit: 1_000, remaining: 1, todayUsed: 1_000 })).toBe(1);
+  });
+});
+
+describe("shouldAlertStall", () => {
+  const since = new Date("2026-10-01T13:45:00Z");
+  const after = (ms: number) => new Date(since.getTime() + ms);
+
+  it("waits for both enough ticks and enough time", () => {
+    expect(shouldAlertStall({ stallTicks: 2, stalledSince: since, alreadyAlerted: false, now: after(STALL_ALERT_AFTER_MS * 10) })).toBe(false);
+    expect(shouldAlertStall({ stallTicks: 100, stalledSince: since, alreadyAlerted: false, now: after(STALL_ALERT_AFTER_MS - 1) })).toBe(false);
+    expect(shouldAlertStall({ stallTicks: STALL_ALERT_MIN_TICKS, stalledSince: since, alreadyAlerted: false, now: after(STALL_ALERT_AFTER_MS) })).toBe(true);
+  });
+
+  it("never fires twice for one stall", () => {
+    expect(shouldAlertStall({ stallTicks: 500, stalledSince: since, alreadyAlerted: true, now: after(STALL_ALERT_AFTER_MS * 30) })).toBe(false);
+  });
+
+  it("tells staff within the hour", () => {
+    expect(STALL_ALERT_AFTER_MS).toBeLessThan(60 * 60_000);
   });
 });

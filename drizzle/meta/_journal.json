@@ -127,6 +127,13 @@
       "when": 1790574577033,
       "tag": "0017_release_recipient_verdict",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790929574530,
+      "tag": "0018_release_stall",
+      "breakpoints": true
     }
   ]
 }

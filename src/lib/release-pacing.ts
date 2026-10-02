@@ -72,6 +72,34 @@ export const MAX_UNSUBSCRIBE_RATE = 0.03;
 /** How often a running release's delivery outcomes are read back from the provider. */
 export const HEALTH_CHECK_INTERVAL_MS = 10 * 60_000;
 
+/**
+ * When a release that keeps failing to send is reported to staff.
+ *
+ * Both must hold: at least `STALL_ALERT_MIN_TICKS` consecutive failed ticks AND
+ * the first of them at least `STALL_ALERT_AFTER_MS` ago. The tick count alone
+ * would fire on three back-to-back ticks of one short blip; the duration alone
+ * would fire on a single failed tick after a long quiet night (a release resting
+ * on a spent daily allowance runs no slice, so it neither extends nor clears a
+ * streak). At one tick a minute the pair means: staff hear within the half hour
+ * of a stall starting, and a dependency that recovers within it costs nobody an
+ * email. Measured on 2026-10-01: a billing 402 behind apollo-service failed
+ * every tick for 15 hours and nobody was told.
+ */
+export const STALL_ALERT_MIN_TICKS = 3;
+export const STALL_ALERT_AFTER_MS = 30 * 60_000;
+
+/** True when a stall has lasted long enough to tell staff and they have not been told about this one. */
+export function shouldAlertStall(input: {
+  stallTicks: number;
+  stalledSince: Date;
+  alreadyAlerted: boolean;
+  now: Date;
+}): boolean {
+  if (input.alreadyAlerted) return false;
+  if (input.stallTicks < STALL_ALERT_MIN_TICKS) return false;
+  return input.now.getTime() - input.stalledSince.getTime() >= STALL_ALERT_AFTER_MS;
+}
+
 /** The start of the UTC calendar day containing `now`. */
 export function startOfUtcDay(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
