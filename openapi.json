@@ -129,6 +129,52 @@
           "eventType"
         ]
       },
+      "PreviewSendResponse": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "htmlBody": {
+            "type": "string",
+            "description": "The HTML a send of this event would carry, the \"Revenue made easy.\" sign-off included where the event is a distribute.you message to a customer. email-gateway appends its signature and unsubscribe footer at send time, so those are absent here."
+          },
+          "textBody": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "nullable": true,
+            "description": "The template's own sender, or null for the gateway default."
+          }
+        },
+        "required": [
+          "subject",
+          "htmlBody",
+          "textBody",
+          "from"
+        ]
+      },
+      "PreviewSendRequest": {
+        "type": "object",
+        "properties": {
+          "eventType": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The event whose registered template to render."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Template variables for {{variable}} interpolation, as a send would pass them."
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
       "StatsResponse": {
         "type": "object",
         "properties": {
@@ -1090,6 +1136,83 @@
           },
           "401": {
             "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/send/preview": {
+      "post": {
+        "summary": "Render an event's email exactly as a send would, without sending",
+        "description": "Resolves the event's registered template, interpolates `metadata`, and returns the message a `POST /send` of the same event would put on the wire. Nothing is sent, recorded or resolved.\n\nEvery customer-facing distribute.you email is signed with the company's why, \"Revenue made easy.\", as a quiet last line in both parts; it is not added to staff-routed alerts, to a template whose sender is outside distribute.you, or to a body that already carries the sentence. This preview shows exactly that.",
+        "tags": [
+          "Email"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID from client-service"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewSendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message as a send would carry it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewSendResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or missing x-org-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No template registered for this event",
             "content": {
               "application/json": {
                 "schema": {

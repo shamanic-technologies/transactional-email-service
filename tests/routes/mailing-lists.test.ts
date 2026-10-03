@@ -117,6 +117,11 @@ import mailingListsRoutes from "../../src/routes/mailing-lists.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
 import { fetchSuppressed } from "../../src/lib/suppression.js";
 import { updateRun } from "../../src/lib/runs-client.js";
+import { signWithWhy } from "../../src/lib/why.js";
+
+// Every list here is distribute.you's own, so every update leaves signed.
+const signed = (htmlBody: string, textBody: string) => signWithWhy({ htmlBody, textBody }, { withLink: true });
+const SIGN_OFF_TEXT = "\n\nRevenue made easy.\nGet started: distribute.you";
 
 const app = express();
 app.use(express.json());
@@ -659,7 +664,7 @@ describe("POST /mailing-lists/updates/preview", () => {
 
   it("carries the plain-text part, which is the markdown itself", async () => {
     const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: BODY });
-    expect(res.body.textBody).toBe(BODY);
+    expect(res.body.textBody).toBe(`${BODY}${SIGN_OFF_TEXT}`);
   });
 
   it("reports an image no client renders instead of refusing — a preview shows what you have", async () => {
@@ -728,8 +733,11 @@ describe("an update whose body staff authored as HTML", () => {
     expect(res.status).toBe(200);
     expect(res.body.recipientCount).toBe(2);
     const bodies = vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody);
-    expect(bodies).toEqual([AUTHORED, AUTHORED]);
-    // Not wrapped in the markdown shell, not re-rendered, nothing appended here.
+    const expected = signed(AUTHORED, "").htmlBody;
+    expect(bodies).toEqual([expected, expected]);
+    // The authored markup itself is untouched; only the sign-off follows it.
+    expect(bodies[0].startsWith(AUTHORED)).toBe(true);
+    // Not wrapped in the markdown shell, not re-rendered.
     expect(bodies[0]).not.toContain("background-color:#f4f5f7");
   });
 
@@ -756,7 +764,7 @@ describe("an update whose body staff authored as HTML", () => {
       .send({ subject: "Flash vs Pro", htmlBody: AUTHORED, textBody: "Flash beats Pro. Read distribute.you/bench" });
 
     const call = vi.mocked(sendEmail).mock.calls[0][0] as any;
-    expect(call.textBody).toBe("Flash beats Pro. Read distribute.you/bench");
+    expect(call.textBody).toBe(`Flash beats Pro. Read distribute.you/bench${SIGN_OFF_TEXT}`);
   });
 
   it("refuses a document no text part can be derived from rather than sending without one", async () => {
@@ -810,7 +818,7 @@ describe("an update whose body staff authored as HTML", () => {
 
     expect(store.inserted.updates[0].bodyKind).toBe("html");
     expect(store.inserted.updates[0].bodyMarkdown).toBeNull();
-    expect(store.inserted.updates[0].htmlBody).toBe(AUTHORED);
+    expect(store.inserted.updates[0].htmlBody).toBe(signed(AUTHORED, "").htmlBody);
   });
 
   it("refuses an SVG the same way — a broken placeholder is broken whoever wrote the markup", async () => {
@@ -867,20 +875,20 @@ describe("an update whose body staff authored as HTML", () => {
     expect(store.inserted.updates[0].bodyKind).toBe("markdown");
     expect(store.inserted.updates[0].bodyMarkdown).toBe("## Hi");
     expect(store.inserted.updates[0].htmlBody).toContain("max-width:600px");
-    expect((vi.mocked(sendEmail).mock.calls[0][0] as any).textBody).toBe("## Hi");
+    expect((vi.mocked(sendEmail).mock.calls[0][0] as any).textBody).toBe(`## Hi${SIGN_OFF_TEXT}`);
   });
 });
 
 describe("previewing an authored HTML body", () => {
   const AUTHORED = '<table><tr><td><h1>Flash vs Pro</h1><p>We measured both.</p></td></tr></table>';
 
-  it("returns it unchanged, which is what a send does with it", async () => {
+  it("returns it as authored plus the sign-off, which is what a send does with it", async () => {
     const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ htmlBody: AUTHORED });
 
     expect(res.status).toBe(200);
-    expect(res.body.htmlBody).toBe(AUTHORED);
+    expect(res.body.htmlBody).toBe(signed(AUTHORED, "").htmlBody);
     expect(res.body.bodyKind).toBe("html");
-    expect(res.body.textBody).toBe("Flash vs Pro\n\nWe measured both.");
+    expect(res.body.textBody).toBe(`Flash vs Pro\n\nWe measured both.${SIGN_OFF_TEXT}`);
     expect(res.body.unrenderableImages).toEqual([]);
   });
 
@@ -898,7 +906,7 @@ describe("previewing an authored HTML body", () => {
   it("says a markdown preview is markdown", async () => {
     const res = await request(app).post("/mailing-lists/updates/preview").set(AUTH).send({ body: "## Hi" });
     expect(res.body.bodyKind).toBe("markdown");
-    expect(res.body.textBody).toBe("## Hi");
+    expect(res.body.textBody).toBe(`## Hi${SIGN_OFF_TEXT}`);
   });
 
   it("reports an SVG in an authored body without refusing it", async () => {
