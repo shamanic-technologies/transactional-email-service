@@ -460,8 +460,8 @@ describe("POST /send", () => {
     const body = JSON.parse(options.body);
 
     expect(body.subject).toBe("Welcome Primary");
-    expect(body.htmlBody).toBe("<p>Hello Primary</p>");
-    expect(body.textBody).toBe("Hello Primary");
+    expect(body.htmlBody).toMatch(/^<p>Hello Primary<\/p>\n<p [^>]*>Revenue made easy\.<\/p>$/);
+    expect(body.textBody).toBe("Hello Primary\n\nRevenue made easy.");
     expect(body.subject).not.toContain("alpha-private@example.com");
     expect(body.htmlBody).not.toContain("alpha-private@example.com");
     expect(body.textBody).not.toContain("alpha-private@example.com");
@@ -1576,5 +1576,123 @@ describe("unpaid_debt_uncollectable", () => {
     for (const call of mockValues.mock.calls) {
       expect(call[0].dedupKey).toBeNull();
     }
+  });
+});
+
+describe("the why under a distribute.you email", () => {
+  const send = (eventType: string, extra: Record<string, unknown> = {}) =>
+    request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType, recipientEmail: "customer@example.com", ...extra });
+
+  const wire = () => JSON.parse(fetchSpy.mock.calls[0][1].body);
+
+  it("signs a customer-facing email, inside the document, in both parts", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      ...DB_TEMPLATE_ROW,
+      htmlBody: "<html><body><div>Hi</div></body></html>",
+      textBody: "Hi",
+    }]);
+
+    await send("welcome");
+
+    const body = wire();
+    expect(body.htmlBody).toMatch(/<div>Hi<\/div><p [^>]*>Revenue made easy\.<\/p>\n<\/body><\/html>$/);
+    expect(body.textBody).toBe("Hi\n\nRevenue made easy.");
+    // The newsletter's "Get started" link is not on a lifecycle email.
+    expect(body.htmlBody).not.toContain("Get started");
+  });
+
+  it("leaves the subject alone", async () => {
+    await send("welcome");
+    expect(wire().subject).toBe("Test subject");
+  });
+
+  it("does not sign a staff-routed alert", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "signup_notification" });
+
+    expect(wire().htmlBody).toBe("<p>Test</p>");
+    expect(wire().textBody).toBe("Test");
+  });
+
+  it("does not sign a template that sends as another brand", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, fromAddress: "GrowthAgency.dev <hello@growthagency.dev>" }]);
+
+    await send("checkout_success");
+
+    expect(wire().htmlBody).toBe("<p>Test</p>");
+    expect(wire().textBody).toBe("Test");
+  });
+
+  it("signs a template that names a distribute.you sender of its own", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, fromAddress: "Kevin <kevin@news.distribute.you>" }]);
+
+    await send("welcome");
+
+    expect(wire().textBody).toBe("Test\n\nRevenue made easy.");
+  });
+
+  it("does not sign twice a template that already says it", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      ...DB_TEMPLATE_ROW,
+      htmlBody: "<p>Hi</p><p>Revenue made easy.</p>",
+      textBody: "Hi\n\nRevenue made easy.",
+    }]);
+
+    await send("welcome");
+
+    expect(wire().htmlBody).toBe("<p>Hi</p><p>Revenue made easy.</p>");
+    expect(wire().textBody).toBe("Hi\n\nRevenue made easy.");
+  });
+});
+
+describe("POST /send/preview", () => {
+  it("returns the message a send would carry, signed, and sends nothing", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, subject: "Hi {{name}}", textBody: "Hello {{name}}" }]);
+
+    const res = await request(app)
+      .post("/send/preview")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .send({ eventType: "welcome", metadata: { name: "Ada" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.subject).toBe("Hi Ada");
+    expect(res.body.textBody).toBe("Hello Ada\n\nRevenue made easy.");
+    expect(res.body.htmlBody).toContain("Revenue made easy.");
+    expect(res.body.from).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("previews a staff alert unsigned, as it is sent", async () => {
+    const res = await request(app)
+      .post("/send/preview")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .send({ eventType: "signup_notification" });
+
+    expect(res.body.textBody).toBe("Test");
+  });
+
+  it("404s an event with no template", async () => {
+    mockSelectLimit.mockResolvedValueOnce([]);
+    const res = await request(app)
+      .post("/send/preview")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .send({ eventType: "nope" });
+    expect(res.status).toBe(404);
+  });
+
+  it("requires the API key", async () => {
+    const res = await request(app).post("/send/preview").set("x-org-id", "org_456").send({ eventType: "welcome" });
+    expect(res.status).toBe(401);
   });
 });

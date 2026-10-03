@@ -291,6 +291,25 @@ export const PreviewUpdateRequestSchema = z
   .superRefine(bodyKindRefinement)
   .openapi("PreviewUpdateRequest");
 
+export const PreviewSendRequestSchema = z
+  .object({
+    eventType: z.string().min(1).openapi({ description: "The event whose registered template to render." }),
+    metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation, as a send would pass them." }),
+  })
+  .openapi("PreviewSendRequest");
+
+export const PreviewSendResponseSchema = z
+  .object({
+    subject: z.string(),
+    htmlBody: z.string().openapi({
+      description:
+        "The HTML a send of this event would carry, the \"Revenue made easy.\" sign-off included where the event is a distribute.you message to a customer. email-gateway appends its signature and unsubscribe footer at send time, so those are absent here.",
+    }),
+    textBody: z.string(),
+    from: z.string().nullable().openapi({ description: "The template's own sender, or null for the gateway default." }),
+  })
+  .openapi("PreviewSendResponse");
+
 export const PreviewUpdateResponseSchema = z
   .object({
     htmlBody: z.string().openapi({
@@ -616,6 +635,27 @@ registry.registerPath({
       description: "Unauthorized - invalid or missing API key",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/send/preview",
+  summary: "Render an event's email exactly as a send would, without sending",
+  description:
+    "Resolves the event's registered template, interpolates `metadata`, and returns the message a `POST /send` of the same event would put on the wire. Nothing is sent, recorded or resolved.\n\n" +
+    "Every customer-facing distribute.you email is signed with the company's why, \"Revenue made easy.\", as a quiet last line in both parts; it is not added to staff-routed alerts, to a template whose sender is outside distribute.you, or to a body that already carries the sentence. This preview shows exactly that.",
+  tags: ["Email"],
+  security: [{ apiKey: [] }],
+  parameters: [orgIdHeader],
+  request: {
+    body: { required: true, content: { "application/json": { schema: PreviewSendRequestSchema } } },
+  },
+  responses: {
+    200: { description: "The message as a send would carry it", content: { "application/json": { schema: PreviewSendResponseSchema } } },
+    400: { description: "Validation error or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No template registered for this event", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

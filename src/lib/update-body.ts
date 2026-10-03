@@ -4,6 +4,7 @@ import {
   findUnrenderableImagesInHtml,
   renderUpdateBody,
 } from "./mailing-list-body.js";
+import { signWithWhy } from "./why.js";
 
 /**
  * Turning what a caller stated into the two parts a message carries.
@@ -30,7 +31,13 @@ export interface ResolvedBody {
  * Markdown is rendered, exactly as it always was. An authored document is NOT:
  * it is the bytes staff wrote, and re-rendering, re-wrapping or inlining
  * anything into it would break the design it exists to carry. So the html path
- * passes the body through untouched and only decides the text part beside it.
+ * passes the body through and only decides the text part beside it.
+ *
+ * The one thing both paths gain is the company's why: every list here is
+ * distribute.you's own, so every update is signed "Revenue made easy." with a
+ * "Get started" link under it, as one self-styled paragraph placed just before
+ * `</body>` (or at the end of a fragment). Nothing of the authored markup is
+ * rewritten, and a body that already carries the sentence is left as it is.
  *
  * A message with no text part is not an option: clients that prefer text show
  * an empty message and filters read the missing alternative as a signal. The
@@ -43,8 +50,8 @@ export interface ResolvedBody {
  */
 export function resolveBody(input: { body?: string; htmlBody?: string; textBody?: string }): ResolvedBody | { error: string } {
   if (input.htmlBody) {
-    const textBody = input.textBody ?? deriveTextFromHtml(input.htmlBody);
-    if (textBody.trim().length === 0) {
+    const authoredText = input.textBody ?? deriveTextFromHtml(input.htmlBody);
+    if (authoredText.trim().length === 0) {
       return {
         error:
           "This HTML carries no text a plain-text part could be derived from, and a message with no text part " +
@@ -52,18 +59,20 @@ export function resolveBody(input: { body?: string; htmlBody?: string; textBody?
       };
     }
 
+    const signed = signWithWhy({ htmlBody: input.htmlBody, textBody: authoredText }, { withLink: true });
+
     return {
       bodyKind: "html",
       markdown: null,
-      htmlBody: input.htmlBody,
-      textBody,
+      htmlBody: signed.htmlBody,
+      textBody: signed.textBody,
       unrenderableImages: findUnrenderableImagesInHtml(input.htmlBody),
     };
   }
 
   // The schema guarantees one of the two, so this is the markdown path.
   const markdown = input.body as string;
-  const rendered = renderUpdateBody(markdown);
+  const rendered = signWithWhy(renderUpdateBody(markdown), { withLink: true });
 
   return {
     bodyKind: "markdown",
