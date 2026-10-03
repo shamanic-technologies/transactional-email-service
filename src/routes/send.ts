@@ -8,7 +8,8 @@ import { sendEmail } from "../lib/email-gateway.js";
 import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
-import { SendRequestSchema } from "../schemas.js";
+import { PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
+import { isDistributeSender, signWithWhy } from "../lib/why.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
 import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
 
@@ -95,6 +96,17 @@ function buildBccList(eventType: string, callerBcc: string[] | undefined): strin
   if (ADMIN_NOTIFICATION_EVENTS.has(eventType)) return bcc;
   if (!bcc.some((address) => address.toLowerCase() === FOUNDER_EMAIL)) bcc.push(FOUNDER_EMAIL);
   return bcc;
+}
+
+// The rendered message a send would put on the wire, the company's why signed
+// under it where the message is distribute.you's own word to a customer: not on
+// a staff-routed alert, and not under a template that names a sender outside
+// distribute.you (the legacy GrowthAgency.dev templates). Shared by the send and
+// its preview so the preview cannot drift from what lands in the inbox.
+type RenderedTemplate = ReturnType<Awaited<ReturnType<typeof getTemplate>>>;
+function signRendered(eventType: string, template: RenderedTemplate): RenderedTemplate {
+  if (ADMIN_NOTIFICATION_EVENTS.has(eventType) || !isDistributeSender(template.from)) return template;
+  return { ...template, ...signWithWhy(template, { withLink: false }) };
 }
 
 function getTodayDate(): string {
@@ -247,7 +259,7 @@ async function handleSend(req: Request, res: Response) {
       res.status(404).json({ error: err.message });
       return;
     }
-    const template = templateFn(metadata as Record<string, unknown>);
+    const template = signRendered(body.eventType, templateFn(metadata as Record<string, unknown>));
 
     if (runId) {
       traceEvent(runId, { service: "transactional-email-service", event: "template-resolved", detail: `Template resolved for ${body.eventType}` }, traceHeaders);
@@ -434,6 +446,36 @@ async function handlePlatformSend(req: Request, res: Response) {
 
   await handleSend(req, res);
 }
+
+/**
+ * Renders an event's template exactly as a send would, and does nothing else:
+ * no recipient is resolved, no row is written, nothing is sent. Metadata the
+ * send would fill in itself (the acting user's email on a staff alert) is
+ * whatever the caller supplies here.
+ */
+router.post("/send/preview", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  const parsed = PreviewSendRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+
+  let templateFn: Awaited<ReturnType<typeof getTemplate>>;
+  try {
+    templateFn = await getTemplate(parsed.data.eventType);
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+    return;
+  }
+
+  const rendered = signRendered(parsed.data.eventType, templateFn(parsed.data.metadata));
+  res.json({
+    subject: rendered.subject,
+    htmlBody: rendered.htmlBody,
+    textBody: rendered.textBody,
+    from: rendered.from ?? null,
+  });
+});
 
 // Authenticated route — requires an acting user (x-org-id, x-user-id, x-run-id)
 router.post("/send", requireApiKey, requireIdentityHeaders, handleSend);

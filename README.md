@@ -55,6 +55,22 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | 400    | Missing required headers (`x-org-id`, `x-user-id`, `x-run-id`) or missing `eventType` |
 | 404    | No template found for the given `eventType` |
 
+### `POST /send/preview`
+
+Renders an event's registered template exactly as `POST /send` would put it on the wire, and does nothing else: no recipient is resolved, nothing is recorded or sent. Headers: `X-API-Key` + `x-org-id`.
+
+**Request body:** `{ "eventType": "welcome", "metadata": { … } }` · **Response:** `{ "subject", "htmlBody", "textBody", "from" }` · **404** when no template is registered for the event.
+
+### The why under every distribute.you email
+
+Every customer-facing email this service sends is signed with distribute.you's why, **"Revenue made easy."** (owner wording, frozen 2026-10-03), as a quiet centred last line in the HTML (just before `</body>`, or at the end of a fragment) and as the last line of the text part. It is added at render (`src/lib/why.ts`), so no template owner edits their template. It is **not** added to:
+
+- staff-routed alerts (they go to us, not a customer);
+- a template whose own `from` is outside distribute.you (the legacy GrowthAgency.dev templates): another brand's mail carries nothing of ours;
+- a part that already contains the sentence (never doubled).
+
+Mailing-list updates (markdown and authored HTML) carry it too, followed by a `Get started: distribute.you` link to https://distribute.you. Subjects are never touched. Both previews show it.
+
 ### `POST /platform-send`
 
 Same body, dedup, template resolution, run tracking and response shape as `POST /send`, for callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.
@@ -293,7 +309,7 @@ An update carries exactly one body: `body` as markdown, which this service rende
 
 `body` is markdown — headings, bold, links, tables, and `![alt](url)` inline images. It is rendered to HTML for delivery, and the markdown itself is sent as the plain-text part. Do not add an unsubscribe link: email-gateway appends a discreet one to every transactional HTML body, and Postmark resolves it against the broadcast stream.
 
-`htmlBody` is a complete HTML document staff authored, sent to every recipient **byte-for-byte as supplied**: nothing is re-rendered, no styles are inlined for you, and it is not wrapped in the markdown template's shell. It exists for a designed newsletter — table layout, inline styles on every element, hosted PNG or JPEG images, a 600px measure — which markdown cannot express. The same rules for authored markup apply as for the rendered kind (inline styles only, table geometry, no `<style>` block worth relying on), because the client does not care who wrote the markup.
+`htmlBody` is a complete HTML document staff authored, sent to every recipient **as supplied**: nothing is re-rendered, no styles are inlined for you, and it is not wrapped in the markdown template's shell. The one addition is the company's sign-off paragraph (see "The why under every distribute.you email"), inserted before `</body>` without rewriting any of the authored markup. It exists for a designed newsletter — table layout, inline styles on every element, hosted PNG or JPEG images, a 600px measure — which markdown cannot express. The same rules for authored markup apply as for the rendered kind (inline styles only, table geometry, no `<style>` block worth relying on), because the client does not care who wrote the markup.
 
 Everything else is identical for both kinds: email-gateway appends the unsubscribe footer, suppressed members are skipped against Postmark at send time, one message goes per recipient, `from` selects the sender, and the update is recorded.
 
@@ -334,7 +350,7 @@ Renders a draft the way a recipient will receive it and does nothing else: no me
 
 **Response:** `{ "htmlBody": …, "textBody": …, "bodyKind": "markdown" | "html", "unrenderableImages": [] }`
 
-The rendering is the same code path a send takes, so approving a preview is approving what lands in the inbox. An authored `htmlBody` comes back unchanged, which is also what a send does with it. Unrenderable images are **reported** here rather than refused: a browser renders SVG happily, which is exactly the trap, so the body still renders and the offending URLs come back beside it.
+The rendering is the same code path a send takes, so approving a preview is approving what lands in the inbox. An authored `htmlBody` comes back as authored plus the sign-off, which is also what a send does with it. Unrenderable images are **reported** here rather than refused: a browser renders SVG happily, which is exactly the trap, so the body still renders and the offending URLs come back beside it.
 
 #### `GET /mailing-lists/{slug}/updates`
 
@@ -581,6 +597,7 @@ src/
     founder.ts          # The founder's address: reply-to on every send, blind copy on customer-facing ones
     mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard; plain-text derivation for authored HTML
     mailing-list-sender.ts # The address an update leaves from when the caller states none
+    why.ts              # "Revenue made easy." sign-off: who gets it, where it goes, never twice
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive

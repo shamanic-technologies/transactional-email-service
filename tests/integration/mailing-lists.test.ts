@@ -24,6 +24,7 @@ import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
 import { fetchSuppressed } from "../../src/lib/suppression.js";
+import { signWithWhy } from "../../src/lib/why.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
 const AUTH = { "x-api-key": API_KEY, "x-org-id": "org_test", "x-user-id": "user_staff" };
@@ -233,14 +234,16 @@ describe("an update authored as HTML", () => {
 
     expect(sent.status).toBe(200);
     expect(sent.body.recipientCount).toBe(2);
-    expect(vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody)).toEqual([AUTHORED, AUTHORED]);
+    // As authored, signed with the company's why after it.
+    const signedHtml = signWithWhy({ htmlBody: AUTHORED, textBody: "" }, { withLink: true }).htmlBody;
+    expect(vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody)).toEqual([signedHtml, signedHtml]);
     expect((vi.mocked(sendEmail).mock.calls[0][0] as any).textBody).toContain("https://distribute.you/bench");
 
     const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
     expect(history.status).toBe(200);
     expect(history.body.updates[0].bodyKind).toBe("html");
     expect(history.body.updates[0].body).toBeNull();
-    expect(history.body.updates[0].htmlBody).toBe(AUTHORED);
+    expect(history.body.updates[0].htmlBody).toBe(signedHtml);
     expect(history.body.updates[0].from).toBe("news@news.distribute.you");
   });
 
