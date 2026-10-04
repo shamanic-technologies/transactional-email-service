@@ -10,6 +10,7 @@ import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
 import { isDistributeSender, signWithWhy } from "../lib/why.js";
+import { isFullHtmlDocument, wrapInBrandLayout } from "../lib/brand-layout.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
 import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
 
@@ -98,14 +99,23 @@ function buildBccList(eventType: string, callerBcc: string[] | undefined): strin
   return bcc;
 }
 
-// The rendered message a send would put on the wire, the company's why signed
-// under it where the message is distribute.you's own word to a customer: not on
-// a staff-routed alert, and not under a template that names a sender outside
+// The rendered message a send would put on the wire, dressed as distribute.you
+// where the message is distribute.you's own word to a customer: not on a
+// staff-routed alert, and not under a template that names a sender outside
 // distribute.you (the legacy GrowthAgency.dev templates). Shared by the send and
 // its preview so the preview cannot drift from what lands in the inbox.
+//
+// A customer template whose rendered body is a fragment, not a full HTML
+// document, is delivered inside the brand layout, which carries the why in its
+// footer. A full document keeps its own chrome and only gets the why signed in
+// if it lacks it. A template registered with layout "none" (one addressed to
+// the agency inbox rather than a customer) is never wrapped.
 type RenderedTemplate = ReturnType<Awaited<ReturnType<typeof getTemplate>>>;
 function signRendered(eventType: string, template: RenderedTemplate): RenderedTemplate {
   if (ADMIN_NOTIFICATION_EVENTS.has(eventType) || !isDistributeSender(template.from)) return template;
+  if (template.layout === "brand" && !isFullHtmlDocument(template.htmlBody)) {
+    return { ...template, ...wrapInBrandLayout(template) };
+  }
   return { ...template, ...signWithWhy(template, { withLink: false }) };
 }
 

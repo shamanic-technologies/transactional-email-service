@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_DAILY_LIMIT } from "./lib/release-pacing.js";
+import { TEMPLATE_LAYOUTS } from "./lib/brand-layout.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -105,6 +106,10 @@ export const TemplateItemSchema = z
     htmlBody: z.string().min(1),
     textBody: z.string().optional().default(""),
     from: z.string().optional().openapi({ description: "Sender address for this template, e.g. \"Display Name <email@domain.com>\". If omitted, the email gateway default is used." }),
+    layout: z.enum(TEMPLATE_LAYOUTS).optional().openapi({
+      description:
+        "\"brand\" (the default for a new template): a customer email whose rendered htmlBody is not a full HTML document (no <!DOCTYPE html> / <html>) is delivered inside the distribute.you layout (wordmark, white card, footer) and its textBody ends with the distribute.you sign-off; register only the card's content. \"none\": delivered exactly as registered, for a template addressed to staff rather than a customer. Omitted on an existing template: its current layout is kept. Staff-routed event types and templates sent from outside distribute.you are never wrapped, and a full HTML document is never wrapped.",
+    }),
   })
   .openapi("TemplateItem");
 

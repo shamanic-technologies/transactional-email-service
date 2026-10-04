@@ -32,6 +32,7 @@ const {
     htmlBody: "<p>Test</p>",
     textBody: "Test",
     fromAddress: null,
+    layout: "brand",
   }]);
 
   return { mockWhere, mockSet, mockUpdate, mockReturning, mockOnConflictDoNothing, mockValues, mockInsert, mockSelectLimit };
@@ -69,6 +70,7 @@ vi.mock("../../src/lib/trace-event.js", () => ({
 }));
 
 import request from "supertest";
+import { brandLayout } from "../../src/lib/brand-layout.js";
 import express from "express";
 import sendRoutes from "../../src/routes/send.js";
 import { createRun } from "../../src/lib/runs-client.js";
@@ -88,6 +90,7 @@ const DB_TEMPLATE_ROW = {
   htmlBody: "<p>Test</p>",
   textBody: "Test",
   fromAddress: null,
+  layout: "brand",
 };
 
 beforeEach(() => {
@@ -1635,20 +1638,114 @@ describe("the why under a distribute.you email", () => {
 
     await send("welcome");
 
-    expect(wire().textBody).toBe("Test\n\nRevenue made easy.");
+    expect(wire().textBody).toBe("Test\n\n--\ndistribute.you\nRevenue made easy.");
   });
 
   it("does not sign twice a template that already says it", async () => {
+    const doc = "<html><body><p>Hi</p><p>Revenue made easy.</p></body></html>";
     mockSelectLimit.mockResolvedValueOnce([{
       ...DB_TEMPLATE_ROW,
-      htmlBody: "<p>Hi</p><p>Revenue made easy.</p>",
+      htmlBody: doc,
       textBody: "Hi\n\nRevenue made easy.",
     }]);
 
     await send("welcome");
 
-    expect(wire().htmlBody).toBe("<p>Hi</p><p>Revenue made easy.</p>");
+    expect(wire().htmlBody).toBe(doc);
     expect(wire().textBody).toBe("Hi\n\nRevenue made easy.");
+  });
+});
+
+describe("the distribute.you layout around a customer email", () => {
+  const send = (eventType: string, extra: Record<string, unknown> = {}) =>
+    request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType, recipientEmail: "customer@example.com", ...extra });
+
+  const wire = () => JSON.parse(fetchSpy.mock.calls[0][1].body);
+
+  it("wraps a bare customer fragment in the layout, card content included as registered", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      ...DB_TEMPLATE_ROW,
+      htmlBody: "<p>Your card ending {{last4}} was declined.</p>",
+      textBody: "Your card ending {{last4}} was declined.",
+    }]);
+
+    await send("credit-card-unusable", { metadata: { last4: "4242" } });
+
+    const { htmlBody, textBody } = wire();
+    expect(htmlBody.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(htmlBody).toBe(brandLayout("<p>Your card ending 4242 was declined.</p>"));
+    expect(htmlBody).toContain("background-color:#fafaf8");
+    expect(htmlBody).toContain("max-width:560px");
+    expect(htmlBody).toContain("border:1px solid rgba(10,10,20,0.08);border-radius:12px;padding:36px 32px;");
+    expect(htmlBody).toContain(">distribute.you</span>");
+    expect(htmlBody).toContain("width:7px;height:7px;border-radius:50%;background:#3D80FF");
+    expect(htmlBody).toContain("Done-for-you cold outreach, sent from our domains on your behalf.");
+    expect(htmlBody).toContain('href="https://dashboard.distribute.you"');
+    expect(htmlBody).toContain('href="https://docs.distribute.you"');
+    // The footer carries the why once; nothing is signed in a second time.
+    expect(htmlBody.match(/Revenue made easy\./g)).toHaveLength(1);
+    expect(textBody).toBe("Your card ending 4242 was declined.\n\n--\ndistribute.you\nRevenue made easy.");
+  });
+
+  it("leaves a full HTML document's markup untouched", async () => {
+    const doc = "<!DOCTYPE html>\n<html><body><p>Hi</p><p>Revenue made easy.</p></body></html>";
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: doc, textBody: "Hi\n\n--\ndistribute.you\nRevenue made easy." }]);
+
+    await send("campaign_created");
+
+    expect(wire().htmlBody).toBe(doc);
+    expect(wire().textBody).toBe("Hi\n\n--\ndistribute.you\nRevenue made easy.");
+  });
+
+  it("does not wrap a {{html}} template whose caller supplies a full document", async () => {
+    const doc = "<!doctype html><html><body><p>Yes!</p></body></html>";
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: "{{html}}", textBody: "{{text}}" }]);
+
+    await send("positive-reply-celebration", { metadata: { html: doc, text: "Yes!" } });
+
+    expect(wire().htmlBody.startsWith(doc.replace("</body></html>", ""))).toBe(true);
+    expect(wire().htmlBody).not.toContain("Done-for-you cold outreach");
+  });
+
+  it("does not wrap a template registered with layout none", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: "<p>Escalated</p>", textBody: "Escalated", layout: "none" }]);
+
+    await send("reply-escalation");
+
+    expect(wire().htmlBody).not.toContain("<!DOCTYPE html>");
+    expect(wire().htmlBody.startsWith("<p>Escalated</p>")).toBe(true);
+  });
+
+  it("does not wrap a staff-routed event", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: "<p>{{email}} changed a budget</p>" }]);
+
+    await send("brand_daily_budget_changed", { recipientEmail: undefined, metadata: { email: "a@b.c" } });
+
+    expect(wire().htmlBody).toBe("<p>a@b.c changed a budget</p>");
+    expect(wire().textBody).toBe("Test");
+  });
+
+  it("does not wrap a template sent as another brand", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, fromAddress: "GrowthAgency.dev <hello@growthagency.dev>" }]);
+
+    await send("contact_welcome");
+
+    expect(wire().htmlBody).toBe("<p>Test</p>");
+  });
+
+  it("previews a bare template wrapped, exactly as it is sent", async () => {
+    const res = await request(app)
+      .post("/send/preview")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .send({ eventType: "credit-card-unusable" });
+
+    expect(res.body.htmlBody).toBe(brandLayout("<p>Test</p>"));
+    expect(res.body.textBody).toBe("Test\n\n--\ndistribute.you\nRevenue made easy.");
   });
 });
 
@@ -1664,7 +1761,7 @@ describe("POST /send/preview", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.subject).toBe("Hi Ada");
-    expect(res.body.textBody).toBe("Hello Ada\n\nRevenue made easy.");
+    expect(res.body.textBody).toBe("Hello Ada\n\n--\ndistribute.you\nRevenue made easy.");
     expect(res.body.htmlBody).toContain("Revenue made easy.");
     expect(res.body.from).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
