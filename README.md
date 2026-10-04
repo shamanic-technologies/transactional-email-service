@@ -179,6 +179,16 @@ Deploy (upsert) email templates. Idempotent: creates new templates or updates ex
 | `templates[].htmlBody` | Yes | HTML body (supports `{{var}}` interpolation) |
 | `templates[].textBody` | No | Plain text body (supports `{{var}}` interpolation) |
 | `templates[].from` | No | Sender address, e.g. `"Display Name <email@domain.com>"`. If omitted, the email gateway default is used. |
+| `templates[].layout` | No | `"brand"` (default for a new template) or `"none"`. See below. Omitted on an existing template: its stored layout is kept. |
+
+**The distribute.you layout.** This service owns the brand chrome (`src/lib/brand-layout.ts`, byte-identical to the dashboard's `emailLayout()`: wordmark + blue dot, `#fafaf8` background, 560px column, white card, footer "Revenue made easy." + Dashboard · Docs). At send (and `/send/preview`) a template is wrapped in it when **all** hold:
+
+1. the event is not staff-routed (`ADMIN_NOTIFICATION_EVENTS`);
+2. its `from` is distribute.you's (or unset);
+3. its `layout` is `"brand"`;
+4. its htmlBody, **after** `{{var}}` interpolation, is not a full HTML document (no `<!DOCTYPE html>` / `<html>`).
+
+A wrapped email's text part ends `--\ndistribute.you\nRevenue made easy.` unless it already says the why. So a customer-facing template registers only its card content (`<p>…</p>`); a template addressed to staff (the agency inbox, not a customer) registers `layout: "none"`. A full document is never wrapped. Staff-alert templates this service seeds are `"none"`.
 
 **Response:**
 
@@ -598,6 +608,7 @@ src/
     mailing-list-body.ts # Markdown -> inline-styled HTML for updates; SVG-image guard; plain-text derivation for authored HTML
     mailing-list-sender.ts # The address an update leaves from when the caller states none
     why.ts              # "Revenue made easy." sign-off: who gets it, where it goes, never twice
+    brand-layout.ts     # distribute.you email chrome wrapped around bare customer templates
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
