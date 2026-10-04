@@ -202,11 +202,63 @@ export const CAMPAIGN_FAILING_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * A campaign ran out of people and the automatic audience refill could not give
+ * it anybody new. Raised by campaign-service at the same moment the customer is
+ * emailed asking them to extend an audience, so a human can step in. Nothing
+ * here is sent to the customer.
+ */
+export const AUDIENCE_REFILL_FAILED_TEMPLATE: StaffTemplate = {
+  name: "audience_refill_failed",
+  subject: "Campaign {{campaignName}} is out of people and the refill did not help",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">A campaign is out of people</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">This campaign has contacted everyone it had. We tried to build new audiences for the brand automatically. It did not give us anyone new. The client was just emailed and asked to extend an audience. Please step in: build audiences by hand or talk to the client.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Brand</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{brandName}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Campaign</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{campaignName}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Why the refill did not help</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{refillOutcome}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Details</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{refillDetail}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Organisation</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{orgId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Brand id</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{brandId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Campaign id</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{campaignId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Where to look</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{whereToLook}}</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "A campaign is out of people.",
+    "",
+    "This campaign has contacted everyone it had. We tried to build new audiences for the brand automatically. It did not give us anyone new. The client was just emailed and asked to extend an audience. Please step in: build audiences by hand or talk to the client.",
+    "",
+    "Brand: {{brandName}}",
+    "Campaign: {{campaignName}}",
+    "Why the refill did not help: {{refillOutcome}}",
+    "Details: {{refillDetail}}",
+    "Organisation: {{orgId}}",
+    "Brand id: {{brandId}}",
+    "Campaign id: {{campaignId}}",
+    "Where to look: {{whereToLook}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   CAMPAIGN_FAILING_TEMPLATE,
+  AUDIENCE_REFILL_FAILED_TEMPLATE,
 ];
 
 /**

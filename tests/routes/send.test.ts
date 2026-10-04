@@ -1511,6 +1511,101 @@ describe("campaign_failing — a campaign has failed every run for a sustained s
   });
 });
 
+describe("audience_refill_failed — out of people and the automatic refill gave nobody new", () => {
+  const STAFF_HEADERS = {
+    "x-org-id": "org_456",
+    "x-user-id": "user_789",
+    "x-run-id": "run_abc",
+    "x-campaign-id": "3922c8e1-3405-46af-8a56-1eef3f221b19",
+    "x-brand-id": "brand_1",
+    "x-feature-slug": "sales-cold-email-outreach",
+  };
+  const today = new Date().toISOString().split("T")[0];
+  const ALERT = {
+    eventType: "audience_refill_failed",
+    metadata: {
+      campaignId: "3922c8e1-3405-46af-8a56-1eef3f221b19",
+      campaignName: "Shockwave cold email",
+      brandId: "brand_1",
+      brandName: "Shockwave",
+      refillOutcome: "cooldown",
+      refillDetail: "last refill 2h ago",
+      whereToLook: "SELECT * FROM campaigns WHERE id = '3922c8e1'",
+    },
+  };
+
+  it("is accepted on the platform send route and reaches the staff list, never the campaign owner", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send(ALERT);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.to).toBe("kevin.lourd@gmail.com");
+    expect(body).not.toHaveProperty("bcc");
+  });
+
+  it("mails once per campaign per calendar day, on a key distinct from campaign_failing", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send(ALERT);
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(
+      `org_456:audience_refill_failed:3922c8e1-3405-46af-8a56-1eef3f221b19:${today}`,
+    );
+
+    mockReturning.mockResolvedValueOnce([]);
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send(ALERT);
+
+    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot be aimed at a customer address", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ ...ALERT, recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an alert that does not say why the refill failed", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ eventType: "audience_refill_failed", metadata: { ...ALERT.metadata, refillOutcome: " " } });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("refillOutcome");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts an empty brand name and refill detail", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, brandName: "", refillDetail: "" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+  });
+});
+
 describe("staff_daily_digest", () => {
   const ORG_ONLY = { "x-org-id": "org_456" };
 
