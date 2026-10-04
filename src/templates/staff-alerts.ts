@@ -151,10 +151,62 @@ export const MAILING_LIST_RELEASE_STALLED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * A campaign has failed every run for a sustained stretch. Raised by
+ * campaign-service once per failing episode. Nothing has been stopped: the
+ * campaign keeps retrying on a widening interval and goes back to its normal
+ * cadence on its first success. The customer is not told by this message.
+ */
+export const CAMPAIGN_FAILING_TEMPLATE: StaffTemplate = {
+  name: "campaign_failing",
+  subject: "Campaign {{campaignName}} keeps failing",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">A campaign keeps failing</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">Every run since the time below failed. The campaign is not stopped. It retries less often now and goes back to normal on its first success. The customer was not told. You will not get this email again for the same stretch.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Campaign</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{campaignName}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Failing since</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{failingSince}} ({{consecutiveFailures}} failed runs in a row)</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Next retry in</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{retryInterval}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Feature</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{featureSlug}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Organisation</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{orgId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Brand</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{brandId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Campaign id</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{campaignId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Where to look</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{whereToLook}}</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "A campaign keeps failing.",
+    "",
+    "Every run since the time below failed. The campaign is not stopped. It retries less often now and goes back to normal on its first success. The customer was not told. You will not get this email again for the same stretch.",
+    "",
+    "Campaign: {{campaignName}}",
+    "Failing since: {{failingSince}} ({{consecutiveFailures}} failed runs in a row)",
+    "Next retry in: {{retryInterval}}",
+    "Feature: {{featureSlug}}",
+    "Organisation: {{orgId}}",
+    "Brand: {{brandId}}",
+    "Campaign id: {{campaignId}}",
+    "Where to look: {{whereToLook}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
+  CAMPAIGN_FAILING_TEMPLATE,
 ];
 
 /**
