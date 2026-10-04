@@ -43,20 +43,23 @@ const ORG_DAILY_EVENTS = new Set(["provider_credits_exhausted"]);
 // failing episode, persisted on the campaign); this key is the bound that holds
 // even if that latch is ever lost, so one broken campaign mails staff at most once
 // a day. Keyed on the CAMPAIGN, not the org: two campaigns of one org failing are
-// two things to look at.
-const CAMPAIGN_DAILY_EVENTS = new Set(["campaign_failing"]);
+// two things to look at. audience_refill_failed (campaign-service: a campaign ran
+// out of people and the automatic audience refill gave it nobody new) shares the
+// bound; the event type is in the key, so it never collides with a real failure.
+const CAMPAIGN_DAILY_EVENTS = new Set(["campaign_failing", "audience_refill_failed"]);
 
 // Metadata a staff alert cannot be actionable without. Missing either one is a
 // 400, never an email with a blank line where the provider name should be.
 const REQUIRED_METADATA: Record<string, string[]> = {
   provider_credits_exhausted: ["provider", "reason"],
   campaign_failing: ["campaignId", "consecutiveFailures", "failingSince", "retryInterval"],
+  audience_refill_failed: ["campaignId", "brandId", "refillOutcome"],
 };
 
 // Staff-bound events that must never carry a caller-supplied recipient, blind
 // copy or visible copy on ANY route, /send included — a "provider is dry" alert
 // is internal and has no customer-facing form.
-const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing"]);
+const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed"]);
 
 // Events where recipient is hardcoded to admin.
 // brand_daily_budget_changed is emitted by billing-service on every real change to a
@@ -73,6 +76,9 @@ const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campa
 // consecutive operations cannot mail-bomb.
 // campaign_failing is raised by campaign-service when a campaign has failed every
 // run for a sustained stretch (CAMPAIGN_DAILY_EVENTS bounds it per campaign per day).
+// audience_refill_failed is raised by campaign-service when a campaign ran out of
+// people and the automatic refill produced nobody new, at the moment the customer
+// is asked to extend an audience (same per campaign per day bound).
 // unpaid_debt_uncollectable is emitted by billing-service when an org's balance has
 // gone negative and there is no card on file to collect it on. It belongs to no dedup
 // set above: billing-service decides when a debt is worth reporting, and two orgs
@@ -91,6 +97,7 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "provider_credits_exhausted",
   "unpaid_debt_uncollectable",
   "campaign_failing",
+  "audience_refill_failed",
 ]);
 
 
