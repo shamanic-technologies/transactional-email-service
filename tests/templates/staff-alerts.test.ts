@@ -10,6 +10,7 @@ const { mockOnConflictDoUpdate, mockValues, mockInsert } = vi.hoisted(() => {
 vi.mock("../../src/db/index.js", () => ({ db: { insert: mockInsert } }));
 
 import {
+  CAMPAIGN_FAILING_TEMPLATE,
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   STAFF_TEMPLATES,
@@ -108,5 +109,39 @@ describe("seedStaffTemplates", () => {
     expect(mockOnConflictDoUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ set: expect.objectContaining({ htmlBody: TPL.htmlBody }) }),
     );
+  });
+});
+
+describe("campaign_failing template", () => {
+  const T = CAMPAIGN_FAILING_TEMPLATE;
+
+  it("is registered and renders every fact, with no dash in the copy and nothing left blank", () => {
+    expect(T.name).toBe("campaign_failing");
+    expect(STAFF_TEMPLATES).toContain(T);
+    const vars = {
+      campaignName: "Shockwave cold email",
+      campaignId: "3922c8e1-3405-46af-8a56-1eef3f221b19",
+      consecutiveFailures: "8",
+      failingSince: "2026-10-04T00:35:40.000Z",
+      retryInterval: "30 min",
+      featureSlug: "sales-cold-email-outreach",
+      orgId: "org_456",
+      brandId: "brand_1",
+      whereToLook: "runs_service.run_events where campaign_id = '3922c8e1'",
+    };
+    const subject = interpolate(T.subject, vars);
+    const html = interpolate(T.htmlBody, vars);
+    const text = interpolate(T.textBody, vars);
+    expect(subject).toBe("Campaign Shockwave cold email keeps failing");
+    for (const value of Object.values(vars)) {
+      expect(html).toContain(value);
+      expect(text).toContain(value);
+    }
+    for (const body of [T.subject, T.htmlBody, T.textBody]) {
+      expect(body).not.toMatch(/[\u2014\u2013]/);
+    }
+    expect(html).not.toContain("{{");
+    expect(T.htmlBody).not.toContain("<style");
+    expect(T.htmlBody).toContain("table-layout:fixed");
   });
 });
