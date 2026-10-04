@@ -75,7 +75,7 @@ Mailing-list updates (markdown and authored HTML) carry it too, followed by a `G
 
 Same body, dedup, template resolution, run tracking and response shape as `POST /send`, for callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.
 
-Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails` and `ccEmails` are rejected for the same reason.
+Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails` and `ccEmails` are rejected for the same reason.
 
 With no acting user, the `email_events` row stores `user_id = NULL`, the runs-service run is created org-only, no `x-user-id` is forwarded downstream, and no actor email is added to metadata.
 
@@ -483,11 +483,14 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | Monthly per brand | `audience_fully_contacted` | `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}` |
 | Daily per org | `provider_credits_exhausted` | `{orgId}:{eventType}:{YYYY-MM-DD}` |
+| Daily per campaign | `campaign_failing` | `{orgId}:{eventType}:{metadata.campaignId}:{YYYY-MM-DD}` |
 | None (repeatable) | `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `unpaid_debt_uncollectable`, and any event not listed above | — |
 
 Monthly per-brand dedup caps a send to at most once per org per brand per calendar month. Brand and month derive entirely from the existing request (`x-brand-id` header, or `brandIds` body field). A send in a new calendar month, or for a different brand, goes through; a repeat within the same brand and month returns `{ sent: false, reason: "duplicate" }`. If no brand identity is present the event falls through to no-dedup (repeatable).
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `send.ts`, never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `send.ts`, never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
+
+`campaign_failing` is raised by campaign-service when a campaign has failed every run for a sustained stretch (once per failing episode, latched on the campaign). Staff only: no `recipientEmail`/`bccEmails`/`ccEmails` on either route. Required non-empty metadata: `campaignId`, `consecutiveFailures`, `failingSince`, `retryInterval`; optional `campaignName`, `featureSlug`, `brandId`, `whereToLook`. The campaign is never stopped by this; the customer is never told by it.
 
 `brand_daily_budget_changed` is emitted by billing-service on every real change to a brand's daily budget. It carries no dedup, so two changes on the same day produce two notifications.
 
@@ -631,7 +634,7 @@ src/
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
-    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted, mailing_list_release_halted, mailing_list_release_stalled)
+    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted, mailing_list_release_halted, mailing_list_release_stalled, campaign_failing)
 tests/
   migrations.test.ts    # Validates migration files use idempotent patterns
   ...

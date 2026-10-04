@@ -1426,6 +1426,91 @@ describe("provider_credits_exhausted — a paid provider has run out of credits"
   });
 });
 
+describe("campaign_failing — a campaign has failed every run for a sustained stretch", () => {
+  const ORG_ONLY = { "x-org-id": "org_456" };
+  const today = new Date().toISOString().split("T")[0];
+  const ALERT = {
+    eventType: "campaign_failing",
+    metadata: {
+      campaignId: "3922c8e1-3405-46af-8a56-1eef3f221b19",
+      campaignName: "Shockwave cold email",
+      consecutiveFailures: 8,
+      failingSince: "2026-10-04T00:35:40.000Z",
+      retryInterval: "30 min",
+    },
+  };
+
+  it("is raised with an org and an API key and reaches the staff list only", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).to).toBe("kevin.lourd@gmail.com");
+  });
+
+  it("mails once per campaign per calendar day", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(
+      `org_456:campaign_failing:3922c8e1-3405-46af-8a56-1eef3f221b19:${today}`,
+    );
+
+    mockReturning.mockResolvedValueOnce([]);
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERT);
+
+    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys on the campaign, so a second failing campaign of the same org still alerts", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, campaignId: "cb528e24-a4c5-4046-ad81-1f069bd62fa9" } });
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(
+      `org_456:campaign_failing:cb528e24-a4c5-4046-ad81-1f069bd62fa9:${today}`,
+    );
+  });
+
+  it("cannot be aimed at a customer address", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ ...ALERT, recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an alert that names no campaign", async () => {
+    const { campaignId: _omit, ...rest } = ALERT.metadata;
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "campaign_failing", metadata: rest });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("campaignId");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("staff_daily_digest", () => {
   const ORG_ONLY = { "x-org-id": "org_456" };
 

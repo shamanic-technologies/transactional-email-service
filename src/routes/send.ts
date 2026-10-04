@@ -37,16 +37,26 @@ const MONTHLY_BRAND_EVENTS = new Set(["audience_fully_contacted"]);
 // a provider still dry tomorrow is news again.
 const ORG_DAILY_EVENTS = new Set(["provider_credits_exhausted"]);
 
+// Event types deduped per campaign × calendar day, with no recipient in the key.
+// campaign_failing is raised by campaign-service when a campaign has failed every
+// run for a sustained stretch. campaign-service latches the alert itself (once per
+// failing episode, persisted on the campaign); this key is the bound that holds
+// even if that latch is ever lost, so one broken campaign mails staff at most once
+// a day. Keyed on the CAMPAIGN, not the org: two campaigns of one org failing are
+// two things to look at.
+const CAMPAIGN_DAILY_EVENTS = new Set(["campaign_failing"]);
+
 // Metadata a staff alert cannot be actionable without. Missing either one is a
 // 400, never an email with a blank line where the provider name should be.
 const REQUIRED_METADATA: Record<string, string[]> = {
   provider_credits_exhausted: ["provider", "reason"],
+  campaign_failing: ["campaignId", "consecutiveFailures", "failingSince", "retryInterval"],
 };
 
 // Staff-bound events that must never carry a caller-supplied recipient, blind
 // copy or visible copy on ANY route, /send included — a "provider is dry" alert
 // is internal and has no customer-facing form.
-const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted"]);
+const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing"]);
 
 // Events where recipient is hardcoded to admin.
 // brand_daily_budget_changed is emitted by billing-service on every real change to a
@@ -61,6 +71,8 @@ const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted"]);
 // third-party provider has run out of credits. It is deduped once per org per
 // calendar day (ORG_DAILY_EVENTS) so a service hitting the wall on thousands of
 // consecutive operations cannot mail-bomb.
+// campaign_failing is raised by campaign-service when a campaign has failed every
+// run for a sustained stretch (CAMPAIGN_DAILY_EVENTS bounds it per campaign per day).
 // unpaid_debt_uncollectable is emitted by billing-service when an org's balance has
 // gone negative and there is no card on file to collect it on. It belongs to no dedup
 // set above: billing-service decides when a debt is worth reporting, and two orgs
@@ -78,6 +90,7 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "staff_daily_digest",
   "provider_credits_exhausted",
   "unpaid_debt_uncollectable",
+  "campaign_failing",
 ]);
 
 
@@ -127,7 +140,13 @@ function getCurrentMonth(): string {
   return new Date().toISOString().slice(0, 7); // YYYY-MM
 }
 
-function buildDedupKey(orgId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string; brandIds?: string[] }): string | null {
+function buildDedupKey(orgId: string, eventType: string, req: { userId?: string; recipientEmail?: string; productId?: string; brandIds?: string[]; metadata?: Record<string, unknown> }): string | null {
+  // Campaign-daily dedup: one send per campaign per calendar day. The campaign is
+  // required metadata on these events, so it is always present here.
+  if (CAMPAIGN_DAILY_EVENTS.has(eventType)) {
+    return `${orgId}:${eventType}:${String(req.metadata?.campaignId)}:${getTodayDate()}`;
+  }
+
   // Org-daily dedup: one send per org per calendar day, whoever the recipient is.
   // The key holds no recipient and no user, so a machine caller with no acting
   // user deduplicates exactly like one that has one.
