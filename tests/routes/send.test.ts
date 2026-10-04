@@ -1681,8 +1681,13 @@ describe("the distribute.you layout around a customer email", () => {
     expect(htmlBody).toContain("background-color:#fafaf8");
     expect(htmlBody).toContain("max-width:560px");
     expect(htmlBody).toContain("border:1px solid rgba(10,10,20,0.08);border-radius:12px;padding:36px 32px;");
-    expect(htmlBody).toContain(">distribute.you</span>");
-    expect(htmlBody).toContain("width:7px;height:7px;border-radius:50%;background:#3D80FF");
+    // The header is the official logo image, never the old typed wordmark + blue dot.
+    expect(htmlBody).toContain(
+      '<div style="margin-bottom:28px;"><img src="https://distribute.you/brand/logo-full-on-light.png" width="170" height="32" alt="distribute.you" style="display:block;border:0;outline:none;text-decoration:none;height:32px;width:170px;" /></div>',
+    );
+    expect(htmlBody).not.toContain(">distribute.you</span>");
+    expect(htmlBody).not.toContain("border-radius:50%");
+    expect(htmlBody).not.toContain("#3D80FF");
     expect(htmlBody).toContain("Done-for-you cold outreach, sent from our domains on your behalf.");
     expect(htmlBody).toContain('href="https://dashboard.distribute.you"');
     expect(htmlBody).toContain('href="https://docs.distribute.you"');

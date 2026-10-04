@@ -181,7 +181,7 @@ Deploy (upsert) email templates. Idempotent: creates new templates or updates ex
 | `templates[].from` | No | Sender address, e.g. `"Display Name <email@domain.com>"`. If omitted, the email gateway default is used. |
 | `templates[].layout` | No | `"brand"` (default for a new template) or `"none"`. See below. Omitted on an existing template: its stored layout is kept. |
 
-**The distribute.you layout.** This service owns the brand chrome (`src/lib/brand-layout.ts`, byte-identical to the dashboard's `emailLayout()`: wordmark + blue dot, `#fafaf8` background, 560px column, white card, footer "Revenue made easy." + Dashboard · Docs). At send (and `/send/preview`) a template is wrapped in it when **all** hold:
+**The distribute.you layout.** This service owns the brand chrome (`src/lib/brand-layout.ts`, byte-identical to the dashboard's `emailLayout()`: official logo image `https://distribute.you/brand/logo-full-on-light.png` (170×32, alt "distribute.you"), `#fafaf8` background, 560px column, white card, footer "Revenue made easy." + Dashboard · Docs). At send (and `/send/preview`) a template is wrapped in it when **all** hold:
 
 1. the event is not staff-routed (`ADMIN_NOTIFICATION_EVENTS`);
 2. its `from` is distribute.you's (or unset);
