@@ -172,6 +172,7 @@ export async function seedStaffTemplates(): Promise<void> {
         subject: tpl.subject,
         htmlBody: tpl.htmlBody,
         textBody: tpl.textBody,
+        layout: "none",
       })
       .onConflictDoUpdate({
         target: [emailTemplates.name],
@@ -179,6 +180,7 @@ export async function seedStaffTemplates(): Promise<void> {
           subject: tpl.subject,
           htmlBody: tpl.htmlBody,
           textBody: tpl.textBody,
+          layout: "none",
           updatedAt: new Date(),
         },
       });

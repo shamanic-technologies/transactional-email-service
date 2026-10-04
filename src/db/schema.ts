@@ -41,6 +41,10 @@ export const emailTemplates = pgTable(
     htmlBody: text("html_body").notNull(),
     textBody: text("text_body").notNull().default(""),
     fromAddress: text("from_address"),
+    // "brand": a body that is not a full HTML document is delivered inside the
+    // distribute.you layout (src/lib/brand-layout.ts). "none": delivered as
+    // registered — for templates addressed to staff, not to a customer.
+    layout: text("layout").notNull().default("brand"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

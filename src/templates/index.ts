@@ -1,12 +1,14 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
+import type { TemplateLayout } from "../lib/brand-layout.js";
 
 export interface TemplateResult {
   subject: string;
   htmlBody: string;
   textBody: string;
   from?: string | null;
+  layout?: TemplateLayout;
 }
 
 type TemplateFn = (metadata?: Record<string, unknown>) => TemplateResult;
@@ -39,5 +41,6 @@ export async function getTemplate(eventType: string): Promise<TemplateFn> {
     htmlBody: interpolate(row.htmlBody, metadata),
     textBody: interpolate(row.textBody, metadata),
     from: row.fromAddress,
+    layout: row.layout as TemplateLayout,
   });
 }

@@ -26,14 +26,18 @@ async function deployTemplates(req: Request, res: Response) {
           htmlBody: tpl.htmlBody,
           textBody: tpl.textBody,
           fromAddress: tpl.from ?? null,
+          ...(tpl.layout ? { layout: tpl.layout } : {}),
         })
         .onConflictDoUpdate({
           target: [emailTemplates.name],
+          // A layout the caller does not name is left as it is: a template set
+          // to "none" stays unwrapped through a redeploy that predates the field.
           set: {
             subject: tpl.subject,
             htmlBody: tpl.htmlBody,
             textBody: tpl.textBody,
             fromAddress: tpl.from ?? null,
+            ...(tpl.layout ? { layout: tpl.layout } : {}),
             updatedAt: new Date(),
           },
         })

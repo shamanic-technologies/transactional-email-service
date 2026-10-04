@@ -39,6 +39,31 @@ beforeEach(() => {
 });
 
 describe("PUT /templates", () => {
+  const put = (tpl: Record<string, unknown>) =>
+    request(app)
+      .put("/templates")
+      .set("X-API-Key", "test-service-key")
+      .set(IDENTITY_HEADERS)
+      .send({ templates: [{ name: "reply-escalation", subject: "s", htmlBody: "<p>x</p>", ...tpl }] });
+
+  it("stores a declared layout on create and on update", async () => {
+    const res = await put({ layout: "none" });
+    expect(res.status).toBe(200);
+    expect(mockValues.mock.calls[0][0].layout).toBe("none");
+    expect(mockOnConflictDoUpdate.mock.calls[0][0].set.layout).toBe("none");
+  });
+
+  it("keeps the stored layout when the caller names none", async () => {
+    await put({});
+    expect(mockValues.mock.calls[0][0]).not.toHaveProperty("layout");
+    expect(mockOnConflictDoUpdate.mock.calls[0][0].set).not.toHaveProperty("layout");
+  });
+
+  it("rejects an unknown layout", async () => {
+    const res = await put({ layout: "fancy" });
+    expect(res.status).toBe(400);
+  });
+
   it("creates new templates via upsert", async () => {
     const res = await request(app)
       .put("/templates")
