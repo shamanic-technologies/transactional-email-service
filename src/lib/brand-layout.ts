@@ -16,13 +16,14 @@ import { WHY } from "./why.js";
 
 const DASHBOARD_URL = "https://dashboard.distribute.you";
 const DOCS_URL = "https://docs.distribute.you";
+/** The official full logo on a light background (PNG: Gmail and Outlook do not render SVG). */
+const LOGO_URL = "https://distribute.you/brand/logo-full-on-light.png";
 
 const EMAIL_BG = "#fafaf8";
 const EMAIL_SURFACE = "#ffffff";
 const EMAIL_TEXT = "#0a0a14";
 const EMAIL_MUTED = "#8b8e98";
 const EMAIL_BORDER = "rgba(10,10,20,0.08)";
-const EMAIL_DOT = "#3D80FF";
 const EMAIL_FONT =
   "'Space Grotesk','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
@@ -48,9 +49,7 @@ export function brandLayout(content: string): string {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet"></head>
 <body style="margin:0;padding:0;background-color:${EMAIL_BG};font-family:${EMAIL_FONT};-webkit-font-smoothing:antialiased;">
   <div style="max-width:560px;margin:0 auto;padding:40px 24px;">
-    <div style="margin-bottom:28px;">
-      <span style="font-size:26px;font-weight:700;letter-spacing:-0.03em;color:${EMAIL_TEXT};">distribute.you</span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${EMAIL_DOT};margin-left:3px;"></span>
-    </div>
+    <div style="margin-bottom:28px;"><img src="${LOGO_URL}" width="170" height="32" alt="distribute.you" style="display:block;border:0;outline:none;text-decoration:none;height:32px;width:170px;" /></div>
     <div style="background:${EMAIL_SURFACE};border:1px solid ${EMAIL_BORDER};border-radius:12px;padding:36px 32px;">
       ${content}
     </div>
