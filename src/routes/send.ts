@@ -139,6 +139,12 @@ function signRendered(eventType: string, template: RenderedTemplate): RenderedTe
   return { ...template, ...signWithWhy(template, { withLink: false }) };
 }
 
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === "" ? null : trimmed;
+}
+
 function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 }
@@ -314,7 +320,18 @@ async function handleSend(req: Request, res: Response) {
     const dedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body, brandIds: effectiveBrandIds });
     const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
 
+    // A staff member is not alerted about an action they just took themselves
+    // (owner: "I am aware of what I am doing"). The actor is metadata.email,
+    // caller-supplied or enriched above. No actor (a machine caller) never matches.
+    const actorEmail = ADMIN_NOTIFICATION_EVENTS.has(body.eventType) ? normalizeEmail(metadata.email) : null;
+
     for (const email of recipientEmails) {
+      if (actorEmail && normalizeEmail(email) === actorEmail) {
+        console.log(`[send] skipped ${body.eventType} to ${email}: reason=self_action (the recipient is the staff member who performed the action)`);
+        results.push({ email, sent: false, reason: "self_action" });
+        continue;
+      }
+
       // Build per-recipient dedup key (append email for org-wide sends)
       const recipientDedupKey = dedupKey && recipientEmails.length > 1
         ? `${dedupKey}:${email}`
