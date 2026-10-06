@@ -12,7 +12,7 @@ import { PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
 import { isDistributeSender, signWithWhy } from "../lib/why.js";
 import { isFullHtmlDocument, wrapInBrandLayout } from "../lib/brand-layout.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
-import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
+import { ADMIN_EMAILS, isStaffRecipientActor } from "../lib/staff-recipients.js";
 
 const router = Router();
 
@@ -137,12 +137,6 @@ function signRendered(eventType: string, template: RenderedTemplate): RenderedTe
     return { ...template, ...wrapInBrandLayout(template) };
   }
   return { ...template, ...signWithWhy(template, { withLink: false }) };
-}
-
-function normalizeEmail(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim().toLowerCase();
-  return trimmed === "" ? null : trimmed;
 }
 
 function getTodayDate(): string {
@@ -322,11 +316,13 @@ async function handleSend(req: Request, res: Response) {
 
     // A staff member is not alerted about an action they just took themselves
     // (owner: "I am aware of what I am doing"). The actor is metadata.email,
-    // caller-supplied or enriched above. No actor (a machine caller) never matches.
-    const actorEmail = ADMIN_NOTIFICATION_EVENTS.has(body.eventType) ? normalizeEmail(metadata.email) : null;
+    // caller-supplied or enriched above, matched against the recipient and every
+    // other address that person acts under (STAFF_IDENTITIES). No actor (a
+    // machine caller) never matches.
+    const isStaffEvent = ADMIN_NOTIFICATION_EVENTS.has(body.eventType);
 
     for (const email of recipientEmails) {
-      if (actorEmail && normalizeEmail(email) === actorEmail) {
+      if (isStaffEvent && isStaffRecipientActor(email, metadata.email)) {
         console.log(`[send] skipped ${body.eventType} to ${email}: reason=self_action (the recipient is the staff member who performed the action)`);
         results.push({ email, sent: false, reason: "self_action" });
         continue;

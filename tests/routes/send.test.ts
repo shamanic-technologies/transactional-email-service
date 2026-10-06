@@ -1063,6 +1063,22 @@ describe("staff-routed events — no alert to the staff member who did it", () =
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("skips the staff recipient when the same person acts under another address", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValueOnce("Kevin@Distribute.you");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "brand_daily_budget_changed", metadata: { brandName: "Acme", newBudget: "0" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "self_action" }]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
   it("still sends when the actor is a customer", async () => {
     const { resolveUserEmail } = await import("../../src/lib/client-service.js");
     vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
