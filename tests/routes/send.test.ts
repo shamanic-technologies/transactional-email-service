@@ -1033,6 +1033,72 @@ describe("POST /send — brand_daily_budget_changed staff notification", () => {
   });
 });
 
+describe("staff-routed events — no alert to the staff member who did it", () => {
+  it("skips the send when the enriched actor is the staff recipient", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValueOnce("kevin.lourd@gmail.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "brand_daily_budget_changed", metadata: { brandName: "Acme", newBudget: "0" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "self_action" }]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it("matches a caller-supplied actor email trimmed and case-insensitively", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set({ "x-org-id": "org_456" })
+      .send({ eventType: "payment_method_removed", metadata: { email: "  Kevin.Lourd@GMAIL.com " } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "self_action" }]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("still sends when the actor is a customer", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "brand_daily_budget_changed", metadata: { brandName: "Acme" } });
+
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).to).toBe("kevin.lourd@gmail.com");
+  });
+
+  it("still sends a staff event with no acting person", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set({ "x-org-id": "org_456" })
+      .send({ eventType: "payment_method_removed", metadata: { cardLast4: "4242" } });
+
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("never applies to a customer-facing event, even when staff is the recipient", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "welcome", recipientEmail: "kevin.lourd@gmail.com", metadata: { email: "kevin.lourd@gmail.com" } });
+
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+  });
+});
+
 describe("POST /platform-send — payment_method_removed (no acting user)", () => {
   const ORG_ONLY = { "x-org-id": "org_456" };
 
