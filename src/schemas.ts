@@ -17,7 +17,7 @@ export const SendRequestSchema = z
     eventType: z.string().openapi({
       description:
         "Event type determining which template to use and which dedup strategy applies. " +
-        "Once-only events (waitlist, welcome, signup_notification): sent at most once per recipient. " +
+        "Once-only events (waitlist, welcome, signup_notification, first_payment): sent at most once per recipient. " +
         "Daily events (user_active): sent at most once per recipient per day. " +
         "Product-scoped events (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. " +
         "Monthly per-brand events (audience_fully_contacted): sent at most once per org per brand per calendar month. " +
@@ -606,7 +606,7 @@ registry.registerPath({
     "One of userId (from x-user-id header) or recipientEmail is required.\n\n" +
     "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`\n\n" +
     "**Deduplication:** The dedup strategy depends on eventType:\n" +
-    "- **Once-only** (waitlist, welcome, signup_notification): sent at most once per recipient, ever. Dedup key: `{orgId}:{eventType}:{userId or recipientEmail}`.\n" +
+    "- **Once-only** (waitlist, welcome, signup_notification, first_payment): sent at most once per recipient, ever. Dedup key: `{orgId}:{eventType}:{userId or recipientEmail}`.\n" +
     "- **Daily** (user_active): sent at most once per recipient per day. Dedup key: `{orgId}:{eventType}:{identifier}:{YYYY-MM-DD}`.\n" +
     "- **Product-scoped** (webinar_welcome, j_minus_3, j_minus_2, j_minus_1, j_day): sent once per recipient per productId. Dedup key: `{orgId}:{eventType}:{recipientEmail}:{productId}`.\n" +
     "- **Monthly per-brand** (audience_fully_contacted): sent at most once per org per brand per calendar month. Brand + month derive from the existing request (x-brand-id header / brandIds body). Dedup key: `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}`.\n" +

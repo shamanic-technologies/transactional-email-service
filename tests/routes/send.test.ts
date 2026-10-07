@@ -931,6 +931,34 @@ describe("POST /send — existing dedup cadences unchanged (regression)", () => 
     expect(insertValues.dedupKey).toBe("org_456:welcome:user_123");
   });
 
+  it("once-only (first_payment) keys on org+eventType+userId like welcome, and a repeat send is deduped", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .set("x-brand-id", "brand_cold")
+      .send({ eventType: "first_payment" });
+
+    const insertValues = mockValues.mock.calls[0][0];
+    expect(insertValues.dedupKey).toBe("org_456:first_payment:user_123");
+    expect(mockOnConflictDoNothing).toHaveBeenCalled();
+  });
+
+  it("first_payment: a second send for the same org+user is a duplicate, not delivered", async () => {
+    // Simulate the unique-index conflict: onConflictDoNothing returns no rows
+    mockReturning.mockResolvedValueOnce([]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "first_payment" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "user@example.com", sent: false, reason: "duplicate" }]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("daily (user_active) keys on org+eventType+identifier+date, unaffected by brand", async () => {
     const today = new Date().toISOString().split("T")[0];
     await request(app)
