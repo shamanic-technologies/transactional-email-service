@@ -17,7 +17,9 @@ import { ADMIN_EMAILS, isStaffRecipientActor } from "../lib/staff-recipients.js"
 const router = Router();
 
 // Event types that are deduped (sent only once per key)
-const ONCE_ONLY_EVENTS = new Set(["waitlist", "welcome", "signup_notification"]);
+// first_payment: the dashboard fires it on a customer's first confirmed prepayment and may
+// fire it again (a second brand paid later, a retried "check my payment"); the customer gets it once.
+const ONCE_ONLY_EVENTS = new Set(["waitlist", "welcome", "signup_notification", "first_payment"]);
 
 // Event types deduped per day (one per user per day)
 const DAILY_DEDUP_EVENTS = new Set(["user_active"]);

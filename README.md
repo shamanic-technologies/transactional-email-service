@@ -478,7 +478,7 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 | Strategy | Events | Key format |
 | -------- | ------ | ---------- |
 | Once per email | `waitlist` | `{orgId}:waitlist:{email}` |
-| Once per user | `welcome`, `signup_notification` | `{orgId}:{eventType}:{userId}` |
+| Once per user | `welcome`, `signup_notification`, `first_payment` | `{orgId}:{eventType}:{userId}` |
 | Daily per user | `user_active` | `{orgId}:{eventType}:{userId}:{date}` |
 | Per email × product | `webinar_welcome`, `j_minus_3`, `j_minus_2`, `j_minus_1`, `j_day` | `{orgId}:{eventType}:{email}:{productId}` |
 | Monthly per brand | `audience_fully_contacted` | `{orgId}:{eventType}:{sortedBrandIds}:{YYYY-MM}` |
