@@ -180,6 +180,7 @@ Deploy (upsert) email templates. Idempotent: creates new templates or updates ex
 | `templates[].textBody` | No | Plain text body (supports `{{var}}` interpolation) |
 | `templates[].from` | No | Sender address, e.g. `"Display Name <email@domain.com>"`. If omitted, the email gateway default is used. |
 | `templates[].layout` | No | `"brand"` (default for a new template) or `"none"`. See below. Omitted on an existing template: its stored layout is kept. |
+| `templates[].stream` | No | `"broadcast"` (default for a new template) or `"transactional"`. See below. Omitted on an existing template: its stored stream is kept. |
 
 **The distribute.you layout.** This service owns the brand chrome (`src/lib/brand-layout.ts`, byte-identical to the dashboard's `emailLayout()`: official logo image `https://distribute.you/brand/logo-full-on-light.png` (170×32, alt "distribute.you"), `#fafaf8` background, 560px column, white card, footer "Revenue made easy." + Dashboard · Docs). At send (and `/send/preview`) a template is wrapped in it when **all** hold:
 
@@ -189,6 +190,8 @@ Deploy (upsert) email templates. Idempotent: creates new templates or updates ex
 4. its htmlBody, **after** `{{var}}` interpolation, is not a full HTML document (no `<!DOCTYPE html>` / `<html>`).
 
 A wrapped email's text part ends `--\ndistribute.you\nRevenue made easy.` unless it already says the why. So a customer-facing template registers only its card content (`<p>…</p>`); a template addressed to staff (the agency inbox, not a customer) registers `layout: "none"`. A full document is never wrapped. Staff-alert templates this service seeds are `"none"`.
+
+**Person-to-person delivery (`stream: "transactional"`).** For an email the recipient is meant to answer with Reply, like a normal email from a person (instantly-service's `positive-reply-answer-request`, sent with `replyToEmail` = the prospect). It is forwarded to email-gateway with `stream: "transactional"`: the Postmark transactional stream, so no List-Unsubscribe header and no Unsubscribe footer. It goes out exactly as registered: no brand layout and no "Revenue made easy." sign-off, whatever its `layout`, because the recipient's reply quotes the message and anything we add would travel into their own conversation. Reply-To is unchanged (`replyToEmail`, else the founder); the founder blind copy stays. A `"broadcast"` template puts no `stream` on the wire, byte for byte today's send. Never use it for anything a recipient can ask to stop receiving; mailing-list updates never go through templates and always keep their unsubscribe.
 
 **Response:**
 
@@ -614,6 +617,7 @@ src/
     mailing-list-sender.ts # The address an update leaves from when the caller states none
     why.ts              # "Revenue made easy." sign-off: who gets it, where it goes, never twice
     brand-layout.ts     # distribute.you email chrome wrapped around bare customer templates
+    delivery-stream.ts  # Template delivery: broadcast (default) or transactional (person-to-person, no unsubscribe)
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive

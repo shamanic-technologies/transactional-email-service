@@ -2069,6 +2069,49 @@ describe("the distribute.you layout around a customer email", () => {
     expect(wire().htmlBody.startsWith("<p>Escalated</p>")).toBe(true);
   });
 
+  it("sends a person-to-person template as registered, on the transactional stream, Reply-To kept", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{
+      ...DB_TEMPLATE_ROW,
+      name: "positive-reply-answer-request",
+      subject: "{{subject}}",
+      htmlBody: "{{html}}",
+      textBody: "{{text}}",
+      layout: "none",
+      stream: "transactional",
+    }]);
+
+    await send("positive-reply-answer-request", {
+      replyToEmail: "prospect@example.com",
+      metadata: { subject: "They answered", html: "<p>Hi, answer them.</p>", text: "Hi, answer them." },
+    });
+
+    const body = wire();
+    expect(body.stream).toBe("transactional");
+    expect(body.replyTo).toBe("prospect@example.com");
+    // No chrome and no why: the customer's reply quotes this message to their prospect.
+    expect(body.htmlBody).toBe("<p>Hi, answer them.</p>");
+    expect(body.textBody).toBe("Hi, answer them.");
+    expect(JSON.stringify(body)).not.toContain("Revenue made easy.");
+  });
+
+  it("keeps a person-to-person template plain even when its layout is brand", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: "<p>Hi</p>", textBody: "Hi", stream: "transactional" }]);
+
+    await send("positive-reply-answer-request");
+
+    expect(wire().htmlBody).toBe("<p>Hi</p>");
+    expect(wire().textBody).toBe("Hi");
+    expect(wire().stream).toBe("transactional");
+  });
+
+  it("puts no stream on the wire for a broadcast template (today's delivery, byte for byte)", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, layout: "none", stream: "broadcast" }]);
+
+    await send("reply-escalation");
+
+    expect(wire()).not.toHaveProperty("stream");
+  });
+
   it("does not wrap a staff-routed event", async () => {
     mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: "<p>{{email}} changed a budget</p>" }]);
 

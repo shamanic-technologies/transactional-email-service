@@ -59,6 +59,22 @@ describe("PUT /templates", () => {
     expect(mockOnConflictDoUpdate.mock.calls[0][0].set).not.toHaveProperty("layout");
   });
 
+  it("stores a declared stream on create and on update, and keeps it when omitted", async () => {
+    const res = await put({ stream: "transactional" });
+    expect(res.status).toBe(200);
+    expect(mockValues.mock.calls[0][0].stream).toBe("transactional");
+    expect(mockOnConflictDoUpdate.mock.calls[0][0].set.stream).toBe("transactional");
+
+    await put({});
+    expect(mockValues.mock.calls[1][0]).not.toHaveProperty("stream");
+    expect(mockOnConflictDoUpdate.mock.calls[1][0].set).not.toHaveProperty("stream");
+  });
+
+  it("rejects an unknown stream", async () => {
+    const res = await put({ stream: "outbound" });
+    expect(res.status).toBe(400);
+  });
+
   it("rejects an unknown layout", async () => {
     const res = await put({ layout: "fancy" });
     expect(res.status).toBe(400);

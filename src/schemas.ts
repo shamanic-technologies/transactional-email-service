@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_DAILY_LIMIT } from "./lib/release-pacing.js";
 import { TEMPLATE_LAYOUTS } from "./lib/brand-layout.js";
+import { DELIVERY_STREAMS } from "./lib/delivery-stream.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -113,6 +114,10 @@ export const TemplateItemSchema = z
     layout: z.enum(TEMPLATE_LAYOUTS).optional().openapi({
       description:
         "\"brand\" (the default for a new template): a customer email whose rendered htmlBody is not a full HTML document (no <!DOCTYPE html> / <html>) is delivered inside the distribute.you layout (official logo, white card, footer) and its textBody ends with the distribute.you sign-off; register only the card's content. \"none\": delivered exactly as registered, for a template addressed to staff rather than a customer. Omitted on an existing template: its current layout is kept. Staff-routed event types and templates sent from outside distribute.you are never wrapped, and a full HTML document is never wrapped.",
+    }),
+    stream: z.enum(DELIVERY_STREAMS).optional().openapi({
+      description:
+        "How an email from this template is delivered. \"transactional\": person-to-person mail the recipient is meant to answer with Reply, like a normal email from a person. It goes out on the Postmark transactional stream with no List-Unsubscribe header and no Unsubscribe footer, and it is sent exactly as registered: no distribute.you layout and no \"Revenue made easy.\" sign-off (the recipient's reply quotes the message, so anything we add travels into their conversation). Reply-To stays as the send sets it (replyToEmail, else the founder). Never use it for anything a recipient can ask to stop receiving. \"broadcast\" (the default for a new template): today's delivery, broadcast stream plus the Unsubscribe footer. Omitted on an existing template: its current stream is kept. Mailing-list updates never use templates and always keep their unsubscribe.",
     }),
   })
   .openapi("TemplateItem");
