@@ -1,5 +1,6 @@
 import type { WorkflowHeaders } from "./runs-client.js";
 import { FOUNDER_EMAIL } from "./founder.js";
+import type { DeliveryStream } from "./delivery-stream.js";
 
 const EMAIL_GATEWAY_SERVICE_URL = process.env.EMAIL_GATEWAY_SERVICE_URL || "https://email-gateway.distribute.you";
 const EMAIL_GATEWAY_SERVICE_API_KEY = process.env.EMAIL_GATEWAY_SERVICE_API_KEY;
@@ -22,6 +23,8 @@ interface SendEmailParams {
   cc?: string;
   /** Reply address. Omitted means replies are invited to the founder. */
   replyTo?: string;
+  /** Omitted = the gateway's default (broadcast), byte for byte today's send. */
+  stream?: DeliveryStream;
   workflowHeaders?: WorkflowHeaders;
 }
 
@@ -81,6 +84,9 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       ...(bcc && { bcc }),
       ...(cc && { cc }),
       replyTo,
+      // Only the non-default choice is put on the wire, so every other send's
+      // request body is unchanged.
+      ...(params.stream === "transactional" && { stream: params.stream }),
     }),
   });
 

@@ -132,9 +132,16 @@ function buildBccList(eventType: string, callerBcc: string[] | undefined): strin
 // footer. A full document keeps its own chrome and only gets the why signed in
 // if it lacks it. A template registered with layout "none" (one addressed to
 // the agency inbox rather than a customer) is never wrapped.
+//
+// A template delivered on the "transactional" stream is person-to-person mail
+// the recipient answers with Reply (instantly-service's answer-it-yourself email,
+// Reply-To = the prospect). It goes out exactly as registered: no layout and no
+// why. Its reply quotes the message, so a sign-off we add would travel into the
+// customer's own conversation with their prospect.
 type RenderedTemplate = ReturnType<Awaited<ReturnType<typeof getTemplate>>>;
 function signRendered(eventType: string, template: RenderedTemplate): RenderedTemplate {
   if (ADMIN_NOTIFICATION_EVENTS.has(eventType) || !isDistributeSender(template.from)) return template;
+  if (template.stream === "transactional") return template;
   if (template.layout === "brand" && !isFullHtmlDocument(template.htmlBody)) {
     return { ...template, ...wrapInBrandLayout(template) };
   }
@@ -428,6 +435,7 @@ async function handleSend(req: Request, res: Response) {
           cc: ccList.length > 0 ? ccList.join(",") : undefined,
           // Absent = undefined, so the gateway client keeps its founder default
           replyTo: body.replyToEmail,
+          stream: template.stream,
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 

@@ -45,6 +45,10 @@ export const emailTemplates = pgTable(
     // distribute.you layout (src/lib/brand-layout.ts). "none": delivered as
     // registered — for templates addressed to staff, not to a customer.
     layout: text("layout").notNull().default("brand"),
+    // "broadcast": today's delivery (Postmark broadcast stream + unsubscribe
+    // footer). "transactional": person-to-person mail the recipient answers
+    // with Reply — transactional stream, no unsubscribe, no chrome, no why.
+    stream: text("stream").notNull().default("broadcast"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
