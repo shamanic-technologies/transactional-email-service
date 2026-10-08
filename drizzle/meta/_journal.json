@@ -141,6 +141,13 @@
       "when": 1791095698260,
       "tag": "0019_template_layout",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791478663333,
+      "tag": "0020_template_stream",
+      "breakpoints": true
     }
   ]
 }

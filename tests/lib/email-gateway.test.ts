@@ -314,6 +314,25 @@ describe("sendEmail", () => {
     expect(JSON.parse(options.body).replyTo).toBe("support@example.com");
   });
 
+  it("forwards the transactional stream when asked, and nothing otherwise", async () => {
+    const base = {
+      to: "customer@example.com",
+      subject: "Test subject",
+      htmlBody: "<p>Test</p>",
+      textBody: "Test",
+      tag: "positive-reply-answer-request",
+      orgId: "org_123",
+      runId: "run_abc",
+    };
+    await sendEmail({ ...base, stream: "transactional" });
+    await sendEmail({ ...base, stream: "broadcast" });
+    await sendEmail(base);
+
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).stream).toBe("transactional");
+    expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).not.toHaveProperty("stream");
+    expect(JSON.parse(fetchSpy.mock.calls[2][1].body)).not.toHaveProperty("stream");
+  });
+
   it("adds no blind copy of its own", async () => {
     await sendEmail({
       to: "customer@example.com",

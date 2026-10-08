@@ -27,6 +27,7 @@ async function deployTemplates(req: Request, res: Response) {
           textBody: tpl.textBody,
           fromAddress: tpl.from ?? null,
           ...(tpl.layout ? { layout: tpl.layout } : {}),
+          ...(tpl.stream ? { stream: tpl.stream } : {}),
         })
         .onConflictDoUpdate({
           target: [emailTemplates.name],
@@ -38,6 +39,7 @@ async function deployTemplates(req: Request, res: Response) {
             textBody: tpl.textBody,
             fromAddress: tpl.from ?? null,
             ...(tpl.layout ? { layout: tpl.layout } : {}),
+            ...(tpl.stream ? { stream: tpl.stream } : {}),
             updatedAt: new Date(),
           },
         })
