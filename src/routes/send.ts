@@ -218,10 +218,10 @@ async function handleSend(req: Request, res: Response) {
     // Staff-only alerts carry no caller-chosen destination on any route
     if (
       STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType) &&
-      (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined)
+      (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined || body.replyToEmail !== undefined)
     ) {
       res.status(400).json({
-        error: `'${body.eventType}' does not accept recipientEmail, bccEmails or ccEmails: it is delivered to the internal staff recipient list only`,
+        error: `'${body.eventType}' does not accept recipientEmail, bccEmails, ccEmails or replyToEmail: it is delivered to the internal staff recipient list only`,
       });
       return;
     }
@@ -426,6 +426,8 @@ async function handleSend(req: Request, res: Response) {
           from: template.from,
           bcc: bccList.length > 0 ? bccList.join(",") : undefined,
           cc: ccList.length > 0 ? ccList.join(",") : undefined,
+          // Absent = undefined, so the gateway client keeps its founder default
+          replyTo: body.replyToEmail,
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 
@@ -487,10 +489,10 @@ async function handlePlatformSend(req: Request, res: Response) {
     return;
   }
 
-  const body = req.body as { recipientEmail?: unknown; bccEmails?: unknown; ccEmails?: unknown };
-  if (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined) {
+  const body = req.body as { recipientEmail?: unknown; bccEmails?: unknown; ccEmails?: unknown; replyToEmail?: unknown };
+  if (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined || body.replyToEmail !== undefined) {
     res.status(400).json({
-      error: "platform-send does not accept recipientEmail, bccEmails or ccEmails: staff-bound notifications are delivered to the internal staff recipient list only",
+      error: "platform-send does not accept recipientEmail, bccEmails, ccEmails or replyToEmail: staff-bound notifications are delivered to the internal staff recipient list only",
     });
     return;
   }

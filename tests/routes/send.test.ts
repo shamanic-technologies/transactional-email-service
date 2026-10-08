@@ -244,6 +244,46 @@ describe("POST /send", () => {
     expect(body.replyTo).toBe("kevin@distribute.you");
   });
 
+  it("forwards a caller's replyToEmail as the Reply-To instead of the founder", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+        replyToEmail: "prospect@acme.com",
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    // Hitting Reply addresses the third party the caller named
+    expect(body.to).toBe("customer@example.com");
+    expect(body.replyTo).toBe("prospect@acme.com");
+    // The blind copy is untouched by a named reply address
+    expect(body.bcc).toBe("kevin@distribute.you");
+    // Never rendered into stored metadata
+    expect(JSON.stringify(body)).not.toContain("replyToEmail");
+  });
+
+  it("refuses a malformed replyToEmail", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "campaign_created",
+        recipientEmail: "customer@example.com",
+        replyToEmail: "not-an-email",
+      });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps a caller's bccEmails and adds the founder to them", async () => {
     const res = await request(app)
       .post("/send")
@@ -1265,7 +1305,7 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects recipientEmail, bccEmails and ccEmails", async () => {
+  it("rejects recipientEmail, bccEmails, ccEmails and replyToEmail", async () => {
     const withRecipient = await request(app)
       .post("/platform-send")
       .set("X-API-Key", "test-service-key")
@@ -1284,9 +1324,16 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
       .set(ORG_ONLY)
       .send({ eventType: "payment_method_removed", ccEmails: ["customer@example.com"] });
 
+    const withReplyTo = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "payment_method_removed", replyToEmail: "customer@example.com" });
+
     expect(withRecipient.status).toBe(400);
     expect(withBcc.status).toBe(400);
     expect(withCc.status).toBe(400);
+    expect(withReplyTo.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
@@ -1473,9 +1520,16 @@ describe("provider_credits_exhausted — a paid provider has run out of credits"
         .set(headers)
         .send({ ...ALERT, ccEmails: ["customer@example.com"] });
 
+      const withReplyTo = await request(app)
+        .post(route)
+        .set("X-API-Key", "test-service-key")
+        .set(headers)
+        .send({ ...ALERT, replyToEmail: "customer@example.com" });
+
       expect(withRecipient.status).toBe(400);
       expect(withBcc.status).toBe(400);
       expect(withCc.status).toBe(400);
+      expect(withReplyTo.status).toBe(400);
     }
 
     expect(fetchSpy).not.toHaveBeenCalled();
