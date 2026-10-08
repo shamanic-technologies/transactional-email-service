@@ -41,4 +41,15 @@ describe("GET /openapi.json", () => {
     // Optional: a caller that names none is unchanged, so it can never be required
     expect(sendRequest.required ?? []).not.toContain("ccEmails");
   });
+
+  it("documents an optional caller-named reply address", async () => {
+    const res = await request(app).get("/openapi.json");
+    const sendRequest = res.body.components.schemas.SendRequest;
+
+    expect(sendRequest.properties.replyToEmail).toMatchObject({
+      type: "string",
+      format: "email",
+    });
+    expect(sendRequest.required ?? []).not.toContain("replyToEmail");
+  });
 });
