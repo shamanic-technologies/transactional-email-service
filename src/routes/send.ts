@@ -50,18 +50,35 @@ const ORG_DAILY_EVENTS = new Set(["provider_credits_exhausted"]);
 // bound; the event type is in the key, so it never collides with a real failure.
 const CAMPAIGN_DAILY_EVENTS = new Set(["campaign_failing", "audience_refill_failed"]);
 
+// Event types deduped per TRIGGER × calendar day, fleet-wide: no org, no
+// recipient in the key. trigger_silent is raised by campaign-service when a
+// reactive trigger (e.g. positive_reply_received) has produced no event for days
+// while live campaigns depend on it. The trigger list is the same for every
+// customer, so the org on the request (a campaign owner, there only so billing
+// can authorize the send) is NOT a meaningful key: two orgs behind the same
+// silent trigger are one broken pipeline step. campaign-service latches the
+// alert itself (once per trigger per 24h); this key is the backstop.
+const TRIGGER_DAILY_EVENTS = new Set(["trigger_silent"]);
+
+// Machine alerts with no acting person. The x-user-id on the request is a
+// campaign owner chosen so billing can authorize the send, not somebody who did
+// anything, so it is never resolved into an actor and never suppresses the alert
+// as the recipient's own action (the owner may well be staff).
+const NO_ACTOR_EVENTS = new Set(["trigger_silent"]);
+
 // Metadata a staff alert cannot be actionable without. Missing either one is a
 // 400, never an email with a blank line where the provider name should be.
 const REQUIRED_METADATA: Record<string, string[]> = {
   provider_credits_exhausted: ["provider", "reason"],
   campaign_failing: ["campaignId", "consecutiveFailures", "failingSince", "retryInterval"],
   audience_refill_failed: ["campaignId", "brandId", "refillOutcome"],
+  trigger_silent: ["triggerId", "triggerLabel", "silentSince", "silentDays", "liveCampaignCount"],
 };
 
 // Staff-bound events that must never carry a caller-supplied recipient, blind
 // copy or visible copy on ANY route, /send included — a "provider is dry" alert
 // is internal and has no customer-facing form.
-const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed"]);
+const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed", "trigger_silent"]);
 
 // Events where recipient is hardcoded to admin.
 // brand_daily_budget_changed is emitted by billing-service on every real change to a
@@ -81,6 +98,9 @@ const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campa
 // audience_refill_failed is raised by campaign-service when a campaign ran out of
 // people and the automatic refill produced nobody new, at the moment the customer
 // is asked to extend an audience (same per campaign per day bound).
+// trigger_silent is raised by campaign-service when a reactive trigger has gone
+// silent for days while live campaigns depend on it (TRIGGER_DAILY_EVENTS bounds
+// it per trigger per day, fleet-wide).
 // unpaid_debt_uncollectable is emitted by billing-service when an org's balance has
 // gone negative and there is no card on file to collect it on. It belongs to no dedup
 // set above: billing-service decides when a debt is worth reporting, and two orgs
@@ -100,6 +120,7 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "unpaid_debt_uncollectable",
   "campaign_failing",
   "audience_refill_failed",
+  "trigger_silent",
 ]);
 
 
@@ -161,6 +182,12 @@ function buildDedupKey(orgId: string, eventType: string, req: { userId?: string;
   // required metadata on these events, so it is always present here.
   if (CAMPAIGN_DAILY_EVENTS.has(eventType)) {
     return `${orgId}:${eventType}:${String(req.metadata?.campaignId)}:${getTodayDate()}`;
+  }
+
+  // Trigger-daily dedup: one send per trigger per calendar day, fleet-wide. The
+  // trigger is required metadata on these events, so it is always present here.
+  if (TRIGGER_DAILY_EVENTS.has(eventType)) {
+    return `${eventType}:${String(req.metadata?.triggerId).trim()}:${getTodayDate()}`;
   }
 
   // Org-daily dedup: one send per org per calendar day, whoever the recipient is.
@@ -281,7 +308,7 @@ async function handleSend(req: Request, res: Response) {
     // A machine caller (Stripe webhook, cron) has no acting user — the honest
     // metadata is then whatever the caller supplied, never a placeholder actor.
     const metadata = { ...body.metadata };
-    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && userId && runId && !metadata.email) {
+    if (ADMIN_NOTIFICATION_EVENTS.has(body.eventType) && !NO_ACTOR_EVENTS.has(body.eventType) && userId && runId && !metadata.email) {
       try {
         const userEmail = await resolveUserEmail(userId, { orgId, userId, runId, campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId });
         metadata.email = userEmail;
@@ -331,7 +358,7 @@ async function handleSend(req: Request, res: Response) {
     const isStaffEvent = ADMIN_NOTIFICATION_EVENTS.has(body.eventType);
 
     for (const email of recipientEmails) {
-      if (isStaffEvent && isStaffRecipientActor(email, metadata.email)) {
+      if (isStaffEvent && !NO_ACTOR_EVENTS.has(body.eventType) && isStaffRecipientActor(email, metadata.email)) {
         console.log(`[send] skipped ${body.eventType} to ${email}: reason=self_action (the recipient is the staff member who performed the action)`);
         results.push({ email, sent: false, reason: "self_action" });
         continue;

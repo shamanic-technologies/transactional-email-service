@@ -253,12 +253,57 @@ export const AUDIENCE_REFILL_FAILED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * A reactive trigger (e.g. "positive reply received") has produced no event for
+ * days while live campaigns depend on it. Raised by campaign-service, at most
+ * once per trigger per day. FLEET-WIDE: the trigger list is the same for every
+ * customer, so this names no organisation (the org on the request is only there
+ * so billing can authorize the send). A trigger that never fires is a broken
+ * pipeline step, not a quiet day.
+ */
+export const TRIGGER_SILENT_TEMPLATE: StaffTemplate = {
+  name: "trigger_silent",
+  subject: "Trigger {{triggerLabel}} has been silent for {{silentDays}} days",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">A trigger has gone silent</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">This trigger has not fired since the time below. Live campaigns wait on it, so they are doing nothing. A trigger that never fires is usually broken, not quiet. This is about every client, not one. You will get this at most once a day per trigger.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Trigger</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{triggerLabel}} ({{triggerId}})</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Silent since</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{silentSince}} ({{silentDays}} days)</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Live campaigns waiting on it</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{liveCampaignCount}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Should be fired by</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{firedBy}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Where to look</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{whereToLook}}</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "A trigger has gone silent.",
+    "",
+    "This trigger has not fired since the time below. Live campaigns wait on it, so they are doing nothing. A trigger that never fires is usually broken, not quiet. This is about every client, not one. You will get this at most once a day per trigger.",
+    "",
+    "Trigger: {{triggerLabel}} ({{triggerId}})",
+    "Silent since: {{silentSince}} ({{silentDays}} days)",
+    "Live campaigns waiting on it: {{liveCampaignCount}}",
+    "Should be fired by: {{firedBy}}",
+    "Where to look: {{whereToLook}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   CAMPAIGN_FAILING_TEMPLATE,
   AUDIENCE_REFILL_FAILED_TEMPLATE,
+  TRIGGER_SILENT_TEMPLATE,
 ];
 
 /**
