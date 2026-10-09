@@ -12,6 +12,7 @@ vi.mock("../../src/db/index.js", () => ({ db: { insert: mockInsert } }));
 import {
   CAMPAIGN_FAILING_TEMPLATE,
   AUDIENCE_REFILL_FAILED_TEMPLATE,
+  TRIGGER_SILENT_TEMPLATE,
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   STAFF_TEMPLATES,
@@ -172,6 +173,38 @@ describe("audience_refill_failed template", () => {
       expect(text).toContain(value);
     }
     expect(text).toContain("asked to extend an audience");
+    for (const body of [T.subject, T.htmlBody, T.textBody]) {
+      expect(body).not.toMatch(/[\u2014\u2013]/);
+    }
+    expect(html).not.toContain("{{");
+    expect(T.htmlBody).not.toContain("<style");
+    expect(T.htmlBody).toContain("table-layout:fixed");
+  });
+});
+
+describe("trigger_silent template", () => {
+  const T = TRIGGER_SILENT_TEMPLATE;
+
+  it("is registered and renders every fact, with no dash in the copy and nothing left blank", () => {
+    expect(T.name).toBe("trigger_silent");
+    expect(STAFF_TEMPLATES).toContain(T);
+    const vars = {
+      triggerId: "positive_reply_received",
+      triggerLabel: "Positive reply",
+      silentSince: "2026-10-06T04:12:00.000Z",
+      silentDays: "3.2",
+      liveCampaignCount: "4",
+      firedBy: "instantly-service",
+      whereToLook: "SELECT max(occurred_at) FROM trigger_events WHERE trigger_id = 'positive_reply_received'",
+    };
+    const subject = interpolate(T.subject, vars);
+    const html = interpolate(T.htmlBody, vars);
+    const text = interpolate(T.textBody, vars);
+    expect(subject).toBe("Trigger Positive reply has been silent for 3.2 days");
+    for (const value of Object.values(vars)) {
+      expect(html).toContain(value);
+      expect(text).toContain(value);
+    }
     for (const body of [T.subject, T.htmlBody, T.textBody]) {
       expect(body).not.toMatch(/[\u2014\u2013]/);
     }

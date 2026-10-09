@@ -2185,3 +2185,119 @@ describe("POST /send/preview", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("trigger_silent — a reactive trigger produced no event for days while live campaigns wait on it", () => {
+  const STAFF_HEADERS = {
+    "x-org-id": "org_456",
+    "x-user-id": "user_789",
+    "x-run-id": "run_abc",
+  };
+  const today = new Date().toISOString().split("T")[0];
+  const ALERT = {
+    eventType: "trigger_silent",
+    metadata: {
+      triggerId: "positive_reply_received",
+      triggerLabel: "Positive reply",
+      silentSince: "2026-10-06T04:12:00.000Z",
+      silentDays: "3.2",
+      liveCampaignCount: "4",
+      firedBy: "instantly-service",
+      whereToLook: "SELECT max(occurred_at) FROM trigger_events WHERE trigger_id = 'positive_reply_received'",
+    },
+  };
+
+  it("is accepted on the platform send route and reaches the staff list only", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send(ALERT);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.to).toBe("kevin.lourd@gmail.com");
+    expect(body).not.toHaveProperty("bcc");
+  });
+
+  it("is never suppressed as the recipient's own action: the user on the request is billing context, not an actor", async () => {
+    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, email: "kevin@distribute.you" } });
+
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(resolveUserEmail).not.toHaveBeenCalled();
+  });
+
+  it("mails once per trigger per calendar day, fleet-wide: the org is not in the key", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send(ALERT);
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`trigger_silent:positive_reply_received:${today}`);
+
+    mockReturning.mockResolvedValueOnce([]);
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set({ ...STAFF_HEADERS, "x-org-id": "org_other" })
+      .send(ALERT);
+
+    expect(mockValues.mock.calls[1][0].dedupKey).toBe(`trigger_silent:positive_reply_received:${today}`);
+    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys on the trigger, so a second silent trigger the same day still alerts", async () => {
+    await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, triggerId: "lead_requested", triggerLabel: "Lead requested" } });
+
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`trigger_silent:lead_requested:${today}`);
+  });
+
+  it("cannot be aimed at a customer address", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ ...ALERT, recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an alert that names no trigger, with a named 400", async () => {
+    const { triggerId: _omit, ...rest } = ALERT.metadata;
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ eventType: "trigger_silent", metadata: rest });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("triggerId");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts an alert without firedBy or whereToLook", async () => {
+    const { firedBy: _f, whereToLook: _w, ...rest } = ALERT.metadata;
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ eventType: "trigger_silent", metadata: rest });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+  });
+});
