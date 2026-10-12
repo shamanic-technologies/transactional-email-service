@@ -62,7 +62,7 @@ function post(body: unknown, headers: Record<string, string> = {}) {
 }
 
 function gatewayCalls() {
-  return fetchSpy.mock.calls.filter(([url]) => String(url).includes("email-gateway"));
+  return fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/platform/send"));
 }
 
 beforeEach(() => {
