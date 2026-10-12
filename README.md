@@ -10,7 +10,7 @@ All protected endpoints require these headers:
 - `x-user-id` — internal user UUID from client-service
 - `x-run-id` — caller's run ID
 
-**Platform endpoints** (`/platform-*`) are for machine callers with no end-user session. `PUT /platform-templates` requires `x-api-key` only. `POST /platform-send` requires `x-api-key` and `x-org-id`; `x-user-id` and `x-run-id` are honoured when present but never required, and are never substituted with a placeholder when absent.
+**Platform endpoints** (`/platform-*`) are for machine callers with no end-user session. `PUT /platform-templates` requires `x-api-key` only. `POST /platform-send` requires `x-api-key` and `x-org-id`; `x-user-id` and `x-run-id` are honoured when present but never required, and are never substituted with a placeholder when absent. `POST /platform-orgless-send` requires `x-api-key` only and refuses `x-org-id` / `x-user-id`.
 
 Optional workflow tracking headers (injected automatically by workflow-service):
 - `x-campaign-id` — campaign ID
@@ -122,6 +122,32 @@ A missing or blank `provider` or `reason` is a 400: a staff alert with blanks wh
 | 400    | Missing `x-org-id`, missing `eventType`, a non-staff-bound `eventType`, `recipientEmail`/`bccEmails`/`ccEmails` supplied, or a `provider_credits_exhausted` with no `provider` or no `reason` |
 | 401    | Missing or invalid `x-api-key` |
 | 404    | No template found for the given `eventType` |
+
+### `POST /platform-orgless-send`
+
+Sends an allowlisted template to a person who has **no account yet**, with no organisation and no user at any hop, **platform-paid** end to end. Today the only allowed event is `agent_signup_code` (client-service's one-time sign-up code for an AI agent opening an account against an email; client-service registers the template). The allowlist and each event's required metadata live in `src/lib/orgless-events.ts`.
+
+```bash
+curl -X POST "$TRANSACTIONAL_EMAIL_SERVICE_URL/platform-orgless-send" \
+  -H "x-api-key: $TRANSACTIONAL_EMAIL_SERVICE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"eventType":"agent_signup_code","recipientEmail":"agent@example.com","metadata":{"code":"482913","expiresInMinutes":15}}'
+# 200 {"sent":true,"eventId":"…","runId":"…"}
+```
+
+- The run is an org-less **platform run** (runs-service `/v1/platform-runs`), and email-gateway is called on its org-less `POST /platform/send` (no `x-org-id`/`x-user-id`, Postmark transactional stream, platform-paid), so no customer org is authorized, created or charged.
+- **Not deduplicated**: every call sends. The `email_events` row has `org_id` NULL.
+- No Cc, no Bcc (no founder blind copy: a one-time code reaches only its owner), no caller Reply-To. Strict body: any other field is a 400.
+
+| Status | `code` | Condition |
+| ------ | ------ | --------- |
+| 400 | `org_identity_not_accepted` | `x-org-id` or `x-user-id` sent |
+| 400 | `invalid_request` | body fails validation (unknown field, bad email) |
+| 400 | `event_not_orgless` | `eventType` not in the allowlist |
+| 400 | `missing_metadata` | a required metadata key is missing or blank |
+| 401 | | missing or invalid `x-api-key` |
+| 404 | `template_not_found` | allowlisted template not registered |
+| 502 | `run_failed` / `delivery_failed` | nothing was delivered |
 
 ### `GET /stats`
 
@@ -628,7 +654,8 @@ src/
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
-    runs-client.ts      # Runs service client (create/update runs)
+    runs-client.ts      # Runs service client (create/update runs, org-less platform runs)
+│   │   ├── orgless-events.ts   # Closed list of events sendable with no org (POST /platform-orgless-send)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
   middleware/
     auth.ts             # API key + identity header authentication (full identity, or org-only for machine callers)

@@ -95,3 +95,51 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     throw new Error(`Email sending failed (${response.status}): ${JSON.stringify(errorBody)}`);
   }
 }
+
+interface SendOrglessPlatformEmailParams {
+  to: string;
+  subject: string;
+  htmlBody: string;
+  textBody: string;
+  tag: string;
+  /** The org-less platform run this send is declared under (forwarded as its parent run). */
+  runId: string;
+  from?: string | null;
+}
+
+// A send with NO organisation and NO user, paid by the platform end to end
+// (POST /platform-orgless-send), through email-gateway's `POST /platform/send`.
+// No x-org-id / x-user-id goes on the wire: the gateway refuses them there, and
+// naming an org would let a downstream hop authorize or charge it. The gateway
+// always delivers this on the Postmark transactional stream (no unsubscribe
+// footer) and declares the spend on an org-less platform run. No Cc and no Bcc;
+// the reply address is the founder default like every send.
+export async function sendOrglessPlatformEmail(params: SendOrglessPlatformEmailParams): Promise<void> {
+  if (!EMAIL_GATEWAY_SERVICE_API_KEY) {
+    throw new Error("EMAIL_GATEWAY_SERVICE_API_KEY is not configured");
+  }
+
+  const response = await fetch(`${EMAIL_GATEWAY_SERVICE_URL}/platform/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": EMAIL_GATEWAY_SERVICE_API_KEY,
+      "x-run-id": params.runId,
+    },
+    body: JSON.stringify({
+      type: "transactional",
+      to: params.to,
+      subject: params.subject,
+      htmlBody: params.htmlBody,
+      textBody: params.textBody,
+      tag: params.tag,
+      ...(params.from && { from: params.from }),
+      replyTo: FOUNDER_EMAIL,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(`Email sending failed (${response.status}): ${JSON.stringify(errorBody)}`);
+  }
+}

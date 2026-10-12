@@ -4,11 +4,12 @@ import { requireApiKey, requireIdentityHeaders, requireOrgIdOnly, type PlatformI
 import { db } from "../db/index.js";
 import { emailEvents } from "../db/schema.js";
 import { getTemplate } from "../templates/index.js";
-import { sendEmail } from "../lib/email-gateway.js";
+import { sendEmail, sendOrglessPlatformEmail } from "../lib/email-gateway.js";
 import { resolveUserEmail } from "../lib/client-service.js";
-import { createRun, updateRun } from "../lib/runs-client.js";
+import { createRun, updateRun, createPlatformRun, updatePlatformRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
-import { PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
+import { OrglessSendRequestSchema, PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
+import { ORGLESS_PLATFORM_EVENTS, isOrglessPlatformEvent } from "../lib/orgless-events.js";
 import { isDistributeSender, signWithWhy } from "../lib/why.js";
 import { isFullHtmlDocument, wrapInBrandLayout } from "../lib/brand-layout.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
@@ -536,6 +537,96 @@ async function handlePlatformSend(req: Request, res: Response) {
 }
 
 /**
+ * Org-less platform send — for a backend caller that must mail a person BEFORE
+ * any organisation or user exists (client-service's AI-agent sign-up code).
+ * No org and no user at any hop, platform-paid end to end, never deduplicated,
+ * restricted to the closed list in lib/orgless-events.ts so this path cannot
+ * become a way to mail customers on the platform's dime.
+ */
+async function handleOrglessPlatformSend(req: Request, res: Response) {
+  if (req.headers["x-org-id"] !== undefined || req.headers["x-user-id"] !== undefined) {
+    res.status(400).json({
+      error: "platform-orgless-send accepts no x-org-id or x-user-id: it is for a person with no account yet. A send that has an organisation belongs on POST /send",
+      code: "org_identity_not_accepted",
+    });
+    return;
+  }
+
+  const parsed = OrglessSendRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", code: "invalid_request", details: parsed.error.flatten() });
+    return;
+  }
+  const { eventType, recipientEmail, metadata } = parsed.data;
+
+  if (!isOrglessPlatformEvent(eventType)) {
+    res.status(400).json({
+      error: `'${eventType}' cannot be sent without an organisation. Allowed: ${Object.keys(ORGLESS_PLATFORM_EVENTS).sort().join(", ")}`,
+      code: "event_not_orgless",
+    });
+    return;
+  }
+
+  const missing = ORGLESS_PLATFORM_EVENTS[eventType].filter((key) => {
+    const value = metadata[key];
+    return typeof value !== "string" ? value == null : value.trim() === "";
+  });
+  if (missing.length > 0) {
+    res.status(400).json({ error: `'${eventType}' requires non-empty metadata: ${missing.join(", ")}`, code: "missing_metadata" });
+    return;
+  }
+
+  let templateFn: Awaited<ReturnType<typeof getTemplate>>;
+  try {
+    templateFn = await getTemplate(eventType);
+  } catch (err: any) {
+    res.status(404).json({ error: err.message, code: "template_not_found" });
+    return;
+  }
+  const template = signRendered(eventType, templateFn(metadata));
+
+  let run: { id: string };
+  try {
+    run = await createPlatformRun({ serviceName: "transactional-email-service", taskName: `email-${eventType}` });
+  } catch (err: any) {
+    console.error(`[platform-orgless-send] run creation failed for ${eventType}:`, err.message);
+    res.status(502).json({ error: `Run creation failed: ${err.message}`, code: "run_failed" });
+    return;
+  }
+
+  let eventId: string | null = null;
+  try {
+    const [event] = await db
+      .insert(emailEvents)
+      .values({ eventType, recipientEmail, dedupKey: null, userId: null, orgId: null, status: "pending", metadata })
+      .returning();
+    eventId = event.id;
+
+    await sendOrglessPlatformEmail({
+      to: recipientEmail,
+      subject: template.subject,
+      htmlBody: template.htmlBody,
+      textBody: template.textBody,
+      tag: eventType,
+      runId: run.id,
+      from: template.from,
+    });
+  } catch (err: any) {
+    console.error(`[platform-orgless-send] failed to send ${eventType} to ${recipientEmail}:`, err.message);
+    if (eventId) {
+      await db.update(emailEvents).set({ status: "failed", errorMessage: err.message }).where(eq(emailEvents.id, eventId));
+    }
+    await updatePlatformRun(run.id, "failed", err.message);
+    res.status(502).json({ error: err.message, code: "delivery_failed" });
+    return;
+  }
+
+  await db.update(emailEvents).set({ status: "sent" }).where(eq(emailEvents.id, eventId));
+  await updatePlatformRun(run.id, "completed");
+  res.json({ sent: true, eventId, runId: run.id });
+}
+
+/**
  * Renders an event's template exactly as a send would, and does nothing else:
  * no recipient is resolved, no row is written, nothing is sent. Metadata the
  * send would fill in itself (the acting user's email on a staff alert) is
@@ -570,5 +661,8 @@ router.post("/send", requireApiKey, requireIdentityHeaders, handleSend);
 
 // Platform route — API key + organisation only, for callers with no end user
 router.post("/platform-send", requireApiKey, requireOrgIdOnly, handlePlatformSend);
+
+// Org-less platform route — API key only, no organisation, no user (allowlisted events)
+router.post("/platform-orgless-send", requireApiKey, (req, res, next) => handleOrglessPlatformSend(req, res).catch(next));
 
 export default router;

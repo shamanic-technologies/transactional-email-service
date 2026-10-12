@@ -148,6 +148,13 @@
       "when": 1791478663333,
       "tag": "0020_template_stream",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791789211198,
+      "tag": "0021_email_events_orgless",
+      "breakpoints": true
     }
   ]
 }
