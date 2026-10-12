@@ -25,6 +25,8 @@ interface SendEmailParams {
   replyTo?: string;
   /** Omitted = the gateway's default (broadcast), byte for byte today's send. */
   stream?: DeliveryStream;
+  /** `platform` = platform-paid (no org credit gate, no cost on the org). Omitted = no key on the wire, the org pays. */
+  payer?: "platform";
   workflowHeaders?: WorkflowHeaders;
 }
 
@@ -87,6 +89,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       // Only the non-default choice is put on the wire, so every other send's
       // request body is unchanged.
       ...(params.stream === "transactional" && { stream: params.stream }),
+      ...(params.payer === "platform" && { payer: params.payer }),
     }),
   });
 

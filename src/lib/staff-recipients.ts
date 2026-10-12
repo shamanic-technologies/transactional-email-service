@@ -36,3 +36,30 @@ export function isStaffRecipientActor(recipient: string, actor: unknown): boolea
   const own = [recipientEmail, ...(STAFF_IDENTITIES[recipientEmail] ?? []).map((a) => normalizeEmail(a))];
   return own.includes(actorEmail);
 }
+
+/**
+ * Every address a staff member reads: the staff recipient list plus each
+ * recipient's other addresses (the agency inbox other services mail,
+ * `kevin@distribute.you`, is one of them).
+ */
+export function isStaffAddress(address: unknown): boolean {
+  const email = normalizeEmail(address);
+  if (!email) return false;
+  return ADMIN_EMAILS.some((recipient) => isStaffRecipientActor(recipient, email));
+}
+
+/**
+ * Who pays for one send. A message whose every address (to, cc, bcc) is staff
+ * is the platform's own internal mail: it is platform-paid, so it skips the
+ * org's credit gate and costs that org nothing. A client out of money is the
+ * exact case where staff most need the alert about it (2026-10-13: three
+ * unanswered-question check-ins lost to a 402 on an org at -$96).
+ *
+ * Keyed on the ADDRESSES, never on the event type, so no caller can mail a
+ * customer at the platform's expense: one non-staff address anywhere on the
+ * message and the org pays, exactly as before.
+ */
+export function payerFor(addresses: string[]): "platform" | undefined {
+  if (addresses.length === 0) return undefined;
+  return addresses.every((address) => isStaffAddress(address)) ? "platform" : undefined;
+}
