@@ -13,7 +13,7 @@ import { ORGLESS_PLATFORM_EVENTS, isOrglessPlatformEvent } from "../lib/orgless-
 import { isDistributeSender, signWithWhy } from "../lib/why.js";
 import { isFullHtmlDocument, wrapInBrandLayout } from "../lib/brand-layout.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
-import { ADMIN_EMAILS, isStaffRecipientActor } from "../lib/staff-recipients.js";
+import { ADMIN_EMAILS, isStaffRecipientActor, payerFor } from "../lib/staff-recipients.js";
 
 const router = Router();
 
@@ -464,6 +464,10 @@ async function handleSend(req: Request, res: Response) {
           // Absent = undefined, so the gateway client keeps its founder default
           replyTo: body.replyToEmail,
           stream: template.stream,
+          // A message only staff read is platform-paid: it reaches staff even
+          // when the org it is about has no credit, and costs that org nothing.
+          // One customer address on it and the org pays as before.
+          payer: payerFor([email, ...bccList, ...ccList]),
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 

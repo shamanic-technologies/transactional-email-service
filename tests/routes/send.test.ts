@@ -2301,3 +2301,84 @@ describe("trigger_silent — a reactive trigger produced no event for days while
     expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
   });
 });
+
+describe("POST /send — a message only staff read is platform-paid", () => {
+  const bodyOf = (call: number) => JSON.parse(fetchSpy.mock.calls[call][1].body);
+
+  it("an unanswered-question-check-in to the agency inbox goes out platform-paid and is marked sent", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "unanswered-question-check-in",
+        recipientEmail: "kevin@distribute.you",
+        metadata: { subject: "Check in", html: "<p>x</p>", text: "x" },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toMatch(/\/orgs\/send$/);
+    expect(bodyOf(0).payer).toBe("platform");
+    expect(mockSet).toHaveBeenCalledWith({ status: "sent" });
+  });
+
+  it("an org with no credit still gets the staff mail out: the gateway would 402 only an org-paid send", async () => {
+    fetchSpy.mockImplementation(async (_url: string, init: { body: string }) => {
+      const sent = JSON.parse(init.body);
+      if (sent.payer === "platform") return { ok: true };
+      return { ok: false, status: 502, json: async () => ({ error: "postmark-service POST /orgs/send: 402 Insufficient credits" }) };
+    });
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "unanswered-question-check-in",
+        recipientEmail: "kevin@distribute.you",
+        metadata: { subject: "Check in", html: "<p>x</p>", text: "x" },
+      });
+
+    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+  });
+
+  it("a staff-routed alert is platform-paid too", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "user_active" });
+
+    expect(bodyOf(0).to).toBe("kevin.lourd@gmail.com");
+    expect(bodyOf(0).payer).toBe("platform");
+  });
+
+  it("a customer-facing send stays org-paid: no payer on the wire", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "welcome", recipientEmail: "customer@example.com" });
+
+    expect(bodyOf(0).to).toBe("customer@example.com");
+    expect(bodyOf(0)).not.toHaveProperty("payer");
+  });
+
+  it("a staff recipient with a customer in Cc or Bcc stays org-paid", async () => {
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "some-alert", recipientEmail: "kevin@distribute.you", ccEmails: ["customer@example.com"] });
+    await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "some-alert", recipientEmail: "kevin@distribute.you", bccEmails: ["customer@example.com"] });
+
+    expect(bodyOf(0)).not.toHaveProperty("payer");
+    expect(bodyOf(1)).not.toHaveProperty("payer");
+  });
+});
