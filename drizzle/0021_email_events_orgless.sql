@@ -1,0 +1,1 @@
+ALTER TABLE "email_events" ALTER COLUMN "org_id" DROP NOT NULL;

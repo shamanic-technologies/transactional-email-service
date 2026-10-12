@@ -2,6 +2,7 @@ import { z } from "zod";
 import { MAX_DAILY_LIMIT } from "./lib/release-pacing.js";
 import { TEMPLATE_LAYOUTS } from "./lib/brand-layout.js";
 import { DELIVERY_STREAMS } from "./lib/delivery-stream.js";
+import { ORGLESS_PLATFORM_EVENTS } from "./lib/orgless-events.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -304,6 +305,45 @@ export const PreviewUpdateRequestSchema = z
   })
   .superRefine(bodyKindRefinement)
   .openapi("PreviewUpdateRequest");
+
+// --- POST /platform-orgless-send ---
+
+const orglessEventList = Object.entries(ORGLESS_PLATFORM_EVENTS)
+  .map(([name, keys]) => `\`${name}\` (requires metadata ${keys.map((k) => `\`${k}\``).join(", ")})`)
+  .join("; ");
+
+export const OrglessSendRequestSchema = z
+  .object({
+    eventType: z.string().min(1).openapi({
+      description: `The template to send. Only an allowlisted event type is accepted: ${orglessEventList}. Any other name is refused with 400 \`code: "event_not_orgless"\`.`,
+      example: "agent_signup_code",
+    }),
+    recipientEmail: z.string().email().openapi({ description: "The address to mail. The person behind it has no account yet." }),
+    metadata: z.record(z.string(), z.unknown()).openapi({
+      description: "Template variables for {{variable}} interpolation. The event's required keys must be present and non-empty.",
+      example: { code: "482913", expiresInMinutes: 15 },
+    }),
+  })
+  .strict()
+  .openapi("OrglessSendRequest");
+
+export const OrglessSendResponseSchema = z
+  .object({
+    sent: z.literal(true),
+    eventId: z.string().openapi({ description: "This service's record of the send." }),
+    runId: z.string().openapi({ description: "The org-less platform run the send is declared under." }),
+  })
+  .openapi("OrglessSendResponse");
+
+export const OrglessSendErrorSchema = z
+  .object({
+    error: z.string(),
+    code: z
+      .enum(["invalid_request", "org_identity_not_accepted", "event_not_orgless", "missing_metadata", "template_not_found", "run_failed", "delivery_failed"])
+      .openapi({ description: "Machine code for the refusal or failure." }),
+    details: z.unknown().optional(),
+  })
+  .openapi("OrglessSendError");
 
 export const PreviewSendRequestSchema = z
   .object({
@@ -726,6 +766,31 @@ registry.registerPath({
       description: "Unauthorized - invalid or missing API key",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/platform-orgless-send",
+  summary: "Send an allowlisted template to a person who has no account yet, platform-paid",
+  description:
+    "For a backend caller that must mail somebody BEFORE any organisation or user exists: client-service's one-time sign-up code for an AI agent opening an account against an email. The send names no organisation and no user at any hop, and the platform pays for it: it is declared on an org-less platform run in runs-service and relayed to email-gateway `POST /platform/send` (org-less, platform-paid, Postmark transactional stream: no unsubscribe footer), so no customer org is authorized, created or charged.\n\n" +
+    "**Headers:** `X-API-Key` only. `x-org-id` and `x-user-id` are refused with 400 `org_identity_not_accepted`: this path is org-less by definition, and a send that has an org belongs on `POST /send`.\n\n" +
+    `**Accepted event types (closed list):** ${orglessEventList}. Any other name: 400 \`event_not_orgless\`. A missing or blank required metadata key: 400 \`missing_metadata\`. An allowlisted name whose template is not registered: 404 \`template_not_found\`. The template is the caller's own (\`PUT /platform-templates\`), delivered exactly as registered when its stream is \`transactional\`.\n\n` +
+    "**Not deduplicated:** every call sends; asking for a new code twice delivers twice.\n\n" +
+    "**No copy:** no Cc, no Bcc (the founder blind copy every other customer-facing send carries is NOT added: a one-time code reaches only the person it is for), and no caller-chosen Reply-To (the founder default applies). The body is strict: any other field is a 400.\n\n" +
+    "**Failure is loud:** 200 means the provider accepted the message. A run that could not be opened is 502 `run_failed`; a delivery the gateway refused or failed is 502 `delivery_failed`, with the upstream status in `error`. Nothing on this path ever returns 2xx without a send.",
+  tags: ["Email"],
+  security: [{ apiKey: [] }],
+  request: {
+    body: { required: true, content: { "application/json": { schema: OrglessSendRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Sent", content: { "application/json": { schema: OrglessSendResponseSchema } } },
+    400: { description: "invalid_request, org_identity_not_accepted, event_not_orgless or missing_metadata", content: { "application/json": { schema: OrglessSendErrorSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "template_not_found: the allowlisted template is not registered", content: { "application/json": { schema: OrglessSendErrorSchema } } },
+    502: { description: "run_failed or delivery_failed: nothing was delivered", content: { "application/json": { schema: OrglessSendErrorSchema } } },
   },
 });
 

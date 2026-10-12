@@ -111,3 +111,39 @@ export async function updateRun(
     workflowHeaders,
   });
 }
+
+// ─── Platform runs (org-less) ────────────────────────────────────────────────
+//
+// A send with no organisation at all (POST /platform-orgless-send: a sign-up
+// code mailed before any account exists) has no org to open a run under. It
+// opens a platform run instead: no x-org-id, no x-user-id, so nothing on it can
+// ever reach an org's usage total. runs-service requires x-service-name here.
+
+function platformHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-API-Key": RUNS_SERVICE_API_KEY,
+    "x-service-name": "transactional-email-service",
+  };
+}
+
+async function platformRunsRequest<T>(path: string, method: string, body: unknown): Promise<T> {
+  const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
+    method,
+    headers: platformHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`runs-service ${method} ${path} failed: ${response.status} - ${errorText}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+export async function createPlatformRun(params: { serviceName: string; taskName: string }): Promise<Run> {
+  return platformRunsRequest<Run>("/v1/platform-runs", "POST", params);
+}
+
+export async function updatePlatformRun(runId: string, status: "completed" | "failed", error?: string): Promise<Run> {
+  return platformRunsRequest<Run>(`/v1/platform-runs/${runId}`, "PATCH", { status, ...(error && { error }) });
+}

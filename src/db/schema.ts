@@ -10,7 +10,10 @@ export const emailEvents = pgTable(
     // Null when the send had no acting user (machine caller — e.g. a Stripe
     // webhook observed outside our product). Never a placeholder id.
     userId: text("user_id"),
-    orgId: text("org_id").notNull(),
+    // Null only for an org-less platform send (POST /platform-orgless-send): a
+    // sign-up code mailed to a person before any organisation exists. Never a
+    // placeholder id.
+    orgId: text("org_id"),
     status: text("status").notNull().default("pending"),
     errorMessage: text("error_message"),
     metadata: jsonb("metadata"),
