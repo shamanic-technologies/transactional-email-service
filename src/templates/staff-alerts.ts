@@ -297,6 +297,63 @@ export const TRIGGER_SILENT_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * One trigger occurrence carrying a person or an item (a form filled, a reply)
+ * has waited undelivered because a campaign behind it cannot run. Raised by
+ * campaign-service at most once per occurrence: a prospect is waiting for an
+ * automatic answer that is not coming. Nothing here is sent to the customer.
+ */
+export const TRIGGER_OCCURRENCE_STUCK_TEMPLATE: StaffTemplate = {
+  name: "trigger_occurrence_stuck",
+  subject: "A prospect has been waiting since {{waitingSince}} ({{attempts}} attempts)",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">A prospect is waiting for an answer</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">A prospect did something that should get an automatic answer. The campaign that answers cannot run, so nothing went out yet. We keep retrying. The client was not told. You get this email once per waiting event.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Who is waiting</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{prospect}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Waiting since</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{waitingSince}} ({{attempts}} attempts)</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Campaign holding it back</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{campaignName}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Last error</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{lastError}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Trigger</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{triggerLabel}} ({{triggerId}})</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Event id</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{occurrenceId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Campaign id</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{campaignId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Organisation</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{orgId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Brand id</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{brandId}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Where to look</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;white-space:pre-wrap;">{{whereToLook}}</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "A prospect is waiting for an answer.",
+    "",
+    "A prospect did something that should get an automatic answer. The campaign that answers cannot run, so nothing went out yet. We keep retrying. The client was not told. You get this email once per waiting event.",
+    "",
+    "Who is waiting: {{prospect}}",
+    "Waiting since: {{waitingSince}} ({{attempts}} attempts)",
+    "Campaign holding it back: {{campaignName}}",
+    "Last error: {{lastError}}",
+    "Trigger: {{triggerLabel}} ({{triggerId}})",
+    "Event id: {{occurrenceId}}",
+    "Campaign id: {{campaignId}}",
+    "Organisation: {{orgId}}",
+    "Brand id: {{brandId}}",
+    "Where to look: {{whereToLook}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
@@ -304,6 +361,7 @@ export const STAFF_TEMPLATES: StaffTemplate[] = [
   CAMPAIGN_FAILING_TEMPLATE,
   AUDIENCE_REFILL_FAILED_TEMPLATE,
   TRIGGER_SILENT_TEMPLATE,
+  TRIGGER_OCCURRENCE_STUCK_TEMPLATE,
 ];
 
 /**

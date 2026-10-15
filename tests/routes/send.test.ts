@@ -2302,6 +2302,143 @@ describe("trigger_silent — a reactive trigger produced no event for days while
   });
 });
 
+describe("trigger_occurrence_stuck — a prospect's event has waited undelivered behind a campaign that cannot run", () => {
+  const STAFF_HEADERS = {
+    "x-org-id": "org_456",
+    "x-user-id": "user_789",
+    "x-run-id": "run_abc",
+  };
+  const ALERT = {
+    eventType: "trigger_occurrence_stuck",
+    metadata: {
+      occurrenceId: "occ_1",
+      triggerId: "meta_lead_form_submitted",
+      triggerLabel: "Meta Ads form filled",
+      campaignId: "camp_1",
+      campaignName: "Doc Dinners answer",
+      brandId: "brand_1",
+      waitingSince: "2026-10-14T20:00:00.000Z",
+      attempts: 109,
+      lastError: "402 insufficient credits",
+      prospect: "jane@example.com",
+    },
+  };
+
+  it("is accepted on the platform send route and delivers one email to the staff list only", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send(ALERT);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.to).toBe("kevin.lourd@gmail.com");
+    expect(body).not.toHaveProperty("bcc");
+    expect(mockValues.mock.calls[0][0].metadata.orgId).toBe("org_456");
+  });
+
+  it("mails once per occurrence: a second send for the same occurrence is a duplicate, whatever the org or day", async () => {
+    await request(app).post("/platform-send").set("X-API-Key", "test-service-key").set(STAFF_HEADERS).send(ALERT);
+    expect(mockValues.mock.calls[0][0].dedupKey).toBe("trigger_occurrence_stuck:occ_1");
+
+    mockReturning.mockResolvedValueOnce([]);
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set({ ...STAFF_HEADERS, "x-org-id": "org_other" })
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, attempts: 140 } });
+
+    expect(mockValues.mock.calls[1][0].dedupKey).toBe("trigger_occurrence_stuck:occ_1");
+    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a different occurrence sends again", async () => {
+    await request(app).post("/platform-send").set("X-API-Key", "test-service-key").set(STAFF_HEADERS).send(ALERT);
+    const second = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, occurrenceId: "occ_2" } });
+
+    expect(mockValues.mock.calls[1][0].dedupKey).toBe("trigger_occurrence_stuck:occ_2");
+    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("is never suppressed as the recipient's own action", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, email: "kevin@distribute.you" } });
+
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+  });
+
+  it("cannot be aimed at a customer address", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ ...ALERT, recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  for (const key of ["occurrenceId", "triggerId", "campaignId", "brandId", "waitingSince", "attempts", "lastError"]) {
+    it(`refuses an alert without ${key}, with a named 400`, async () => {
+      const { [key]: _omit, ...rest } = ALERT.metadata as Record<string, unknown>;
+      const res = await request(app)
+        .post("/platform-send")
+        .set("X-API-Key", "test-service-key")
+        .set(STAFF_HEADERS)
+        .send({ eventType: "trigger_occurrence_stuck", metadata: rest });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain(key);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  }
+
+  it("refuses a blank occurrenceId", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ ...ALERT, metadata: { ...ALERT.metadata, occurrenceId: "  " } });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a metadata of the wrong type", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ eventType: "trigger_occurrence_stuck", metadata: "occ_1" });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts an alert without the optional campaignName, triggerLabel, prospect or whereToLook", async () => {
+    const { campaignName: _c, triggerLabel: _t, prospect: _p, ...rest } = ALERT.metadata;
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(STAFF_HEADERS)
+      .send({ eventType: "trigger_occurrence_stuck", metadata: rest });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+  });
+});
+
 describe("POST /send — a message only staff read is platform-paid", () => {
   const bodyOf = (call: number) => JSON.parse(fetchSpy.mock.calls[call][1].body);
 
