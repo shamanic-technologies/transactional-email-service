@@ -61,11 +61,19 @@ const CAMPAIGN_DAILY_EVENTS = new Set(["campaign_failing", "audience_refill_fail
 // alert itself (once per trigger per 24h); this key is the backstop.
 const TRIGGER_DAILY_EVENTS = new Set(["trigger_silent"]);
 
+// Event types deduped per trigger OCCURRENCE, once ever: no org, no date, no
+// recipient in the key. trigger_occurrence_stuck is raised by campaign-service
+// when one occurrence carrying a person or an item (a form filled, a reply) has
+// waited undelivered for a while because a campaign behind it cannot run. The
+// occurrence is one prospect waiting: staff hear about it once, and a different
+// occurrence is a different person, so it alerts again.
+const OCCURRENCE_ONCE_EVENTS = new Set(["trigger_occurrence_stuck"]);
+
 // Machine alerts with no acting person. The x-user-id on the request is a
 // campaign owner chosen so billing can authorize the send, not somebody who did
 // anything, so it is never resolved into an actor and never suppresses the alert
 // as the recipient's own action (the owner may well be staff).
-const NO_ACTOR_EVENTS = new Set(["trigger_silent"]);
+const NO_ACTOR_EVENTS = new Set(["trigger_silent", "trigger_occurrence_stuck"]);
 
 // Metadata a staff alert cannot be actionable without. Missing either one is a
 // 400, never an email with a blank line where the provider name should be.
@@ -74,12 +82,13 @@ const REQUIRED_METADATA: Record<string, string[]> = {
   campaign_failing: ["campaignId", "consecutiveFailures", "failingSince", "retryInterval"],
   audience_refill_failed: ["campaignId", "brandId", "refillOutcome"],
   trigger_silent: ["triggerId", "triggerLabel", "silentSince", "silentDays", "liveCampaignCount"],
+  trigger_occurrence_stuck: ["occurrenceId", "triggerId", "campaignId", "brandId", "waitingSince", "attempts", "lastError"],
 };
 
 // Staff-bound events that must never carry a caller-supplied recipient, blind
 // copy or visible copy on ANY route, /send included — a "provider is dry" alert
 // is internal and has no customer-facing form.
-const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed", "trigger_silent"]);
+const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed", "trigger_silent", "trigger_occurrence_stuck"]);
 
 // Events where recipient is hardcoded to admin.
 // brand_daily_budget_changed is emitted by billing-service on every real change to a
@@ -102,6 +111,9 @@ const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campa
 // trigger_silent is raised by campaign-service when a reactive trigger has gone
 // silent for days while live campaigns depend on it (TRIGGER_DAILY_EVENTS bounds
 // it per trigger per day, fleet-wide).
+// trigger_occurrence_stuck is raised by campaign-service when one trigger
+// occurrence carrying a person or an item has waited undelivered because a
+// campaign behind it cannot run (OCCURRENCE_ONCE_EVENTS: once per occurrence).
 // unpaid_debt_uncollectable is emitted by billing-service when an org's balance has
 // gone negative and there is no card on file to collect it on. It belongs to no dedup
 // set above: billing-service decides when a debt is worth reporting, and two orgs
@@ -122,6 +134,7 @@ const ADMIN_NOTIFICATION_EVENTS = new Set([
   "campaign_failing",
   "audience_refill_failed",
   "trigger_silent",
+  "trigger_occurrence_stuck",
 ]);
 
 
@@ -189,6 +202,12 @@ function buildDedupKey(orgId: string, eventType: string, req: { userId?: string;
   // trigger is required metadata on these events, so it is always present here.
   if (TRIGGER_DAILY_EVENTS.has(eventType)) {
     return `${eventType}:${String(req.metadata?.triggerId).trim()}:${getTodayDate()}`;
+  }
+
+  // Occurrence-once dedup: one send per trigger occurrence, ever. The occurrence
+  // is required metadata on these events, so it is always present here.
+  if (OCCURRENCE_ONCE_EVENTS.has(eventType)) {
+    return `${eventType}:${String(req.metadata?.occurrenceId).trim()}`;
   }
 
   // Org-daily dedup: one send per org per calendar day, whoever the recipient is.
