@@ -16,6 +16,7 @@ import {
   TRIGGER_OCCURRENCE_STUCK_TEMPLATE,
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
+  SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
   STAFF_TEMPLATES,
   seedStaffTemplates,
 } from "../../src/templates/staff-alerts.js";
@@ -249,5 +250,33 @@ describe("trigger_occurrence_stuck template", () => {
     expect(html).not.toContain("{{");
     expect(T.htmlBody).not.toContain("<style");
     expect(T.htmlBody).toContain("table-layout:fixed");
+  });
+});
+
+describe("sending_domain_blocklisted template", () => {
+  const T = SENDING_DOMAIN_BLOCKLISTED_TEMPLATE;
+
+  it("is registered and renders every fact, with no placeholder or dash left", () => {
+    expect(STAFF_TEMPLATES).toContain(T);
+    const vars = {
+      domain: "boostdistribute.com",
+      listName: "Spamhaus DBL",
+      listedSince: "2026-10-16",
+      listAnswer: "127.0.1.2",
+      mailboxesAffected: "a@boostdistribute.com, b@boostdistribute.com",
+      actionTaken: "The 2 mailboxes no longer start new sequences.",
+      removalUrl: "https://check.spamhaus.org/",
+    };
+    for (const body of [T.subject, T.htmlBody, T.textBody]) {
+      const out = interpolate(body, vars);
+      expect(out).not.toContain("{{");
+      expect(out).not.toMatch(/[\u2013\u2014]/);
+    }
+    for (const value of Object.values(vars)) {
+      expect(interpolate(T.textBody, vars)).toContain(value);
+      expect(interpolate(T.htmlBody, vars)).toContain(value);
+    }
+    expect(T.htmlBody).not.toContain("<style");
+    expect(T.htmlBody).not.toContain("class=");
   });
 });
