@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { requireApiKey, requireIdentityHeaders, requireOrgIdOnly, type PlatformIdentityLocals } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { emailEvents } from "../db/schema.js";
@@ -10,6 +11,7 @@ import { createRun, updateRun, createPlatformRun, updatePlatformRun } from "../l
 import { traceEvent } from "../lib/trace-event.js";
 import { OrglessSendRequestSchema, PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
 import { ORGLESS_PLATFORM_EVENTS, isOrglessPlatformEvent } from "../lib/orgless-events.js";
+import { PLATFORM_STAFF_ALERTS, isPlatformStaffAlert, platformStaffAlertDedupKey } from "../lib/platform-staff-alerts.js";
 import { isDistributeSender, signWithWhy } from "../lib/why.js";
 import { isFullHtmlDocument, wrapInBrandLayout } from "../lib/brand-layout.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
@@ -649,6 +651,133 @@ async function handleOrglessPlatformSend(req: Request, res: Response) {
   res.json({ sent: true, eventId, runId: run.id });
 }
 
+// The envelope of a platform staff alert. Metadata keys are checked against the
+// event's own required list below, so a missing one is named in the 400.
+const PlatformStaffAlertEnvelope = z
+  .object({
+    eventType: z.string().min(1),
+    eventId: z.string().trim().min(1).max(200),
+    metadata: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
+/**
+ * Platform staff alert: a fact about the fleet's SHARED infrastructure (a
+ * sending domain every client uses landed on a blocklist) that belongs to no
+ * organisation and was done by nobody. Delivered to the staff list only, on an
+ * org-less platform run (platform-paid at every hop), once per caller event id.
+ * A failed delivery leaves its row `failed`, and the next call with the same
+ * event id reclaims it and sends: a retry never double-sends and never loses
+ * the alert.
+ */
+async function handlePlatformStaffAlert(req: Request, res: Response) {
+  if (req.headers["x-org-id"] !== undefined || req.headers["x-user-id"] !== undefined) {
+    res.status(400).json({
+      error: "platform-staff-alert accepts no x-org-id or x-user-id: it reports a platform fact that belongs to no organisation. An alert about an organisation belongs on POST /platform-send",
+      code: "org_identity_not_accepted",
+    });
+    return;
+  }
+
+  const parsed = PlatformStaffAlertEnvelope.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", code: "invalid_request", details: parsed.error.flatten() });
+    return;
+  }
+  const { eventType, eventId, metadata } = parsed.data;
+
+  if (!isPlatformStaffAlert(eventType)) {
+    res.status(400).json({
+      error: `'${eventType}' is not a platform staff alert. Allowed: ${Object.keys(PLATFORM_STAFF_ALERTS).sort().join(", ")}`,
+      code: "event_not_platform_staff_alert",
+    });
+    return;
+  }
+
+  const missing = PLATFORM_STAFF_ALERTS[eventType].filter((key) => {
+    const value = metadata[key];
+    return typeof value !== "string" || value.trim() === "";
+  });
+  if (missing.length > 0) {
+    res.status(400).json({ error: `'${eventType}' requires non-empty string metadata: ${missing.join(", ")}`, code: "missing_metadata", missing });
+    return;
+  }
+
+  let templateFn: Awaited<ReturnType<typeof getTemplate>>;
+  try {
+    templateFn = await getTemplate(eventType);
+  } catch (err: any) {
+    res.status(404).json({ error: err.message, code: "template_not_found" });
+    return;
+  }
+  // Staff mail: no brand layout, no why (signRendered is for customer mail)
+  const template = templateFn(metadata);
+  const recordedMetadata = { ...metadata, eventId };
+
+  let sentRunId: string | null = null;
+  let sentCount = 0;
+
+  for (const email of ADMIN_EMAILS) {
+    const dedupKey = platformStaffAlertDedupKey(eventType, eventId, email, ADMIN_EMAILS.length);
+
+    // Claim the occurrence: a new key inserts; a key whose last delivery FAILED
+    // is reclaimed; a key already sent (or in flight) returns nothing.
+    const claimed = await db
+      .insert(emailEvents)
+      .values({ eventType, recipientEmail: email, dedupKey, userId: null, orgId: null, status: "pending", metadata: recordedMetadata })
+      .onConflictDoUpdate({
+        target: emailEvents.dedupKey,
+        set: { status: "pending", errorMessage: null, metadata: recordedMetadata },
+        setWhere: eq(emailEvents.status, "failed"),
+      })
+      .returning();
+    if (claimed.length === 0) {
+      console.log(`[platform-staff-alert] duplicate ${eventType} ${eventId} to ${email}: already delivered`);
+      continue;
+    }
+    const rowId = claimed[0].id;
+
+    let run: { id: string };
+    try {
+      run = await createPlatformRun({ serviceName: "transactional-email-service", taskName: `email-${eventType}` });
+    } catch (err: any) {
+      console.error(`[platform-staff-alert] run creation failed for ${eventType} ${eventId}:`, err.message);
+      await db.update(emailEvents).set({ status: "failed", errorMessage: `Run creation failed: ${err.message}` }).where(eq(emailEvents.id, rowId));
+      res.status(502).json({ error: `Run creation failed: ${err.message}`, code: "run_failed" });
+      return;
+    }
+
+    try {
+      await sendOrglessPlatformEmail({
+        to: email,
+        subject: template.subject,
+        htmlBody: template.htmlBody,
+        textBody: template.textBody,
+        tag: eventType,
+        runId: run.id,
+        from: template.from,
+      });
+    } catch (err: any) {
+      console.error(`[platform-staff-alert] failed to send ${eventType} ${eventId} to ${email}:`, err.message);
+      await db.update(emailEvents).set({ status: "failed", errorMessage: err.message }).where(eq(emailEvents.id, rowId));
+      await updatePlatformRun(run.id, "failed", err.message);
+      res.status(502).json({ error: err.message, code: "delivery_failed" });
+      return;
+    }
+
+    await db.update(emailEvents).set({ status: "sent" }).where(eq(emailEvents.id, rowId));
+    await updatePlatformRun(run.id, "completed");
+    sentRunId = run.id;
+    sentCount += 1;
+  }
+
+  if (sentCount === 0) {
+    res.json({ sent: false, duplicate: true, eventId, runId: null });
+    return;
+  }
+  res.json({ sent: true, duplicate: false, eventId, runId: sentRunId });
+}
+
 /**
  * Renders an event's template exactly as a send would, and does nothing else:
  * no recipient is resolved, no row is written, nothing is sent. Metadata the
@@ -687,5 +816,8 @@ router.post("/platform-send", requireApiKey, requireOrgIdOnly, handlePlatformSen
 
 // Org-less platform route — API key only, no organisation, no user (allowlisted events)
 router.post("/platform-orgless-send", requireApiKey, (req, res, next) => handleOrglessPlatformSend(req, res).catch(next));
+
+// Platform staff alert — API key only, no organisation, no user (closed list)
+router.post("/platform-staff-alert", requireApiKey, (req, res, next) => handlePlatformStaffAlert(req, res).catch(next));
 
 export default router;

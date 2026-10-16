@@ -52,4 +52,17 @@ describe("GET /openapi.json", () => {
     });
     expect(sendRequest.required ?? []).not.toContain("replyToEmail");
   });
+
+  it("serves POST /platform-staff-alert with its body contract", async () => {
+    const res = await request(app).get("/openapi.json");
+    const op = res.body.paths["/platform-staff-alert"]?.post;
+    expect(op).toBeDefined();
+    const body = res.body.components.schemas.PlatformStaffAlertRequest;
+    expect(body.required).toEqual(expect.arrayContaining(["eventType", "eventId", "metadata"]));
+    const meta = res.body.components.schemas.SendingDomainBlocklistedMetadata;
+    expect(meta.required).toEqual(
+      expect.arrayContaining(["domain", "listName", "listedSince", "listAnswer", "mailboxesAffected", "actionTaken", "removalUrl"]),
+    );
+    expect(Object.keys(op.responses)).toEqual(expect.arrayContaining(["200", "400", "502"]));
+  });
 });

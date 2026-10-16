@@ -354,6 +354,56 @@ export const TRIGGER_OCCURRENCE_STUCK_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * One of our cold-email SENDING domains newly landed on a public domain
+ * blocklist (SURBL, Spamhaus DBL, URIBL). Raised by instantly-service through
+ * POST /platform-staff-alert, once per listing event: the domain is shared by
+ * every client, so this names no organisation. The mailboxes are already out
+ * of new sequences when it arrives; what is left for staff is the removal
+ * request.
+ */
+export const SENDING_DOMAIN_BLOCKLISTED_TEMPLATE: StaffTemplate = {
+  name: "sending_domain_blocklisted",
+  subject: "{{domain}} is on the {{listName}} blocklist",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">{{domain}} is on the {{listName}} blocklist</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">One of our sending domains landed on a public blocklist. Every client shares this domain. Its mailboxes no longer start new sequences. The next step is yours: ask the list to remove the domain with the link below. You get this once for this listing.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Domain</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{domain}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">List</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{listName}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Listed since</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{listedSince}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">What the list answered</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{listAnswer}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Mailboxes affected</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:16px;font-size:13px;line-height:19px;color:#374151;word-break:break-all;">{{mailboxesAffected}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">What we did automatically</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{actionTaken}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Request removal</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:14px;line-height:20px;word-break:break-all;"><a href="{{removalUrl}}" style="color:#2563eb;text-decoration:underline;">{{removalUrl}}</a></td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "{{domain}} is on the {{listName}} blocklist.",
+    "",
+    "One of our sending domains landed on a public blocklist. Every client shares this domain. Its mailboxes no longer start new sequences. The next step is yours: ask the list to remove the domain with the link below. You get this once for this listing.",
+    "",
+    "Domain: {{domain}}",
+    "List: {{listName}}",
+    "Listed since: {{listedSince}}",
+    "What the list answered: {{listAnswer}}",
+    "Mailboxes affected: {{mailboxesAffected}}",
+    "What we did automatically: {{actionTaken}}",
+    "Request removal: {{removalUrl}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
@@ -362,6 +412,7 @@ export const STAFF_TEMPLATES: StaffTemplate[] = [
   AUDIENCE_REFILL_FAILED_TEMPLATE,
   TRIGGER_SILENT_TEMPLATE,
   TRIGGER_OCCURRENCE_STUCK_TEMPLATE,
+  SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
 ];
 
 /**
