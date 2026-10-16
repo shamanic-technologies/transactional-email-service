@@ -3,6 +3,7 @@ import { MAX_DAILY_LIMIT } from "./lib/release-pacing.js";
 import { TEMPLATE_LAYOUTS } from "./lib/brand-layout.js";
 import { DELIVERY_STREAMS } from "./lib/delivery-stream.js";
 import { ORGLESS_PLATFORM_EVENTS } from "./lib/orgless-events.js";
+import { PLATFORM_STAFF_ALERTS } from "./lib/platform-staff-alerts.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -344,6 +345,62 @@ export const OrglessSendErrorSchema = z
     details: z.unknown().optional(),
   })
   .openapi("OrglessSendError");
+
+// --- POST /platform-staff-alert ---
+
+const platformStaffAlertList = Object.entries(PLATFORM_STAFF_ALERTS)
+  .map(([name, keys]) => `\`${name}\` (requires metadata ${keys.map((k) => `\`${k}\``).join(", ")})`)
+  .join("; ");
+
+export const SendingDomainBlocklistedMetadataSchema = z
+  .object({
+    domain: z.string().min(1).openapi({ description: "The sending domain that is listed.", example: "boostdistribute.com" }),
+    listName: z.string().min(1).openapi({ description: "The blocklist that lists it.", example: "SURBL" }),
+    listedSince: z.string().min(1).openapi({ description: "When the listing was first seen, ISO 8601.", example: "2026-10-16" }),
+    listAnswer: z.string().min(1).openapi({ description: "What the list answered for the domain.", example: "ABUSE" }),
+    mailboxesAffected: z.string().min(1).openapi({ description: "Comma-separated mailboxes on the domain. May be long.", example: "ruth@boostdistribute.com, kevin@boostdistribute.com" }),
+    actionTaken: z.string().min(1).openapi({ description: "What was done automatically.", example: "The 5 mailboxes no longer start new sequences." }),
+    removalUrl: z.string().min(1).openapi({ description: "Where to request removal from the list.", example: "https://www.surbl.org/surbl-analysis" }),
+  })
+  .openapi("SendingDomainBlocklistedMetadata");
+
+export const PlatformStaffAlertRequestSchema = z
+  .object({
+    eventType: z.string().min(1).openapi({
+      description: `The staff alert to raise. Closed list: ${platformStaffAlertList}. Any other name is refused with 400 \`code: "event_not_platform_staff_alert"\`.`,
+      example: "sending_domain_blocklisted",
+    }),
+    eventId: z.string().trim().min(1).max(200).openapi({
+      description:
+        "Caller-chosen id of ONE occurrence of the fact (e.g. `<domain>:<list>:<listedSince>`). The same id delivers once, ever: a second call answers 200 `duplicate: true`. A call whose delivery failed (502) can be retried with the same id and sends.",
+      example: "boostdistribute.com:SURBL:2026-10-16",
+    }),
+    metadata: SendingDomainBlocklistedMetadataSchema.openapi({
+      description: "Template variables, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`.",
+    }),
+  })
+  .strict()
+  .openapi("PlatformStaffAlertRequest");
+
+export const PlatformStaffAlertResponseSchema = z
+  .object({
+    sent: z.boolean().openapi({ description: "True when this call delivered the alert. False only on a duplicate." }),
+    duplicate: z.boolean().openapi({ description: "True when this event id was already delivered: nothing was sent again. Not an error." }),
+    eventId: z.string().openapi({ description: "The caller's event id, echoed." }),
+    runId: z.string().nullable().openapi({ description: "The org-less platform run the send is declared under. Null on a duplicate." }),
+  })
+  .openapi("PlatformStaffAlertResponse");
+
+export const PlatformStaffAlertErrorSchema = z
+  .object({
+    error: z.string(),
+    code: z
+      .enum(["invalid_request", "org_identity_not_accepted", "event_not_platform_staff_alert", "missing_metadata", "template_not_found", "run_failed", "delivery_failed"])
+      .openapi({ description: "Machine code for the refusal or failure." }),
+    missing: z.array(z.string()).optional().openapi({ description: "On `missing_metadata`: the metadata keys that are missing or blank." }),
+    details: z.unknown().optional(),
+  })
+  .openapi("PlatformStaffAlertError");
 
 export const PreviewSendRequestSchema = z
   .object({
@@ -791,6 +848,30 @@ registry.registerPath({
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "template_not_found: the allowlisted template is not registered", content: { "application/json": { schema: OrglessSendErrorSchema } } },
     502: { description: "run_failed or delivery_failed: nothing was delivered", content: { "application/json": { schema: OrglessSendErrorSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/platform-staff-alert",
+  summary: "Raise a staff alert about a platform fact that belongs to no organisation, platform-paid",
+  description:
+    "For a backend caller reporting something true of the fleet's SHARED infrastructure (a sending domain every client uses landed on a blocklist): there is no organisation to name and no acting user. The alert is delivered to this service's own staff recipient list only (the caller never chooses a recipient), declared on an org-less platform run and relayed to email-gateway `POST /platform/send` (org-less, platform-paid, transactional stream). No org is authorized, created or charged.\n\n" +
+    "**Headers:** `X-API-Key` only. `x-org-id` and `x-user-id` are refused with 400 `org_identity_not_accepted`.\n\n" +
+    `**Accepted event types (closed list):** ${platformStaffAlertList}. Any other name: 400 \`event_not_platform_staff_alert\`. A missing or blank metadata key: 400 \`missing_metadata\` with the keys in \`missing\`. Any other body field: 400 \`invalid_request\`.\n\n` +
+    "**Once per event id:** the same `eventId` delivers once, ever. A repeat answers 200 `{sent: false, duplicate: true}` and sends nothing. A call that failed (502) leaves the event id free, so retrying it sends.\n\n" +
+    "**Failure is loud:** 200 `sent: true` means the provider accepted the message. A run that could not be opened is 502 `run_failed`; a delivery the gateway refused is 502 `delivery_failed`.",
+  tags: ["Email"],
+  security: [{ apiKey: [] }],
+  request: {
+    body: { required: true, content: { "application/json": { schema: PlatformStaffAlertRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Sent, or a duplicate of an event id already delivered", content: { "application/json": { schema: PlatformStaffAlertResponseSchema } } },
+    400: { description: "invalid_request, org_identity_not_accepted, event_not_platform_staff_alert or missing_metadata", content: { "application/json": { schema: PlatformStaffAlertErrorSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "template_not_found: the alert's template is not registered", content: { "application/json": { schema: PlatformStaffAlertErrorSchema } } },
+    502: { description: "run_failed or delivery_failed: nothing was delivered, the event id stays free", content: { "application/json": { schema: PlatformStaffAlertErrorSchema } } },
   },
 });
 
