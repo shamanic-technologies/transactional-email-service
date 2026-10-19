@@ -19,6 +19,13 @@
 // URIBL). Every client shares those domains, so no org owns the fact
 // (DOMAIN-BLOCKLIST-1016).
 //
+// inbox_placement_below_bar: instantly-service, our seed placement test shows
+// inbox % at one inbox provider (Google, Microsoft 365, Outlook.com) below the
+// market bar, measured on the mailboxes still allowed to mail that provider,
+// i.e. AFTER the automatic cut of bad mailboxes did its job. A fact about the
+// shared sending fleet, no org owns it (MAILBOX-MONITORING-1019). One event id
+// per provider per episode below the bar.
+//
 // Its own module: tests `vi.mock` route dependencies whole, and src/schemas.ts
 // reads this list at import time.
 export const PLATFORM_STAFF_ALERTS: Record<string, readonly string[]> = {
@@ -30,6 +37,15 @@ export const PLATFORM_STAFF_ALERTS: Record<string, readonly string[]> = {
     "mailboxesAffected",
     "actionTaken",
     "removalUrl",
+  ],
+  inbox_placement_below_bar: [
+    "provider",
+    "measuredOn",
+    "inboxPct",
+    "seeds",
+    "thresholdPct",
+    "mailboxesCut",
+    "dashboardUrl",
   ],
 };
 
