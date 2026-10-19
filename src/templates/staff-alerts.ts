@@ -404,6 +404,46 @@ export const SENDING_DOMAIN_BLOCKLISTED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * Inbox placement at one inbox provider fell below the market bar, measured on
+ * the mailboxes still allowed to mail that provider: the automatic cut of bad
+ * mailboxes already ran and did not bring it back. Raised by instantly-service
+ * through POST /platform-staff-alert, once per provider per episode below the
+ * bar (MAILBOX-MONITORING-1019). Staff mail, readable in 5 seconds.
+ */
+export const INBOX_PLACEMENT_BELOW_BAR_TEMPLATE: StaffTemplate = {
+  name: "inbox_placement_below_bar",
+  subject: "{{provider}} inbox placement is {{inboxPct}}%, below the {{thresholdPct}}% bar",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">{{provider}} inbox placement is {{inboxPct}}%</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">Our seed test puts too much of our mail in spam at {{provider}}. The automatic cut already took {{mailboxesCut}} mailboxes off {{provider}}. The mailboxes still mailing {{provider}} stay below the bar. You get this once until {{provider}} is back above the bar.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Inbox at {{provider}}</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{inboxPct}}% of {{seeds}} seeds (bar {{thresholdPct}}%)</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Measured on</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{measuredOn}} (UTC)</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">What we did automatically</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{mailboxesCut}} mailboxes no longer mail {{provider}} prospects.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Where to look</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:14px;line-height:20px;word-break:break-all;"><a href="{{dashboardUrl}}" style="color:#2563eb;text-decoration:underline;">{{dashboardUrl}}</a></td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "{{provider}} inbox placement is {{inboxPct}}%.",
+    "",
+    "Our seed test puts too much of our mail in spam at {{provider}}. The automatic cut already took {{mailboxesCut}} mailboxes off {{provider}}. The mailboxes still mailing {{provider}} stay below the bar. You get this once until {{provider}} is back above the bar.",
+    "",
+    "Inbox at {{provider}}: {{inboxPct}}% of {{seeds}} seeds (bar {{thresholdPct}}%)",
+    "Measured on: {{measuredOn}} (UTC)",
+    "What we did automatically: {{mailboxesCut}} mailboxes no longer mail {{provider}} prospects.",
+    "Where to look: {{dashboardUrl}}",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
@@ -413,6 +453,7 @@ export const STAFF_TEMPLATES: StaffTemplate[] = [
   TRIGGER_SILENT_TEMPLATE,
   TRIGGER_OCCURRENCE_STUCK_TEMPLATE,
   SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
+  INBOX_PLACEMENT_BELOW_BAR_TEMPLATE,
 ];
 
 /**

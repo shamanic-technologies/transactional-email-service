@@ -364,6 +364,18 @@ export const SendingDomainBlocklistedMetadataSchema = z
   })
   .openapi("SendingDomainBlocklistedMetadata");
 
+export const InboxPlacementBelowBarMetadataSchema = z
+  .object({
+    provider: z.string().min(1).openapi({ description: "The inbox provider, human label.", example: "Google" }),
+    measuredOn: z.string().min(1).openapi({ description: "The day measured, YYYY-MM-DD (UTC).", example: "2026-10-18" }),
+    inboxPct: z.string().min(1).openapi({ description: "Inbox % at that provider among the mailboxes still allowed to mail it (after the automatic cut). A number, no % sign.", example: "52.6" }),
+    seeds: z.string().min(1).openapi({ description: "Seeds behind inboxPct.", example: "38" }),
+    thresholdPct: z.string().min(1).openapi({ description: "The market bar, a number, no % sign.", example: "90" }),
+    mailboxesCut: z.string().min(1).openapi({ description: "How many mailboxes the automatic cut already took off that provider.", example: "6" }),
+    dashboardUrl: z.string().min(1).openapi({ description: "Where staff look.", example: "https://distribute.you/v2/monitoring" }),
+  })
+  .openapi("InboxPlacementBelowBarMetadata");
+
 export const PlatformStaffAlertRequestSchema = z
   .object({
     eventType: z.string().min(1).openapi({
@@ -375,8 +387,8 @@ export const PlatformStaffAlertRequestSchema = z
         "Caller-chosen id of ONE occurrence of the fact (e.g. `<domain>:<list>:<listedSince>`). The same id delivers once, ever: a second call answers 200 `duplicate: true`. A call whose delivery failed (502) can be retried with the same id and sends.",
       example: "boostdistribute.com:SURBL:2026-10-16",
     }),
-    metadata: SendingDomainBlocklistedMetadataSchema.openapi({
-      description: "Template variables, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`.",
+    metadata: z.union([SendingDomainBlocklistedMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
+      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`.",
     }),
   })
   .strict()

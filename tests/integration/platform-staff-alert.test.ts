@@ -101,3 +101,30 @@ describe("POST /platform-staff-alert (database-backed)", () => {
     expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(2 * ADMIN_EMAILS.length);
   });
 });
+
+describe("POST /platform-staff-alert inbox_placement_below_bar (database-backed)", () => {
+  const PLACEMENT = {
+    eventType: "inbox_placement_below_bar",
+    eventId: "Google:2026-10-18",
+    metadata: {
+      provider: "Google",
+      measuredOn: "2026-10-18",
+      inboxPct: "52.6",
+      seeds: "38",
+      thresholdPct: "90",
+      mailboxesCut: "6",
+      dashboardUrl: "https://distribute.you/v2/monitoring",
+    },
+  };
+
+  it("delivers once per event id from the seeded template", async () => {
+    const first = await post(PLACEMENT);
+    expect(first.status).toBe(200);
+    expect(first.body.sent).toBe(true);
+    const second = await post(PLACEMENT);
+    expect(second.body.duplicate).toBe(true);
+    expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(ADMIN_EMAILS.length);
+    const [[sent]] = vi.mocked(sendOrglessPlatformEmail).mock.calls;
+    expect(sent.subject).toBe("Google inbox placement is 52.6%, below the 90% bar");
+  });
+});
