@@ -177,7 +177,8 @@ function buildBccList(eventType: string, callerBcc: string[] | undefined): strin
 // customer's own conversation with their prospect.
 type RenderedTemplate = ReturnType<Awaited<ReturnType<typeof getTemplate>>>;
 function signRendered(eventType: string, template: RenderedTemplate): RenderedTemplate {
-  if (ADMIN_NOTIFICATION_EVENTS.has(eventType) || !isDistributeSender(template.from)) return template;
+  // Staff mail is never signed: a platform staff alert goes out unsigned, so its preview is too
+  if (ADMIN_NOTIFICATION_EVENTS.has(eventType) || isPlatformStaffAlert(eventType) || !isDistributeSender(template.from)) return template;
   if (template.stream === "transactional") return template;
   if (template.layout === "brand" && !isFullHtmlDocument(template.htmlBody)) {
     return { ...template, ...wrapInBrandLayout(template) };
