@@ -181,6 +181,8 @@ Email status lifecycle: `pending` → `sent` (after gateway confirms delivery) o
 
 Deploy (upsert) email templates. Idempotent: creates new templates or updates existing ones matched by `name`. Call this at app startup to register all your email templates. Templates support `{{variable}}` interpolation from metadata passed at send time.
 
+**Syntax contract:** only `{{name}}` (letters, digits, underscore) is replaced. Any other `{{` (mustache sections `{{#x}}…{{/x}}`, `{{^x}}`, `{{{x}}}`, `{{>x}}`, `{{! x}}`, `{{a.b}}`, `{{ x }}`) would reach the recipient raw, so the whole batch is refused with **422** `unsupported_template_syntax`, naming the template, field and token (`templates: [{ name, field, token }]`); nothing is written. A stray `}}` (inline CSS, JSON-LD) is fine. Build conditional text in the caller and pass it as one variable. A stored template that breaks the contract is also refused at send time: 422 on `/send`, `/send/preview`, `/platform-orgless-send`, `/platform-staff-alert`, nothing delivered, one `failed` event row per intended recipient (no dedup key, so a once-only email still goes out after the template is fixed).
+
 **Request body:**
 
 ```json
@@ -673,6 +675,7 @@ src/
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
+    syntax.ts           # Template syntax contract: refuses any {{ that is not a {{name}} placeholder
     staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted, mailing_list_release_halted, mailing_list_release_stalled, campaign_failing, audience_refill_failed, trigger_silent, trigger_occurrence_stuck)
 tests/
   migrations.test.ts    # Validates migration files use idempotent patterns

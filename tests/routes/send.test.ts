@@ -2519,3 +2519,58 @@ describe("POST /send — a message only staff read is platform-paid", () => {
     expect(bodyOf(1)).not.toHaveProperty("payer");
   });
 });
+
+describe("a stored template with syntax the renderer does not support is never delivered", () => {
+  const BROKEN_ROW = { ...DB_TEMPLATE_ROW, name: "campaign_created", htmlBody: "<p>Hi{{#firstName}} {{firstName}}{{/firstName}},</p>" };
+
+  it("POST /send refuses with a 422 naming the token, records a failed event, and sends nothing", async () => {
+    mockSelectLimit.mockResolvedValueOnce([BROKEN_ROW]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", recipientEmail: "kevin@distribute.you" });
+
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe("unsupported_template_syntax");
+    expect(res.body.error).toContain("{{#firstName}}");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+
+    const rows = mockValues.mock.calls[0][0];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ eventType: "campaign_created", recipientEmail: "kevin@distribute.you", status: "failed", dedupKey: null, orgId: "org_456" });
+    expect(rows[0].errorMessage).toContain("{{#firstName}}");
+  });
+
+  it("POST /send/preview refuses with a 422 and writes nothing", async () => {
+    mockSelectLimit.mockResolvedValueOnce([BROKEN_ROW]);
+
+    const res = await request(app)
+      .post("/send/preview")
+      .set("X-API-Key", "test-service-key")
+      .set("x-org-id", "org_456")
+      .send({ eventType: "campaign_created" });
+
+    expect(res.status).toBe(422);
+    expect(res.body.problems).toEqual([
+      { field: "htmlBody", token: "{{#firstName}}" },
+      { field: "htmlBody", token: "{{/firstName}}" },
+    ]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("a valid stored template still sends", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...DB_TEMPLATE_ROW, htmlBody: "<p>Hi {{firstName}},</p>" }]);
+
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", recipientEmail: "kevin@distribute.you", metadata: { firstName: "Kevin" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+  });
+});

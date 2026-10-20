@@ -184,3 +184,17 @@ describe("POST /platform-orgless-send", () => {
     expect(gatewayCalls()).toHaveLength(0);
   });
 });
+
+describe("POST /platform-orgless-send with a stored template the renderer does not support", () => {
+  it("refuses with a 422, records a failed event and sends nothing", async () => {
+    mockSelectLimit.mockResolvedValueOnce([{ ...SIGNUP_TEMPLATE, subject: "Your code{{#code}}: {{code}}{{/code}}" }]);
+
+    const res = await post(BODY);
+
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe("unsupported_template_syntax");
+    expect(gatewayCalls()).toHaveLength(0);
+    expect(createPlatformRun).not.toHaveBeenCalled();
+    expect(mockValues.mock.calls[0][0][0]).toMatchObject({ eventType: "agent_signup_code", status: "failed", dedupKey: null });
+  });
+});
