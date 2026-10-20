@@ -5,6 +5,7 @@ import { requireApiKey, requireIdentityHeaders, requireOrgIdOnly, type PlatformI
 import { db } from "../db/index.js";
 import { emailEvents } from "../db/schema.js";
 import { getTemplate } from "../templates/index.js";
+import { UnsupportedTemplateSyntaxError } from "../templates/syntax.js";
 import { sendEmail, sendOrglessPlatformEmail } from "../lib/email-gateway.js";
 import { resolveUserEmail } from "../lib/client-service.js";
 import { createRun, updateRun, createPlatformRun, updatePlatformRun } from "../lib/runs-client.js";
@@ -186,6 +187,30 @@ function signRendered(eventType: string, template: RenderedTemplate): RenderedTe
   return { ...template, ...signWithWhy(template, { withLink: false }) };
 }
 
+/**
+ * A stored template that would put raw tags in front of a recipient is refused,
+ * never delivered: one failed event row per intended recipient (status
+ * "failed", the offending token in error_message) so the refusal is on the
+ * record where every other failed send is, an error log, and a 422 the caller
+ * sees. The row carries NO dedup key on purpose: a once-only email (welcome,
+ * first_payment) refused today must still go out once the template is fixed.
+ */
+async function refuseUnsupportedTemplate(
+  res: Response,
+  err: UnsupportedTemplateSyntaxError,
+  rows: Array<typeof emailEvents.$inferInsert>
+): Promise<void> {
+  console.error(`[send] refused ${err.templateName} to ${rows.map((r) => r.recipientEmail).join(", ") || "nobody"}: ${err.message}`);
+  if (rows.length > 0) {
+    try {
+      await db.insert(emailEvents).values(rows.map((r) => ({ ...r, dedupKey: null, status: "failed", errorMessage: err.message })));
+    } catch (dbErr: any) {
+      console.error(`[send] could not record the refused ${err.templateName} send:`, dbErr.message);
+    }
+  }
+  res.status(422).json({ error: err.message, code: err.code, template: err.templateName, problems: err.problems });
+}
+
 function getTodayDate(): string {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 }
@@ -351,6 +376,28 @@ async function handleSend(req: Request, res: Response) {
     try {
       templateFn = await getTemplate(body.eventType);
     } catch (err: any) {
+      if (err instanceof UnsupportedTemplateSyntaxError) {
+        if (runId) {
+          traceEvent(runId, { service: "transactional-email-service", event: "send-refused", detail: err.message, level: "error" }, traceHeaders);
+        }
+        await refuseUnsupportedTemplate(
+          res,
+          err,
+          recipientEmails.map((email) => ({
+            eventType: body.eventType,
+            recipientEmail: email,
+            userId: userId ?? null,
+            orgId,
+            metadata: metadata || null,
+            campaignId: effectiveCampaignId || null,
+            brandIds: effectiveBrandIds?.length ? effectiveBrandIds : null,
+            workflowSlug: workflowSlug || null,
+            featureSlug: featureSlug || null,
+            audienceId: audienceId || null,
+          }))
+        );
+        return;
+      }
       res.status(404).json({ error: err.message });
       return;
     }
@@ -606,6 +653,10 @@ async function handleOrglessPlatformSend(req: Request, res: Response) {
   try {
     templateFn = await getTemplate(eventType);
   } catch (err: any) {
+    if (err instanceof UnsupportedTemplateSyntaxError) {
+      await refuseUnsupportedTemplate(res, err, [{ eventType, recipientEmail, userId: null, orgId: null, metadata }]);
+      return;
+    }
     res.status(404).json({ error: err.message, code: "template_not_found" });
     return;
   }
@@ -708,6 +759,16 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
   try {
     templateFn = await getTemplate(eventType);
   } catch (err: any) {
+    if (err instanceof UnsupportedTemplateSyntaxError) {
+      // No dedup key on the refusal row, so the occurrence is still deliverable
+      // (claimed fresh) once the template is fixed and the caller retries.
+      await refuseUnsupportedTemplate(
+        res,
+        err,
+        ADMIN_EMAILS.map((email) => ({ eventType, recipientEmail: email, userId: null, orgId: null, metadata: { ...metadata, eventId } }))
+      );
+      return;
+    }
     res.status(404).json({ error: err.message, code: "template_not_found" });
     return;
   }
@@ -796,6 +857,11 @@ router.post("/send/preview", requireApiKey, requireOrgIdOnly, async (req, res) =
   try {
     templateFn = await getTemplate(parsed.data.eventType);
   } catch (err: any) {
+    if (err instanceof UnsupportedTemplateSyntaxError) {
+      // A preview sends nothing, so there is no event to record
+      res.status(422).json({ error: err.message, code: err.code, template: err.templateName, problems: err.problems });
+      return;
+    }
     res.status(404).json({ error: err.message });
     return;
   }

@@ -759,6 +759,7 @@ registry.registerPath({
       description: "Unauthorized - invalid or missing API key",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+    422: { description: "unsupported_template_syntax: the stored template uses syntax the renderer does not support (e.g. a {{#x}} section); nothing was sent and a failed event is recorded per intended recipient", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
@@ -780,6 +781,7 @@ registry.registerPath({
     400: { description: "Validation error or missing x-org-id", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No template registered for this event", content: { "application/json": { schema: ErrorResponseSchema } } },
+    422: { description: "unsupported_template_syntax: the stored template uses syntax the renderer does not support (e.g. a {{#x}} section)", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
@@ -859,6 +861,7 @@ registry.registerPath({
     400: { description: "invalid_request, org_identity_not_accepted, event_not_orgless or missing_metadata", content: { "application/json": { schema: OrglessSendErrorSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "template_not_found: the allowlisted template is not registered", content: { "application/json": { schema: OrglessSendErrorSchema } } },
+    422: { description: "unsupported_template_syntax: the stored template uses syntax the renderer does not support (e.g. a {{#x}} section); nothing was sent and a failed event is recorded per intended recipient", content: { "application/json": { schema: ErrorResponseSchema } } },
     502: { description: "run_failed or delivery_failed: nothing was delivered", content: { "application/json": { schema: OrglessSendErrorSchema } } },
   },
 });
@@ -883,6 +886,7 @@ registry.registerPath({
     400: { description: "invalid_request, org_identity_not_accepted, event_not_platform_staff_alert or missing_metadata", content: { "application/json": { schema: PlatformStaffAlertErrorSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "template_not_found: the alert's template is not registered", content: { "application/json": { schema: PlatformStaffAlertErrorSchema } } },
+    422: { description: "unsupported_template_syntax: the stored template uses syntax the renderer does not support (e.g. a {{#x}} section); nothing was sent and a failed event is recorded per intended recipient", content: { "application/json": { schema: ErrorResponseSchema } } },
     502: { description: "run_failed or delivery_failed: nothing was delivered, the event id stays free", content: { "application/json": { schema: PlatformStaffAlertErrorSchema } } },
   },
 });
@@ -927,6 +931,7 @@ registry.registerPath({
   summary: "Deploy (upsert) email templates",
   description:
     "Idempotent: creates new templates or updates existing ones matched by name. Call this at app startup to register all your email templates. Templates support {{variable}} interpolation from metadata passed at send time.\n\n" +
+    "**Syntax contract:** the renderer replaces `{{name}}` (letters, digits, underscore) and nothing else. Every other `{{` (a section `{{#x}}…{{/x}}`, an inverted section `{{^x}}`, a triple `{{{x}}}`, a partial `{{>x}}`, a comment `{{! x}}`, a dotted path `{{a.b}}`, spaces `{{ x }}`) would reach the recipient as written, so the WHOLE batch is refused with 422 `unsupported_template_syntax`, naming each template, field and token in `templates`; nothing is written. A stray `}}` (inline CSS, JSON-LD) is fine. Conditional text belongs in the caller: build it and pass it as one variable.\n\n" +
     "**Required headers:** `x-org-id`, `x-user-id`, `x-run-id`",
   tags: ["Templates"],
   security: [{ apiKey: [] }],
@@ -948,6 +953,10 @@ registry.registerPath({
     },
     401: {
       description: "Unauthorized - invalid or missing API key",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    422: {
+      description: "unsupported_template_syntax: a template uses syntax the renderer would leave raw; the error names the template and the token, and `templates` lists each {name, field, token}. Nothing was written.",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },
