@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { emailTemplates } from "../db/schema.js";
 import type { TemplateLayout } from "../lib/brand-layout.js";
 import type { DeliveryStream } from "../lib/delivery-stream.js";
+import { UnsupportedTemplateSyntaxError, checkTemplateSyntax } from "./syntax.js";
 
 export interface TemplateResult {
   subject: string;
@@ -38,6 +39,18 @@ export async function getTemplate(eventType: string): Promise<TemplateFn> {
   }
 
   const row = rows[0];
+
+  // A stored template that breaks the contract (registered before the check
+  // existed, or written by hand) is refused here, before anything renders: a
+  // send that would put raw tags in front of a recipient does not go out.
+  // Checking the SOURCE, not the rendered output, is deliberate: a source that
+  // passes can render no raw tag of its own, and a metadata value that happens
+  // to contain "{{" (a prospect's text) does not block a correct template.
+  const problems = checkTemplateSyntax(row);
+  if (problems.length > 0) {
+    throw new UnsupportedTemplateSyntaxError(row.name, problems);
+  }
+
   return (metadata?: Record<string, unknown>) => ({
     subject: interpolate(row.subject, metadata),
     htmlBody: interpolate(row.htmlBody, metadata),

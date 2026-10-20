@@ -357,3 +357,37 @@ describe("PUT /platform-templates", () => {
     expect(res.body.templates).toHaveLength(2);
   });
 });
+
+describe("PUT /platform-templates refuses syntax the renderer would leave raw", () => {
+  const putPlatform = (templates: Array<Record<string, unknown>>) =>
+    request(app).put("/platform-templates").set("X-API-Key", "test-service-key").send({ templates });
+
+  it("rejects a mustache section with a 422 naming the template and the token, and writes nothing", async () => {
+    const res = await putPlatform([
+      { name: "ok-template", subject: "Hello", htmlBody: "<p>Hi {{firstName}}</p>" },
+      { name: "campaign_created", subject: "Live", htmlBody: "<p>Hi{{#firstName}} {{firstName}}{{/firstName}},</p>" },
+    ]);
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe("unsupported_template_syntax");
+    expect(res.body.error).toContain("campaign_created");
+    expect(res.body.error).toContain("{{#firstName}}");
+    expect(res.body.templates).toEqual([
+      { name: "campaign_created", field: "htmlBody", token: "{{#firstName}}" },
+      { name: "campaign_created", field: "htmlBody", token: "{{/firstName}}" },
+    ]);
+    // The whole batch is refused: not even the valid template is written
+    expect(mockValues).not.toHaveBeenCalled();
+  });
+
+  it("checks the subject and the text body too", async () => {
+    const res = await putPlatform([{ name: "t", subject: "{{^name}}there{{/name}}", htmlBody: "<p>x</p>", textBody: "{{ name }}" }]);
+    expect(res.status).toBe(422);
+    expect(res.body.templates.map((t: { field: string }) => t.field)).toEqual(["subject", "subject", "textBody"]);
+  });
+
+  it("still registers plain {{firstName}}", async () => {
+    const res = await putPlatform([{ name: "t", subject: "Hi {{firstName}}", htmlBody: "<p>Hi {{firstName}}</p>", textBody: "Hi {{firstName}}" }]);
+    expect(res.status).toBe(200);
+    expect(res.body.templates).toEqual([{ name: "t", action: "created" }]);
+  });
+});

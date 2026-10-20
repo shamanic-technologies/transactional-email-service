@@ -77,6 +77,15 @@ submitted_at DESC"` — then read the headers with
 it carries no `Cc` and no `ReplyTo` key at all, so a header that IS set reads
 as absent.
 
+## A template says exactly what the client reads: only `{{name}}` is syntax
+
+The renderer replaces `{{name}}` and nothing else, so `src/templates/syntax.ts`
+refuses every other `{{` at registration (422, whole batch, nothing written)
+and again at send time (422, nothing delivered, a `failed` event row with no
+dedup key). Cost 2026-10-20: a client read "Hi{{#firstName}} Liudvikas{{/firstName}},".
+Do not add mustache sections to make such a template pass, and do not relax
+the check to the RENDERED output: metadata may legitimately contain `{{`.
+
 ## Commands
 
 - `npm test` — run tests (Vitest)
