@@ -309,6 +309,74 @@ describe("pacing", () => {
   });
 });
 
+describe("releases spread over the list instead of piling on its head", () => {
+  async function reachedBy(releaseId: string): Promise<string[]> {
+    const rows = await sql`
+      SELECT email FROM mailing_list_release_recipients
+      WHERE release_id = ${releaseId} AND status = 'sent'
+    `;
+    return rows.map((r) => r.email as string);
+  }
+
+  it("two releases running in parallel reach disjoint people in a day", async () => {
+    await seedList(100);
+    const a = await createRelease({ subject: "Issue A", body: "a", dailyLimit: 30 });
+    const b = await createRelease({ subject: "Issue B", body: "b", dailyLimit: 30 });
+
+    await drain();
+
+    const reachedA = await reachedBy(a.body.releaseId);
+    const reachedB = await reachedBy(b.body.releaseId);
+    expect(reachedA.length).toBe(30);
+    expect(reachedB.length).toBe(30);
+    expect(reachedA.filter((email) => reachedB.includes(email))).toEqual([]);
+    // Nobody twice within a release.
+    expect(new Set(reachedA).size).toBe(30);
+    expect(new Set(reachedB).size).toBe(30);
+  });
+
+  it("a later release goes to people no earlier release reached, then to the least recently mailed", async () => {
+    await seedList(40);
+    const first = await createRelease({ subject: "Older issue", body: "1", dailyLimit: 15 });
+    await drain();
+    const reachedFirst = await reachedBy(first.body.releaseId);
+    expect(reachedFirst.length).toBe(15);
+
+    const second = await createRelease({ subject: "Newer issue", body: "2", dailyLimit: 30 });
+    await drain();
+    const reachedSecond = await reachedBy(second.body.releaseId);
+    expect(reachedSecond.length).toBe(30);
+
+    // The 25 nobody had mailed come first; only then 5 of the first release's 15.
+    const repeats = reachedSecond.filter((email) => reachedFirst.includes(email));
+    expect(repeats.length).toBe(5);
+    expect(new Set(addresses(40).filter((e) => !reachedFirst.includes(e)))).toEqual(
+      new Set(reachedSecond.filter((e) => !reachedFirst.includes(e)))
+    );
+  });
+
+  it("among people mailed equally often, the least recently mailed go first", async () => {
+    await seedList(4);
+    const older = await createRelease({ subject: "Old", body: "o", dailyLimit: 4 });
+    await drain();
+    // Make two of them recently mailed.
+    const recent = addresses(4).slice(0, 2);
+    await sql`
+      UPDATE mailing_list_release_recipients SET settled_at = now()
+      WHERE release_id = ${older.body.releaseId} AND email IN ${sql(recent)}
+    `;
+    await sql`
+      UPDATE mailing_list_release_recipients SET settled_at = now() - interval '10 days'
+      WHERE release_id = ${older.body.releaseId} AND email NOT IN ${sql(recent)}
+    `;
+
+    const next = await createRelease({ subject: "Next", body: "n", dailyLimit: 2 });
+    await drain();
+    const reached = await reachedBy(next.body.releaseId);
+    expect(new Set(reached)).toEqual(new Set(addresses(4).slice(2)));
+  });
+});
+
 describe("a release survives a restart", () => {
   it("loses nobody and repeats nobody when the process is replaced mid-flight", async () => {
     await seedList(LIST_SIZE);
