@@ -1,3 +1,4 @@
+import { queryErrorHandler } from "./lib/db-error.js";
 import express from "express";
 import cors from "cors";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -31,6 +32,7 @@ app.use(openapiRoutes);
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
+app.use(queryErrorHandler);
 
 // Only start server if not in test environment
 if (process.env.NODE_ENV !== "test") {

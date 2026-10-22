@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/db-error.js";
 import { Router, Request, Response } from "express";
 import { requireApiKey, requireIdentityHeaders } from "../middleware/auth.js";
 import { db } from "../db/index.js";
@@ -71,7 +72,7 @@ async function deployTemplates(req: Request, res: Response) {
     res.json({ templates: results });
   } catch (error: any) {
     console.error("Deploy templates error:", error);
-    res.status(500).json({ error: error.message || "Failed to deploy templates" });
+    res.status(500).json({ error: messageOf(error) || "Failed to deploy templates" });
   }
 }
 

@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/db-error.js";
 import { Router, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -203,12 +204,12 @@ async function refuseUnsupportedTemplate(
   console.error(`[send] refused ${err.templateName} to ${rows.map((r) => r.recipientEmail).join(", ") || "nobody"}: ${err.message}`);
   if (rows.length > 0) {
     try {
-      await db.insert(emailEvents).values(rows.map((r) => ({ ...r, dedupKey: null, status: "failed", errorMessage: err.message })));
+      await db.insert(emailEvents).values(rows.map((r) => ({ ...r, dedupKey: null, status: "failed", errorMessage: messageOf(err) })));
     } catch (dbErr: any) {
       console.error(`[send] could not record the refused ${err.templateName} send:`, dbErr.message);
     }
   }
-  res.status(422).json({ error: err.message, code: err.code, template: err.templateName, problems: err.problems });
+  res.status(422).json({ error: messageOf(err), code: err.code, template: err.templateName, problems: err.problems });
 }
 
 function getTodayDate(): string {
@@ -378,7 +379,7 @@ async function handleSend(req: Request, res: Response) {
     } catch (err: any) {
       if (err instanceof UnsupportedTemplateSyntaxError) {
         if (runId) {
-          traceEvent(runId, { service: "transactional-email-service", event: "send-refused", detail: err.message, level: "error" }, traceHeaders);
+          traceEvent(runId, { service: "transactional-email-service", event: "send-refused", detail: messageOf(err), level: "error" }, traceHeaders);
         }
         await refuseUnsupportedTemplate(
           res,
@@ -398,7 +399,7 @@ async function handleSend(req: Request, res: Response) {
         );
         return;
       }
-      res.status(404).json({ error: err.message });
+      res.status(404).json({ error: messageOf(err) });
       return;
     }
     const template = signRendered(body.eventType, templateFn(metadata as Record<string, unknown>));
@@ -455,7 +456,7 @@ async function handleSend(req: Request, res: Response) {
         });
       } catch (runErr: any) {
         console.error(`Failed to create run for ${body.eventType}:`, runErr.message);
-        results.push({ email, sent: false, reason: `Run creation failed: ${runErr.message}` });
+        results.push({ email, sent: false, reason: `Run creation failed: ${messageOf(runErr)}` });
         continue;
       }
 
@@ -551,7 +552,7 @@ async function handleSend(req: Request, res: Response) {
         results.push({ email, sent: true });
       } catch (err: any) {
         console.error(`Failed to send ${body.eventType} to ${email}:`, err.message);
-        traceEvent(run.id, { service: "transactional-email-service", event: "send-error", detail: err.message, level: "error" }, traceHeaders);
+        traceEvent(run.id, { service: "transactional-email-service", event: "send-error", detail: messageOf(err), level: "error" }, traceHeaders);
 
         // Mark run as failed
         try {
@@ -565,21 +566,21 @@ async function handleSend(req: Request, res: Response) {
           try {
             await db
               .update(emailEvents)
-              .set({ status: "failed", errorMessage: err.message })
+              .set({ status: "failed", errorMessage: messageOf(err) })
               .where(eq(emailEvents.id, insertedEventId));
           } catch {
             // Best effort
           }
         }
 
-        results.push({ email, sent: false, reason: err.message });
+        results.push({ email, sent: false, reason: messageOf(err) });
       }
     }
 
     res.json({ results });
   } catch (error: any) {
     console.error("Send lifecycle email error:", error);
-    res.status(500).json({ error: error.message || "Failed to send lifecycle email" });
+    res.status(500).json({ error: messageOf(error) || "Failed to send lifecycle email" });
   }
 }
 
@@ -657,7 +658,7 @@ async function handleOrglessPlatformSend(req: Request, res: Response) {
       await refuseUnsupportedTemplate(res, err, [{ eventType, recipientEmail, userId: null, orgId: null, metadata }]);
       return;
     }
-    res.status(404).json({ error: err.message, code: "template_not_found" });
+    res.status(404).json({ error: messageOf(err), code: "template_not_found" });
     return;
   }
   const template = signRendered(eventType, templateFn(metadata));
@@ -667,7 +668,7 @@ async function handleOrglessPlatformSend(req: Request, res: Response) {
     run = await createPlatformRun({ serviceName: "transactional-email-service", taskName: `email-${eventType}` });
   } catch (err: any) {
     console.error(`[platform-orgless-send] run creation failed for ${eventType}:`, err.message);
-    res.status(502).json({ error: `Run creation failed: ${err.message}`, code: "run_failed" });
+    res.status(502).json({ error: `Run creation failed: ${messageOf(err)}`, code: "run_failed" });
     return;
   }
 
@@ -691,10 +692,10 @@ async function handleOrglessPlatformSend(req: Request, res: Response) {
   } catch (err: any) {
     console.error(`[platform-orgless-send] failed to send ${eventType} to ${recipientEmail}:`, err.message);
     if (eventId) {
-      await db.update(emailEvents).set({ status: "failed", errorMessage: err.message }).where(eq(emailEvents.id, eventId));
+      await db.update(emailEvents).set({ status: "failed", errorMessage: messageOf(err) }).where(eq(emailEvents.id, eventId));
     }
-    await updatePlatformRun(run.id, "failed", err.message);
-    res.status(502).json({ error: err.message, code: "delivery_failed" });
+    await updatePlatformRun(run.id, "failed", messageOf(err));
+    res.status(502).json({ error: messageOf(err), code: "delivery_failed" });
     return;
   }
 
@@ -769,7 +770,7 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
       );
       return;
     }
-    res.status(404).json({ error: err.message, code: "template_not_found" });
+    res.status(404).json({ error: messageOf(err), code: "template_not_found" });
     return;
   }
   // Staff mail: no brand layout, no why (signRendered is for customer mail)
@@ -804,8 +805,8 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
       run = await createPlatformRun({ serviceName: "transactional-email-service", taskName: `email-${eventType}` });
     } catch (err: any) {
       console.error(`[platform-staff-alert] run creation failed for ${eventType} ${eventId}:`, err.message);
-      await db.update(emailEvents).set({ status: "failed", errorMessage: `Run creation failed: ${err.message}` }).where(eq(emailEvents.id, rowId));
-      res.status(502).json({ error: `Run creation failed: ${err.message}`, code: "run_failed" });
+      await db.update(emailEvents).set({ status: "failed", errorMessage: `Run creation failed: ${messageOf(err)}` }).where(eq(emailEvents.id, rowId));
+      res.status(502).json({ error: `Run creation failed: ${messageOf(err)}`, code: "run_failed" });
       return;
     }
 
@@ -821,9 +822,9 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
       });
     } catch (err: any) {
       console.error(`[platform-staff-alert] failed to send ${eventType} ${eventId} to ${email}:`, err.message);
-      await db.update(emailEvents).set({ status: "failed", errorMessage: err.message }).where(eq(emailEvents.id, rowId));
-      await updatePlatformRun(run.id, "failed", err.message);
-      res.status(502).json({ error: err.message, code: "delivery_failed" });
+      await db.update(emailEvents).set({ status: "failed", errorMessage: messageOf(err) }).where(eq(emailEvents.id, rowId));
+      await updatePlatformRun(run.id, "failed", messageOf(err));
+      res.status(502).json({ error: messageOf(err), code: "delivery_failed" });
       return;
     }
 
@@ -859,10 +860,10 @@ router.post("/send/preview", requireApiKey, requireOrgIdOnly, async (req, res) =
   } catch (err: any) {
     if (err instanceof UnsupportedTemplateSyntaxError) {
       // A preview sends nothing, so there is no event to record
-      res.status(422).json({ error: err.message, code: err.code, template: err.templateName, problems: err.problems });
+      res.status(422).json({ error: messageOf(err), code: err.code, template: err.templateName, problems: err.problems });
       return;
     }
-    res.status(404).json({ error: err.message });
+    res.status(404).json({ error: messageOf(err) });
     return;
   }
 
