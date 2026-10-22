@@ -155,6 +155,13 @@
       "when": 1791789211198,
       "tag": "0021_email_events_orgless",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792691361071,
+      "tag": "0022_retire_inbox_placement_alert",
+      "breakpoints": true
     }
   ]
 }
