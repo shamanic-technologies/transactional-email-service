@@ -17,7 +17,7 @@ vi.mock("../../src/lib/runs-client.js", () => ({
 
 import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
-import { emailEvents } from "../../src/db/schema.js";
+import { emailEvents, emailTemplates } from "../../src/db/schema.js";
 import { sendOrglessPlatformEmail } from "../../src/lib/email-gateway.js";
 import { seedStaffTemplates } from "../../src/templates/staff-alerts.js";
 import { ADMIN_EMAILS } from "../../src/lib/staff-recipients.js";
@@ -102,29 +102,22 @@ describe("POST /platform-staff-alert (database-backed)", () => {
   });
 });
 
-describe("POST /platform-staff-alert inbox_placement_below_bar (database-backed)", () => {
-  const PLACEMENT = {
-    eventType: "inbox_placement_below_bar",
-    eventId: "Google:2026-10-18",
-    metadata: {
-      provider: "Google",
-      measuredOn: "2026-10-18",
-      inboxPct: "52.6",
-      seeds: "38",
-      thresholdPct: "90",
-      mailboxesCut: "6",
-      dashboardUrl: "https://distribute.you/v2/monitoring",
-    },
-  };
+describe("POST /platform-staff-alert inbox_placement_below_bar (retired, database-backed)", () => {
+  it("is refused, sends nothing and stores no row", async () => {
+    const res = await post({
+      eventType: "inbox_placement_below_bar",
+      eventId: "Google:2026-10-22",
+      metadata: { provider: "Google", inboxPct: "52.6" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("event_not_platform_staff_alert");
+    expect(sendOrglessPlatformEmail).not.toHaveBeenCalled();
+    const rows = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "inbox_placement_below_bar"));
+    expect(rows).toHaveLength(0);
+  });
 
-  it("delivers once per event id from the seeded template", async () => {
-    const first = await post(PLACEMENT);
-    expect(first.status).toBe(200);
-    expect(first.body.sent).toBe(true);
-    const second = await post(PLACEMENT);
-    expect(second.body.duplicate).toBe(true);
-    expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(ADMIN_EMAILS.length);
-    const [[sent]] = vi.mocked(sendOrglessPlatformEmail).mock.calls;
-    expect(sent.subject).toBe("Google inbox placement is 52.6%, below the 90% bar");
+  it("no template by that name is registered after boot", async () => {
+    const rows = await db.select().from(emailTemplates).where(eq(emailTemplates.name, "inbox_placement_below_bar"));
+    expect(rows).toHaveLength(0);
   });
 });

@@ -38,7 +38,7 @@ import sendRoutes from "../../src/routes/send.js";
 import { createRun, createPlatformRun, updatePlatformRun } from "../../src/lib/runs-client.js";
 import { resolveUserEmail } from "../../src/lib/client-service.js";
 import { ADMIN_EMAILS } from "../../src/lib/staff-recipients.js";
-import { SENDING_DOMAIN_BLOCKLISTED_TEMPLATE as TPL, INBOX_PLACEMENT_BELOW_BAR_TEMPLATE as PLACEMENT_TPL } from "../../src/templates/staff-alerts.js";
+import { SENDING_DOMAIN_BLOCKLISTED_TEMPLATE as TPL } from "../../src/templates/staff-alerts.js";
 
 const app = express();
 app.use(express.json());
@@ -219,81 +219,16 @@ describe("POST /platform-staff-alert", () => {
   });
 });
 
-describe("POST /platform-staff-alert inbox_placement_below_bar", () => {
-  const PLACEMENT_METADATA = {
-    provider: "Google",
-    measuredOn: "2026-10-18",
-    inboxPct: "52.6",
-    seeds: "38",
-    thresholdPct: "90",
-    mailboxesCut: "6",
-    dashboardUrl: "https://distribute.you/v2/monitoring",
-  };
-  const PLACEMENT_BODY = { eventType: "inbox_placement_below_bar", eventId: "Google:2026-10-18", metadata: PLACEMENT_METADATA };
-
-  beforeEach(() => {
-    mockSelectLimit.mockResolvedValue([{ ...PLACEMENT_TPL, fromAddress: null, layout: "none", stream: "broadcast" }]);
-  });
-
-  it("delivers one email to the staff list with every fact, on a platform run", async () => {
-    const res = await post(PLACEMENT_BODY);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ sent: true, duplicate: false, eventId: PLACEMENT_BODY.eventId, runId: "platform-run-1" });
-    expect(createPlatformRun).toHaveBeenCalledWith({ serviceName: "transactional-email-service", taskName: "email-inbox_placement_below_bar" });
-    expect(resolveUserEmail).not.toHaveBeenCalled();
-
-    const calls = gatewayCalls();
-    expect(calls).toHaveLength(ADMIN_EMAILS.length);
-    const [, options] = calls[0];
-    expect(options.headers["x-org-id"]).toBeUndefined();
-    const sent = JSON.parse(options.body);
-    expect(sent.to).toBe(ADMIN_EMAILS[0]);
-    expect(sent.subject).toBe("Google inbox placement is 52.6%, below the 90% bar");
-    expect(sent.bcc).toBeUndefined();
-    for (const value of Object.values(PLACEMENT_METADATA)) {
-      expect(sent.textBody).toContain(value);
-      expect(sent.htmlBody).toContain(value);
-    }
-    expect(sent.htmlBody).toContain(`href="${PLACEMENT_METADATA.dashboardUrl}"`);
-    expect(sent.textBody).not.toContain("Revenue made easy");
-    expect(mockValues).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: "inbox_placement_below_bar",
-        orgId: null,
-        userId: null,
-        dedupKey: `platform-staff-alert:inbox_placement_below_bar:${PLACEMENT_BODY.eventId}`,
-      }),
-    );
-  });
-
-  it("the same event id twice delivers once", async () => {
-    await post(PLACEMENT_BODY);
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await post(PLACEMENT_BODY);
-    expect(second.body).toEqual({ sent: false, duplicate: true, eventId: PLACEMENT_BODY.eventId, runId: null });
-    expect(gatewayCalls()).toHaveLength(ADMIN_EMAILS.length);
-  });
-
-  it("a missing key is a 400 naming it", async () => {
-    const { mailboxesCut: _m, ...rest } = PLACEMENT_METADATA;
-    const res = await post({ ...PLACEMENT_BODY, metadata: { ...rest, seeds: "" } });
+describe("POST /platform-staff-alert inbox_placement_below_bar (retired)", () => {
+  it("is refused like any unknown event type and sends nothing", async () => {
+    const res = await post({
+      eventType: "inbox_placement_below_bar",
+      eventId: "Google:2026-10-22",
+      metadata: { provider: "Google", inboxPct: "52.6" },
+    });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("missing_metadata");
-    expect(res.body.missing).toEqual(["seeds", "mailboxesCut"]);
+    expect(res.body.code).toBe("event_not_platform_staff_alert");
+    expect(createPlatformRun).not.toHaveBeenCalled();
     expect(gatewayCalls()).toHaveLength(0);
-  });
-
-  it("/send/preview renders it unsigned and sends nothing", async () => {
-    const res = await request(app)
-      .post("/send/preview")
-      .set("X-API-Key", "test-service-key")
-      .set("x-org-id", "org_456")
-      .send({ eventType: "inbox_placement_below_bar", metadata: PLACEMENT_METADATA });
-    expect(res.status).toBe(200);
-    expect(res.body.subject).toBe("Google inbox placement is 52.6%, below the 90% bar");
-    expect(res.body.textBody).toContain("52.6% of 38 seeds (bar 90%)");
-    expect(res.body.textBody).not.toContain("Revenue made easy");
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
