@@ -1,3 +1,4 @@
+import { messageOf } from "./db-error.js";
 import { and, eq, inArray, sql as raw } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
@@ -385,7 +386,7 @@ async function recordStall(release: MailingListRelease, slug: string, reason: st
     );
   } catch (err: any) {
     console.error(
-      `[transactional-email-service] release ${release.id}: STALL ALERT NOT SENT, retrying next tick: ${err.message}`
+      `[transactional-email-service] release ${release.id}: STALL ALERT NOT SENT, retrying next tick: ${messageOf(err)}`
     );
   }
 }
@@ -423,7 +424,7 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
     // release's run. That is a question which found nothing, not a release with
     // clean outcomes, and it decides nothing here.
     console.error(
-      `[transactional-email-service] release ${release.id}: delivery outcomes unavailable, no verdict this tick: ${err.message}`
+      `[transactional-email-service] release ${release.id}: delivery outcomes unavailable, no verdict this tick: ${messageOf(err)}`
     );
     return false;
   }
@@ -518,7 +519,7 @@ async function releaseSlice(
           });
           return { id: row.id, reason: null as string | null };
         } catch (err: any) {
-          return { id: row.id, reason: err.message || "Unknown send error" };
+          return { id: row.id, reason: messageOf(err) || "Unknown send error" };
         }
       })
     );
@@ -577,19 +578,19 @@ async function verifySlice(
       );
     report.verificationUnavailable += 1;
     console.error(
-      `[transactional-email-service] release ${release.id}: VERIFICATION UNAVAILABLE, ${rows.length} address(es) NOT sent, returned to pending for the next tick: ${err.message}`
+      `[transactional-email-service] release ${release.id}: VERIFICATION UNAVAILABLE, ${rows.length} address(es) NOT sent, returned to pending for the next tick: ${messageOf(err)}`
     );
     traceEvent(
       release.runId,
       {
         service: "transactional-email-service",
         event: "mailing-list-release-verification-unavailable",
-        detail: `${rows.length} address(es) not sent this tick: ${err.message}`,
+        detail: `${rows.length} address(es) not sent this tick: ${messageOf(err)}`,
         level: "error",
       },
       headersOf(release)
     );
-    await recordStall(release, slug, err.message, now);
+    await recordStall(release, slug, messageOf(err), now);
     return [];
   }
 
@@ -712,7 +713,7 @@ export async function runReleaseTick(now = new Date()): Promise<TickReport> {
         // A tick that throws every time is a stall too (a suppression read that
         // keeps failing, say), and is reported on the same terms.
         try {
-          await recordStall(release, slug, err.message, now);
+          await recordStall(release, slug, messageOf(err), now);
         } catch (stallErr: any) {
           console.error(`[transactional-email-service] release ${release.id}: could not record stall: ${stallErr.message}`);
         }

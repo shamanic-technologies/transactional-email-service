@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/db-error.js";
 import { Router, type Request, type Response } from "express";
 import { and, desc, eq } from "drizzle-orm";
 import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "../middleware/auth.js";
@@ -141,7 +142,7 @@ router.get("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnly, 
     });
   } catch (error: any) {
     console.error("List subscribers error:", error);
-    res.status(502).json({ error: error.message || "Failed to read subscribers" });
+    res.status(502).json({ error: messageOf(error) || "Failed to read subscribers" });
   }
 });
 
@@ -188,7 +189,7 @@ router.post("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnly,
     res.json({ slug, added, skipped, rejected: blob.rejected });
   } catch (error: any) {
     console.error("Add subscribers error:", error);
-    res.status(500).json({ error: error.message || "Failed to add subscribers" });
+    res.status(500).json({ error: messageOf(error) || "Failed to add subscribers" });
   }
 });
 
@@ -225,7 +226,7 @@ router.delete("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnl
     res.json({ slug, email, removed: true });
   } catch (error: any) {
     console.error("Remove subscriber error:", error);
-    res.status(500).json({ error: error.message || "Failed to remove subscriber" });
+    res.status(500).json({ error: messageOf(error) || "Failed to remove subscriber" });
   }
 });
 
@@ -442,7 +443,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
             });
             return { email, reason: null as string | null };
           } catch (err: any) {
-            return { email, reason: err.message || "Unknown send error" };
+            return { email, reason: messageOf(err) || "Unknown send error" };
           }
         })
       );
@@ -517,7 +518,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
     res.json(outcome);
   } catch (error: any) {
     console.error("Send mailing-list update error:", error);
-    res.status(500).json({ error: error.message || "Failed to send mailing-list update" });
+    res.status(500).json({ error: messageOf(error) || "Failed to send mailing-list update" });
   }
 });
 
@@ -560,7 +561,7 @@ router.get("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asyn
     });
   } catch (error: any) {
     console.error("List updates error:", error);
-    res.status(500).json({ error: error.message || "Failed to read updates" });
+    res.status(500).json({ error: messageOf(error) || "Failed to read updates" });
   }
 });
 
