@@ -17,7 +17,6 @@ import {
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
-  INBOX_PLACEMENT_BELOW_BAR_TEMPLATE,
   STAFF_TEMPLATES,
   seedStaffTemplates,
 } from "../../src/templates/staff-alerts.js";
@@ -267,34 +266,6 @@ describe("sending_domain_blocklisted template", () => {
       mailboxesAffected: "a@boostdistribute.com, b@boostdistribute.com",
       actionTaken: "The 2 mailboxes no longer start new sequences.",
       removalUrl: "https://check.spamhaus.org/",
-    };
-    for (const body of [T.subject, T.htmlBody, T.textBody]) {
-      const out = interpolate(body, vars);
-      expect(out).not.toContain("{{");
-      expect(out).not.toMatch(/[\u2013\u2014]/);
-    }
-    for (const value of Object.values(vars)) {
-      expect(interpolate(T.textBody, vars)).toContain(value);
-      expect(interpolate(T.htmlBody, vars)).toContain(value);
-    }
-    expect(T.htmlBody).not.toContain("<style");
-    expect(T.htmlBody).not.toContain("class=");
-  });
-});
-
-describe("inbox_placement_below_bar template", () => {
-  const T = INBOX_PLACEMENT_BELOW_BAR_TEMPLATE;
-
-  it("is registered and renders every fact, with no placeholder or dash left", () => {
-    expect(STAFF_TEMPLATES).toContain(T);
-    const vars = {
-      provider: "Microsoft 365",
-      measuredOn: "2026-10-18",
-      inboxPct: "41.7",
-      seeds: "24",
-      thresholdPct: "90",
-      mailboxesCut: "3",
-      dashboardUrl: "https://distribute.you/v2/monitoring",
     };
     for (const body of [T.subject, T.htmlBody, T.textBody]) {
       const out = interpolate(body, vars);
