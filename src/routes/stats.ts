@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/db-error.js";
 import { Router } from "express";
 import { requireApiKey, requireIdentityHeaders, type IdentityLocals } from "../middleware/auth.js";
 import { db } from "../db/index.js";
@@ -48,7 +49,7 @@ router.get("/stats", requireApiKey, requireIdentityHeaders, async (req, res) => 
     res.json({ stats });
   } catch (error: any) {
     console.error("Stats error:", error);
-    res.status(500).json({ error: error.message || "Failed to get stats" });
+    res.status(500).json({ error: messageOf(error) || "Failed to get stats" });
   }
 });
 

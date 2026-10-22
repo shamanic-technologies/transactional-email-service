@@ -1,3 +1,4 @@
+import { errorString } from "./db-error.js";
 import type { MailingListRelease } from "../db/schema.js";
 
 /**
@@ -81,7 +82,7 @@ async function verifyChunk(release: MailingListRelease, emails: string[]): Promi
       signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
     });
   } catch (err: any) {
-    throw new VerificationUnavailableError(`apollo-service unreachable: ${err?.message ?? String(err)}`);
+    throw new VerificationUnavailableError(`apollo-service unreachable: ${err?.message ?? errorString(err)}`);
   }
 
   const text = await response.text();

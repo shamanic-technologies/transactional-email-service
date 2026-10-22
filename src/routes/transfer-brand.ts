@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/db-error.js";
 import { Router } from "express";
 import { requireApiKey } from "../middleware/auth.js";
 import { TransferBrandRequestSchema } from "../schemas.js";
@@ -35,7 +36,7 @@ router.post("/internal/transfer-brand", requireApiKey, async (req, res) => {
     res.json({ updatedTables: result.updatedTables });
   } catch (error: any) {
     console.error("[transactional-email-service] transfer-brand error:", error);
-    res.status(500).json({ error: error.message || "Failed to transfer brand" });
+    res.status(500).json({ error: messageOf(error) || "Failed to transfer brand" });
   }
 });
 

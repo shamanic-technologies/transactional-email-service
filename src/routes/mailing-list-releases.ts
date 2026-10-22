@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/db-error.js";
 import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, sql as raw } from "drizzle-orm";
@@ -332,7 +333,7 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
     });
   } catch (error: any) {
     console.error("[transactional-email-service] Create release error:", error);
-    res.status(502).json({ error: error.message || "Failed to create release" });
+    res.status(502).json({ error: messageOf(error) || "Failed to create release" });
   }
 });
 
@@ -365,7 +366,7 @@ router.get("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, asy
     });
   } catch (error: any) {
     console.error("[transactional-email-service] List releases error:", error);
-    res.status(500).json({ error: error.message || "Failed to read releases" });
+    res.status(500).json({ error: messageOf(error) || "Failed to read releases" });
   }
 });
 
@@ -389,7 +390,7 @@ router.get("/mailing-lists/releases/:releaseId", requireApiKey, requireOrgIdOnly
     res.json(await describe(found.release, found.slug));
   } catch (error: any) {
     console.error("[transactional-email-service] Read release error:", error);
-    res.status(500).json({ error: error.message || "Failed to read release" });
+    res.status(500).json({ error: messageOf(error) || "Failed to read release" });
   }
 });
 
@@ -484,7 +485,7 @@ async function transition(
     res.json(await describe(updated, found.slug, now));
   } catch (error: any) {
     console.error(`[transactional-email-service] Release ${to} error:`, error);
-    res.status(500).json({ error: error.message || `Failed to ${to} release` });
+    res.status(500).json({ error: messageOf(error) || `Failed to ${to} release` });
   }
 }
 
@@ -579,7 +580,7 @@ router.patch("/mailing-lists/releases/:releaseId/pace", requireApiKey, requireOr
     res.json(await describe(updated, found.slug, now));
   } catch (error: any) {
     console.error("[transactional-email-service] Release pace error:", error);
-    res.status(500).json({ error: error.message || "Failed to change release pace" });
+    res.status(500).json({ error: messageOf(error) || "Failed to change release pace" });
   }
 });
 
@@ -604,7 +605,7 @@ router.post("/internal/mailing-lists/releases/tick", requireApiKey, async (_req,
     res.json(await runReleaseTick());
   } catch (error: any) {
     console.error("[transactional-email-service] Release tick error:", error);
-    res.status(500).json({ error: error.message || "Release tick failed" });
+    res.status(500).json({ error: messageOf(error) || "Release tick failed" });
   }
 });
 
