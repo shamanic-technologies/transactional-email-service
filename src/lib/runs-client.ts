@@ -147,3 +147,29 @@ export async function createPlatformRun(params: { serviceName: string; taskName:
 export async function updatePlatformRun(runId: string, status: "completed" | "failed", error?: string): Promise<Run> {
   return platformRunsRequest<Run>(`/v1/platform-runs/${runId}`, "PATCH", { status, ...(error && { error }) });
 }
+
+// ─── Outcome backfill (COST-BACKFILL-1023) ──────────────────────────────────
+//
+// runs-service's batch door for declaring the outcomes of PAST runs, each run
+// with its own `occurredAt` (see outcome-backfill.ts). Platform-authed: no
+// x-org-id, x-service-name = the owner of every run declared. All or nothing
+// per call; a replay answers 200 with every occurrence already recorded.
+
+export interface BackfillOccurrence {
+  outcomeKey: string;
+  subjectService: string;
+  subjectId: string;
+}
+
+export interface DeclareOutcomesBatchBody {
+  runs: Array<{ runId: string; occurredAt: string; produced: BackfillOccurrence[] }>;
+}
+
+export interface DeclareOutcomesBatchResult {
+  recordedCount: number;
+  alreadyRecordedCount: number;
+}
+
+export async function declareOutcomesBatch(body: DeclareOutcomesBatchBody): Promise<DeclareOutcomesBatchResult> {
+  return platformRunsRequest<DeclareOutcomesBatchResult>("/v1/platform-runs/outcomes/batch", "POST", body);
+}
