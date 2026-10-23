@@ -169,6 +169,25 @@ export const TransferBrandResponseSchema = z
   })
   .openapi("TransferBrandResponse");
 
+// --- POST /internal/outcome-backfill ---
+
+export const OutcomeBackfillRequestSchema = z
+  .object({
+    dryRun: z.boolean().openapi({ description: "true = count what would be declared and write nothing." }),
+  })
+  .openapi("OutcomeBackfillRequest");
+
+export const OutcomeBackfillResponseSchema = z
+  .object({
+    dryRun: z.boolean(),
+    releaseRuns: z.number().int().openapi({ description: "Release runs holding at least one past send." }),
+    occurrences: z.number().int().openapi({ description: "Past `message_sent` occurrences our rows hold (one per release run x subscriber reached)." }),
+    calls: z.number().int().openapi({ description: "runs-service batch calls (one per release run x UTC day, <= 1000 occurrences each)." }),
+    recorded: z.number().int().openapi({ description: "Occurrences newly recorded by runs-service (0 on a dry run, 0 on a replay)." }),
+    alreadyRecorded: z.number().int(),
+  })
+  .openapi("OutcomeBackfillResponse");
+
 // --- Mailing lists (platform-level, staff-only) ---
 
 export const MailingListSubscriberSchema = z
@@ -957,6 +976,43 @@ registry.registerPath({
     },
     422: {
       description: "unsupported_template_syntax: a template uses syntax the renderer would leave raw; the error names the template and the token, and `templates` lists each {name, field, token}. Nothing was written.",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/outcome-backfill",
+  summary: "Declare the outcomes of PAST release sends to runs-service (COST-BACKFILL-1023)",
+  description:
+    "Re-reads every mailing-list release send settled before the live declarations went live (2026-10-23T14:33:24Z) and declares, " +
+    "on each release's own run, one `message_sent` per subscriber reached (subject transactional-email-service / mailing_list_subscribers.id), " +
+    "through runs-service POST /v1/platform-runs/outcomes/batch with the send's instant as occurredAt. The release run's cost (the past " +
+    "postmark sends and apollo verifications under it, which declare nothing) is split over them. Idempotent: a replay records nothing.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: OutcomeBackfillRequestSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "What was (or, on a dry run, would be) declared",
+      content: { "application/json": { schema: OutcomeBackfillResponseSchema } },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    401: {
+      description: "Unauthorized - invalid or missing API key",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    502: {
+      description: "runs-service refused or was unreachable; whatever was recorded before stays, re-run to resume",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },

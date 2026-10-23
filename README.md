@@ -257,6 +257,12 @@ export async function register() {
 }
 ```
 
+### `POST /internal/outcome-backfill`
+
+**Internal endpoint** — requires `x-api-key` only. Body `{ "dryRun": boolean }` (required).
+
+Declares the outcomes of PAST release sends (COST-BACKFILL-1023): every recipient `sent` before the live subscriber declarations went live (2026-10-23T14:33:24Z) becomes one `message_sent` on its release's own run (subject `transactional-email-service` / subscriber id), through runs-service `POST /v1/platform-runs/outcomes/batch` with the send's instant as `occurredAt`. Idempotent (a replay records nothing); a failure is a 502 and a re-run resumes. Returns `{ dryRun, releaseRuns, occurrences, calls, recorded, alreadyRecorded }`.
+
 ### `POST /internal/transfer-brand`
 
 **Internal endpoint** — requires `x-api-key` only, no identity headers.
@@ -656,6 +662,7 @@ src/
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
     outcome-subject.ts  # Cost ledger: a release send names its subscriber (message_sent) and consumes email_checked; transactional sends name nobody
+    outcome-backfill.ts # Cost ledger: declares message_sent on past release runs (sends before the live path) via runs-service's batch door
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
@@ -675,6 +682,7 @@ src/
     stats.ts            # GET /stats + POST /stats (deprecated) for aggregated email stats
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
+    outcome-backfill.ts # POST /internal/outcome-backfill (declare past release sends' outcomes)
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
     syntax.ts           # Template syntax contract: refuses any {{ that is not a {{name}} placeholder
