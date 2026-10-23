@@ -47,6 +47,27 @@ describe("fetchVerdicts", () => {
     expect(JSON.parse(init.body).emails).toEqual(["A@x.com", "b@x.com"]);
   });
 
+  it("names each address's subscriber so apollo declares email_checked on the same subject, and sends no subjects when none is known", async () => {
+    fetchMock.mockImplementation(async () =>
+      answer(200, {
+        results: [
+          { email: "a@x.com", verdict: "valid", verificationId: "v1" },
+          { email: "b@x.com", verdict: "valid", verificationId: "v2" },
+        ],
+      })
+    );
+    await fetchVerdicts(
+      RELEASE,
+      ["A@x.com", "b@x.com"],
+      new Map([["a@x.com", { subjectService: "transactional-email-service", subjectId: "sub-a" }]])
+    );
+    await fetchVerdicts(RELEASE, ["A@x.com", "b@x.com"]);
+
+    const named = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(named.subjects).toEqual([{ email: "A@x.com", subjectService: "transactional-email-service", subjectId: "sub-a" }]);
+    expect("subjects" in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
+  });
+
   it("throws on a non-2xx answer", async () => {
     fetchMock.mockResolvedValue(answer(502, { type: "email_verification", error: "boom" }));
     await expect(fetchVerdicts(RELEASE, ["a@x.com"])).rejects.toBeInstanceOf(VerificationUnavailableError);

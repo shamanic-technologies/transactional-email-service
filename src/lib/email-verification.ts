@@ -1,5 +1,6 @@
 import { errorString } from "./db-error.js";
 import type { MailingListRelease } from "../db/schema.js";
+import type { OutcomeSubject } from "./outcome-subject.js";
 
 /**
  * Pre-send verdicts for a slice of a mailing-list release, from apollo-service.
@@ -13,6 +14,12 @@ import type { MailingListRelease } from "../db/schema.js";
  * Only verdict `valid` may be sent. Apollo's own `email_status: verified` is
  * not a usable filter: 97% of the newsletter list carried it and 132 of its
  * first 138 bounces did too.
+ *
+ * Cost ledger: each address may carry the person it belongs to (`subjects`,
+ * keyed by lower-cased address). apollo-service then declares the
+ * `email_checked` its deciding verification produced on THAT subject, the same
+ * one the release send later states it consumed. An address with no subject is
+ * verified exactly as before.
  *
  * Fails loud. A non-2xx answer, a timeout, or an answer that does not name a
  * verdict for every address asked THROWS, and the caller sends nothing from
@@ -71,14 +78,26 @@ function identityHeaders(release: MailingListRelease): Record<string, string> {
   return headers;
 }
 
-async function verifyChunk(release: MailingListRelease, emails: string[]): Promise<Verdict[]> {
+async function verifyChunk(
+  release: MailingListRelease,
+  emails: string[],
+  subjects: ReadonlyMap<string, OutcomeSubject>
+): Promise<Verdict[]> {
+  const named = emails.flatMap((email) => {
+    const subject = subjects.get(email.toLowerCase());
+    return subject ? [{ email, ...subject }] : [];
+  });
   const { url, apiKey } = config();
   let response: Response;
   try {
     response = await fetch(`${url}/email-verifications`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, ...identityHeaders(release) },
-      body: JSON.stringify({ emails, source: "transactional-email-service:mailing-list-release" }),
+      body: JSON.stringify({
+        emails,
+        source: "transactional-email-service:mailing-list-release",
+        ...(named.length > 0 && { subjects: named }),
+      }),
       signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
     });
   } catch (err: any) {
@@ -114,10 +133,14 @@ async function verifyChunk(release: MailingListRelease, emails: string[]): Promi
  * A verdict for EVERY address given, keyed by the lower-cased address. Throws
  * VerificationUnavailableError if one cannot be had for any of them.
  */
-export async function fetchVerdicts(release: MailingListRelease, emails: string[]): Promise<Map<string, Verdict>> {
+export async function fetchVerdicts(
+  release: MailingListRelease,
+  emails: string[],
+  subjects: ReadonlyMap<string, OutcomeSubject> = new Map()
+): Promise<Map<string, Verdict>> {
   const byEmail = new Map<string, Verdict>();
   for (let offset = 0; offset < emails.length; offset += VERIFY_CHUNK) {
-    for (const v of await verifyChunk(release, emails.slice(offset, offset + VERIFY_CHUNK))) {
+    for (const v of await verifyChunk(release, emails.slice(offset, offset + VERIFY_CHUNK), subjects)) {
       byEmail.set(v.email, v);
     }
   }

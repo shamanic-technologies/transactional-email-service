@@ -349,4 +349,30 @@ describe("sendEmail", () => {
     // is where a customer-facing send can be told apart from a staff-list one
     expect(JSON.parse(options.body)).not.toHaveProperty("bcc");
   });
+  it("forwards the outcome subject and consumed keys a release names, and nothing otherwise", async () => {
+    const base = {
+      to: "s@example.com",
+      subject: "S",
+      htmlBody: "<p>s</p>",
+      textBody: "s",
+      tag: "t",
+      orgId: "org_1",
+      runId: "run_1",
+    };
+    await sendEmail({
+      ...base,
+      outcomeSubject: { subjectService: "transactional-email-service", subjectId: "sub-1" },
+      consumedOutcomeKeys: ["email_checked"],
+    });
+    await sendEmail(base);
+    await sendEmail({ ...base, consumedOutcomeKeys: ["email_checked"] });
+
+    const [named, plain, keysOnly] = fetchSpy.mock.calls.map(([, o]) => JSON.parse(o.body));
+    expect(named.outcomeSubject).toEqual({ subjectService: "transactional-email-service", subjectId: "sub-1" });
+    expect(named.consumedOutcomeKeys).toEqual(["email_checked"]);
+    expect("outcomeSubject" in plain).toBe(false);
+    expect("consumedOutcomeKeys" in plain).toBe(false);
+    // Keys without a subject would be a 400 at the gateway: never put on the wire.
+    expect("consumedOutcomeKeys" in keysOnly).toBe(false);
+  });
 });

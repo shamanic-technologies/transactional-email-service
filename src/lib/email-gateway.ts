@@ -1,6 +1,7 @@
 import type { WorkflowHeaders } from "./runs-client.js";
 import { FOUNDER_EMAIL } from "./founder.js";
 import type { DeliveryStream } from "./delivery-stream.js";
+import type { OutcomeSubject } from "./outcome-subject.js";
 
 const EMAIL_GATEWAY_SERVICE_URL = process.env.EMAIL_GATEWAY_SERVICE_URL || "https://email-gateway.distribute.you";
 const EMAIL_GATEWAY_SERVICE_API_KEY = process.env.EMAIL_GATEWAY_SERVICE_API_KEY;
@@ -27,6 +28,14 @@ interface SendEmailParams {
   stream?: DeliveryStream;
   /** `platform` = platform-paid (no org credit gate, no cost on the org). Omitted = no key on the wire, the org pays. */
   payer?: "platform";
+  /**
+   * The ONE person this send reaches, for the cost ledger (postmark-service
+   * declares `message_sent` on the send run for them). Set by a mailing-list
+   * release only; omitted = no key on the wire (a transactional send names nobody).
+   */
+  outcomeSubject?: OutcomeSubject;
+  /** Outcome keys this send consumed for `outcomeSubject` (e.g. `email_checked`). Ignored without a subject. */
+  consumedOutcomeKeys?: readonly string[];
   workflowHeaders?: WorkflowHeaders;
 }
 
@@ -90,6 +99,9 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       // request body is unchanged.
       ...(params.stream === "transactional" && { stream: params.stream }),
       ...(params.payer === "platform" && { payer: params.payer }),
+      ...(params.outcomeSubject && { outcomeSubject: params.outcomeSubject }),
+      ...(params.outcomeSubject &&
+        params.consumedOutcomeKeys?.length && { consumedOutcomeKeys: [...params.consumedOutcomeKeys] }),
     }),
   });
 

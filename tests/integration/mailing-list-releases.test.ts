@@ -377,6 +377,66 @@ describe("releases spread over the list instead of piling on its head", () => {
   });
 });
 
+describe("every release send names the subscriber it reaches, for the cost ledger", () => {
+  async function subscriberIds(): Promise<Map<string, string>> {
+    const rows = await sql`
+      SELECT s.email, s.id FROM mailing_list_subscribers s
+      JOIN mailing_lists l ON l.id = s.list_id WHERE l.slug = ${SLUG}
+    `;
+    return new Map(rows.map((r) => [r.email as string, r.id as string]));
+  }
+
+  it("carries outcomeSubject = the subscriber row and consumes email_checked", async () => {
+    await seedList(3);
+    await createRelease({ subject: "Ledger", body: "hi", dailyLimit: 10 });
+    await drain();
+
+    const ids = await subscriberIds();
+    const calls = vi.mocked(sendEmail).mock.calls.map(([p]) => p);
+    expect(calls).toHaveLength(3);
+    for (const p of calls) {
+      expect(p.outcomeSubject).toEqual({ subjectService: "transactional-email-service", subjectId: ids.get(p.to) });
+      expect(p.consumedOutcomeKeys).toEqual(["email_checked"]);
+    }
+    // The verification before the send names the SAME subject, so the
+    // email_checked apollo-service produces is the one the send consumed.
+    const [, emails, subjects] = vi.mocked(fetchVerdicts).mock.calls[0];
+    for (const email of emails) {
+      expect(subjects!.get(email)).toEqual({ subjectService: "transactional-email-service", subjectId: ids.get(email) });
+    }
+  });
+
+  it("names the same subject for one subscriber across two releases", async () => {
+    await seedList(2);
+    await createRelease({ subject: "One", body: "1", dailyLimit: 10 });
+    await createRelease({ subject: "Two", body: "2", dailyLimit: 10 });
+    await drain();
+
+    const target = addresses(2)[0];
+    const subjects = vi
+      .mocked(sendEmail)
+      .mock.calls.map(([p]) => p)
+      .filter((p) => p.to === target)
+      .map((p) => p.outcomeSubject);
+    expect(subjects).toHaveLength(2);
+    expect(subjects[0]).toEqual(subjects[1]);
+    expect(subjects[0]?.subjectId).toBe((await subscriberIds()).get(target));
+  });
+
+  it("still sends, naming nobody, to an address removed from the list after the release froze it", async () => {
+    await seedList(2);
+    await createRelease({ subject: "Frozen", body: "hi", dailyLimit: 10 });
+    const removed = addresses(2)[1];
+    await sql`DELETE FROM mailing_list_subscribers WHERE email = ${removed}`;
+    await drain();
+
+    const p = vi.mocked(sendEmail).mock.calls.map(([c]) => c).find((c) => c.to === removed)!;
+    expect(p).toBeDefined();
+    expect(p.outcomeSubject).toBeUndefined();
+    expect(p.consumedOutcomeKeys).toBeUndefined();
+  });
+});
+
 describe("a release survives a restart", () => {
   it("loses nobody and repeats nobody when the process is replaced mid-flight", async () => {
     await seedList(LIST_SIZE);

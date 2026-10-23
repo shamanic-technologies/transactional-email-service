@@ -117,6 +117,22 @@ describe("validation", () => {
   });
 });
 
+// --- Cost ledger: a transactional send is a support function ---
+
+describe("cost ledger", () => {
+  it("a transactional send names no outcome subject and consumes nothing", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("x-api-key", API_KEY)
+      .set(HEADERS)
+      .send({ eventType: "waitlist", ...BASE, recipientEmail: "ledger@example.com" });
+    expect(res.body.results[0].sent).toBe(true);
+    const [sent] = vi.mocked(sendEmail).mock.calls[0];
+    expect(sent.outcomeSubject).toBeUndefined();
+    expect(sent.consumedOutcomeKeys).toBeUndefined();
+  });
+});
+
 // --- Once-only dedup ---
 
 describe("once-only dedup", () => {
