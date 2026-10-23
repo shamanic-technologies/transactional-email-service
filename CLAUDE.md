@@ -45,6 +45,21 @@ reading the absent stats as zeros — that is the original bug. There is no
 fallback to the tag handle and no dual read; a second handle answering one
 question with a different number is the contradiction that was just removed.
 
+## A release send names its subscriber for the cost ledger; nothing else names anybody
+
+COST-ACCOUNTING-1023: postmark-service declares `message_sent` on a send's run
+for the ONE person the sender names. A release send names the subscriber as
+`{subjectService: "transactional-email-service", subjectId: mailing_list_subscribers.id}`
+(one row per list + address, so the same id on every release) and states
+`consumedOutcomeKeys: ["email_checked"]`. The verification before it passes the
+same subject to apollo-service (`subjects` on `POST /email-verifications`), which
+declares the `email_checked` it produced on it; a reused verdict declares nothing
+and runs-service resolves the consumption to that subscriber's earlier one.
+An address removed from the list after the release froze it is still sent,
+naming nobody (one warn line). Transactional sends (receipts, codes, staff
+alerts, lifecycle mail) are support functions: never give them a subject.
+Helpers live in `src/lib/outcome-subject.ts` (own module: tests mock the others).
+
 ## A release sends ONLY verdict `valid` — and no verdict means no send
 
 Every slice is verified by apollo-service `POST /email-verifications` after the
