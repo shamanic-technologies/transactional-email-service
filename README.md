@@ -655,6 +655,7 @@ src/
     delivery-stream.ts  # Template delivery: broadcast (default) or transactional (person-to-person, no unsubscribe)
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
+    outcome-subject.ts  # Cost ledger: a release send names its subscriber (message_sent) and consumes email_checked; transactional sends name nobody
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle

@@ -12,6 +12,7 @@ import { fetchSuppressed } from "../lib/suppression.js";
 import { fetchVerdicts, SENDABLE_VERDICT } from "../lib/email-verification.js";
 import { fetchDeliveryOutcomes } from "../lib/release-health.js";
 import { releaseOperationId } from "../lib/release-operation.js";
+import { RELEASE_SEND_CONSUMES, subscriberSubject } from "../lib/outcome-subject.js";
 import { getTemplate } from "../templates/index.js";
 import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
 import { updateRun } from "../lib/runs-client.js";
@@ -236,7 +237,19 @@ async function settleStaleClaims(releaseId: string, now: Date): Promise<number> 
  * pace and the one-row-per-address guarantee are untouched. ~100 ms per claim
  * on the 30k-address newsletter (prod, 2026-10-21).
  */
-async function claimSlice(releaseId: string, limit: number): Promise<Array<{ id: string; email: string }>> {
+/**
+ * A claimed address, with the list subscriber it belongs to: the person the
+ * send is declared for in the cost ledger. Null only when the subscriber was
+ * removed from the list after the release was created; the mail still goes
+ * out (the release froze its recipients), it simply names nobody.
+ */
+interface ClaimedRecipient {
+  id: string;
+  email: string;
+  subscriberId: string | null;
+}
+
+async function claimSlice(releaseId: string, limit: number): Promise<ClaimedRecipient[]> {
   if (limit <= 0) return [];
 
   const rows = await db.execute(raw`
@@ -260,10 +273,17 @@ async function claimSlice(releaseId: string, limit: number): Promise<Array<{ id:
       LIMIT ${limit}
       FOR UPDATE OF r SKIP LOCKED
     )
-    RETURNING id, email
+    RETURNING id, email,
+      (SELECT s.id FROM mailing_list_subscribers s
+       WHERE s.list_id = (SELECT list_id FROM mailing_list_releases WHERE id = ${releaseId})
+         AND s.email = mailing_list_release_recipients.email) AS subscriber_id
   `);
 
-  return (rows as unknown as Array<{ id: string; email: string }>).map((r) => ({ id: r.id, email: r.email }));
+  return (rows as unknown as Array<{ id: string; email: string; subscriber_id: string | null }>).map((r) => ({
+    id: r.id,
+    email: r.email,
+    subscriberId: r.subscriber_id,
+  }));
 }
 
 async function settle(ids: string[], status: string, reason: string | null, now: Date): Promise<void> {
@@ -474,7 +494,7 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
 async function releaseSlice(
   release: MailingListRelease,
   slug: string,
-  slice: Array<{ id: string; email: string }>,
+  slice: ClaimedRecipient[],
   report: TickReport,
   now: Date
 ): Promise<void> {
@@ -493,6 +513,13 @@ async function releaseSlice(
 
   const unsuppressed = slice.filter((r) => !suppression.isSuppressed(r.email));
   const sendable = await verifySlice(release, slug, unsuppressed, report, now);
+
+  const unnamed = sendable.filter((r) => !r.subscriberId).length;
+  if (unnamed > 0) {
+    console.warn(
+      `[transactional-email-service] release ${release.id}: ${unnamed} address(es) no longer on the list, sent with no outcome subject (cost rolls into the release run)`
+    );
+  }
 
   for (let offset = 0; offset < sendable.length; offset += SEND_CONCURRENCY) {
     const wave = sendable.slice(offset, offset + SEND_CONCURRENCY);
@@ -515,6 +542,12 @@ async function releaseSlice(
             userId: release.userId,
             runId: release.runId,
             from: release.fromAddress,
+            // Cost ledger: the subscriber this send reaches, and the
+            // verification it consumed (every row here has verdict `valid`).
+            ...(row.subscriberId && {
+              outcomeSubject: subscriberSubject(row.subscriberId),
+              consumedOutcomeKeys: RELEASE_SEND_CONSUMES,
+            }),
             workflowHeaders: workflowHeadersOf(release),
           });
           return { id: row.id, reason: null as string | null };
@@ -554,15 +587,19 @@ async function releaseSlice(
 async function verifySlice(
   release: MailingListRelease,
   slug: string,
-  rows: Array<{ id: string; email: string }>,
+  rows: ClaimedRecipient[],
   report: TickReport,
   now: Date
-): Promise<Array<{ id: string; email: string }>> {
+): Promise<ClaimedRecipient[]> {
   if (rows.length === 0) return [];
 
   let verdicts;
   try {
-    verdicts = await fetchVerdicts(release, rows.map((r) => r.email));
+    verdicts = await fetchVerdicts(
+      release,
+      rows.map((r) => r.email),
+      new Map(rows.flatMap((r) => (r.subscriberId ? [[r.email.toLowerCase(), subscriberSubject(r.subscriberId)]] : [])))
+    );
   } catch (err: any) {
     await db
       .update(mailingListReleaseRecipients)
@@ -596,7 +633,7 @@ async function verifySlice(
 
   await clearStall(release, now);
 
-  const sendable: Array<{ id: string; email: string }> = [];
+  const sendable: ClaimedRecipient[] = [];
   for (const row of rows) {
     const v = verdicts.get(row.email.toLowerCase())!;
     if (v.verdict === SENDABLE_VERDICT) {
