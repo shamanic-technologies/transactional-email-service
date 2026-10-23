@@ -60,6 +60,18 @@ naming nobody (one warn line). Transactional sends (receipts, codes, staff
 alerts, lifecycle mail) are support functions: never give them a subject.
 Helpers live in `src/lib/outcome-subject.ts` (own module: tests mock the others).
 
+## Past release sends are declared on the release's own run (COST-BACKFILL-1023)
+
+`POST /internal/outcome-backfill {dryRun}` (`src/lib/outcome-backfill.ts`) declares one `message_sent`
+per subscriber reached on each release's OWN run, for sends settled before `LIVE_SUBJECTS_SINCE`
+(2026-10-23T14:33:24Z, v0.25.23 live), through runs-service's batch door with the send's instant as
+`occurredAt`. Never on the child runs: runs-service refuses `not_run_owner`, and postmark-service /
+apollo-service skip every run under ours by agreement, so their past sends and verifications roll into
+the release run's occurrences. Nothing is declared consumed (no past `email_checked` exists to resolve
+to; an unknown-provenance consumption would charge the check twice). Sends after the cutoff are
+declared live by postmark-service: never move the cutoff later. Transactional `email-*` runs are
+support functions and are never backfilled.
+
 ## A release sends ONLY verdict `valid` — and no verdict means no send
 
 Every slice is verified by apollo-service `POST /email-verifications` after the

@@ -597,6 +597,53 @@
           "htmlBody"
         ]
       },
+      "OutcomeBackfillResponse": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "releaseRuns": {
+            "type": "integer",
+            "description": "Release runs holding at least one past send."
+          },
+          "occurrences": {
+            "type": "integer",
+            "description": "Past `message_sent` occurrences our rows hold (one per release run x subscriber reached)."
+          },
+          "calls": {
+            "type": "integer",
+            "description": "runs-service batch calls (one per release run x UTC day, <= 1000 occurrences each)."
+          },
+          "recorded": {
+            "type": "integer",
+            "description": "Occurrences newly recorded by runs-service (0 on a dry run, 0 on a replay)."
+          },
+          "alreadyRecorded": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dryRun",
+          "releaseRuns",
+          "occurrences",
+          "calls",
+          "recorded",
+          "alreadyRecorded"
+        ]
+      },
+      "OutcomeBackfillRequest": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "true = count what would be declared and write nothing."
+          }
+        },
+        "required": [
+          "dryRun"
+        ]
+      },
       "TransferBrandResponse": {
         "type": "object",
         "properties": {
@@ -2084,6 +2131,72 @@
           },
           "422": {
             "description": "unsupported_template_syntax: a template uses syntax the renderer would leave raw; the error names the template and the token, and `templates` lists each {name, field, token}. Nothing was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/outcome-backfill": {
+      "post": {
+        "summary": "Declare the outcomes of PAST release sends to runs-service (COST-BACKFILL-1023)",
+        "description": "Re-reads every mailing-list release send settled before the live declarations went live (2026-10-23T14:33:24Z) and declares, on each release's own run, one `message_sent` per subscriber reached (subject transactional-email-service / mailing_list_subscribers.id), through runs-service POST /v1/platform-runs/outcomes/batch with the send's instant as occurredAt. The release run's cost (the past postmark sends and apollo verifications under it, which declare nothing) is split over them. Idempotent: a replay records nothing.",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeBackfillRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What was (or, on a dry run, would be) declared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeBackfillResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "runs-service refused or was unreachable; whatever was recorded before stays, re-run to resume",
             "content": {
               "application/json": {
                 "schema": {
