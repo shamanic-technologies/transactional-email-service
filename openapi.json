@@ -744,6 +744,54 @@
           "linkId"
         ]
       },
+      "LedgerSubjectsChecksResponse": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "calls": {
+            "type": "integer",
+            "description": "apollo-service calls (<= 500 addresses each)."
+          },
+          "subjects": {
+            "type": "integer",
+            "description": "Distinct subscriber addresses named (one subscriber per address)."
+          },
+          "checks": {
+            "type": "integer",
+            "description": "Past checks of those addresses a release asked for: one email_checked each."
+          },
+          "subjectsWithoutCheck": {
+            "type": "integer",
+            "description": "Addresses no release check holds (never verified, or only invalid / undecided)."
+          },
+          "parked": {
+            "type": "integer",
+            "description": "Checks apollo-service parked for declaration by this call (0 on a dry run, 0 on a replay)."
+          }
+        },
+        "required": [
+          "dryRun",
+          "calls",
+          "subjects",
+          "checks",
+          "subjectsWithoutCheck",
+          "parked"
+        ]
+      },
+      "LedgerSubjectsChecksRequest": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "true = apollo-service only counts; nothing is parked."
+          }
+        },
+        "required": [
+          "dryRun"
+        ]
+      },
       "OutcomeBackfillResponse": {
         "type": "object",
         "properties": {
@@ -2429,6 +2477,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SubscriberLinkResolution"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/ledger-subjects/checks": {
+      "post": {
+        "summary": "Name the subscriber of every past release check at apollo-service (LEDGER-HISTORY-1024)",
+        "description": "Releases name each address's subscriber when they ask apollo-service to check it only since 2026-10-23; the checks before named nobody, so a send reusing one consumed email_checked with no producer. This names every subscriber address (one subscriber per address: the list whose release verified it first) through apollo-service POST /internal/outcome-declarations/named-subjects (callerLabel transactional-email-service:mailing-list-release, <= 500 per call); apollo then declares email_checked on each past check, dated at the check. Idempotent.",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LedgerSubjectsChecksRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "apollo-service's answers, summed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerSubjectsChecksResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "apollo-service refused or was unreachable; re-run to resume (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

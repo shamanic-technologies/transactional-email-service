@@ -188,6 +188,25 @@ export const OutcomeBackfillResponseSchema = z
   })
   .openapi("OutcomeBackfillResponse");
 
+// --- POST /internal/ledger-subjects/checks (LEDGER-HISTORY-1024) ---
+
+export const LedgerSubjectsChecksRequestSchema = z
+  .object({
+    dryRun: z.boolean().openapi({ description: "true = apollo-service only counts; nothing is parked." }),
+  })
+  .openapi("LedgerSubjectsChecksRequest");
+
+export const LedgerSubjectsChecksResponseSchema = z
+  .object({
+    dryRun: z.boolean(),
+    calls: z.number().int().openapi({ description: "apollo-service calls (<= 500 addresses each)." }),
+    subjects: z.number().int().openapi({ description: "Distinct subscriber addresses named (one subscriber per address)." }),
+    checks: z.number().int().openapi({ description: "Past checks of those addresses a release asked for: one email_checked each." }),
+    subjectsWithoutCheck: z.number().int().openapi({ description: "Addresses no release check holds (never verified, or only invalid / undecided)." }),
+    parked: z.number().int().openapi({ description: "Checks apollo-service parked for declaration by this call (0 on a dry run, 0 on a replay)." }),
+  })
+  .openapi("LedgerSubjectsChecksResponse");
+
 // --- GET /internal/sent-emails (TX-EMAIL-IN-UNIBOX-1024) ---
 
 export const SentEmailsQuerySchema = z
@@ -1076,6 +1095,27 @@ registry.registerPath({
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "unknown", content: { "application/json": { schema: SubscriberLinkResolutionSchema } } },
     410: { description: "revoked", content: { "application/json": { schema: SubscriberLinkResolutionSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/ledger-subjects/checks",
+  summary: "Name the subscriber of every past release check at apollo-service (LEDGER-HISTORY-1024)",
+  description:
+    "Releases name each address's subscriber when they ask apollo-service to check it only since 2026-10-23; the checks before " +
+    "named nobody, so a send reusing one consumed email_checked with no producer. This names every subscriber address (one subscriber " +
+    "per address: the list whose release verified it first) through apollo-service POST /internal/outcome-declarations/named-subjects " +
+    "(callerLabel transactional-email-service:mailing-list-release, <= 500 per call); apollo then declares email_checked on each past " +
+    "check, dated at the check. Idempotent.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { body: { required: true, content: { "application/json": { schema: LedgerSubjectsChecksRequestSchema } } } },
+  responses: {
+    200: { description: "apollo-service's answers, summed", content: { "application/json": { schema: LedgerSubjectsChecksResponseSchema } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "apollo-service refused or was unreachable; re-run to resume (idempotent)", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
