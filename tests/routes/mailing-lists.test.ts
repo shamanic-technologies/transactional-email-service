@@ -107,6 +107,10 @@ vi.mock("../../src/lib/email-gateway.js", () => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../../src/lib/subscriber-link-store.js", () => ({
+  ensureLinkIds: vi.fn().mockResolvedValue(new Map()),
+}));
+
 vi.mock("../../src/lib/suppression.js", () => ({
   fetchSuppressed: vi.fn().mockResolvedValue({ isSuppressed: () => false, reasonFor: () => null }),
 }));

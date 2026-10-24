@@ -1,3 +1,5 @@
+import { ensureLinkIds } from "./subscriber-link-store.js";
+import { stampSubscriberLinks } from "./subscriber-link.js";
 import { messageOf } from "./db-error.js";
 import { and, eq, inArray, sql as raw } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -521,16 +523,23 @@ async function releaseSlice(
     );
   }
 
+  // Who clicked: each subscriber's copy carries their own opaque id on every
+  // distribute.you link (NEWSLETTER-WHO-CLICKED-1024).
+  const linkIds = await ensureLinkIds(sendable.flatMap((r) => (r.subscriberId ? [r.subscriberId] : [])));
+
   for (let offset = 0; offset < sendable.length; offset += SEND_CONCURRENCY) {
     const wave = sendable.slice(offset, offset + SEND_CONCURRENCY);
     const outcomes = await Promise.all(
       wave.map(async (row) => {
+        const linkId = row.subscriberId ? linkIds.get(row.subscriberId) : undefined;
+        const body = { htmlBody: release.htmlBody, textBody: release.textBody };
+        const { htmlBody, textBody } = linkId ? stampSubscriberLinks(body, linkId) : body;
         try {
           await sendEmail({
             to: row.email,
             subject: release.subject,
-            htmlBody: release.htmlBody,
-            textBody: release.textBody,
+            htmlBody,
+            textBody,
             // Per release, not per list. The provider stores the tag on every
             // message, so this is what identifies exactly this release's mail in
             // the Postmark Activity archive, where a human reads one message

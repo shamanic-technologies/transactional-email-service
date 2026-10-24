@@ -1,3 +1,5 @@
+import { ensureLinkIds } from "../lib/subscriber-link-store.js";
+import { stampSubscriberLinks } from "../lib/subscriber-link.js";
 import { messageOf } from "../lib/db-error.js";
 import { Router, type Request, type Response } from "express";
 import { and, desc, eq } from "drizzle-orm";
@@ -383,7 +385,8 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       { maxAgeMs: 0 }
     );
     const skippedOptedOut = members.filter((m) => suppression.isSuppressed(m.email)).map((m) => m.email);
-    const recipients = members.filter((m) => !suppression.isSuppressed(m.email)).map((m) => m.email);
+    const recipientMembers = members.filter((m) => !suppression.isSuppressed(m.email));
+    const recipients = recipientMembers.map((m) => m.email);
 
     if (recipients.length === 0) {
       res.status(400).json({ error: `Every subscriber on '${slug}' is opted out` });
@@ -418,6 +421,11 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       traceHeaders
     );
 
+    // Who clicked: each subscriber's copy carries their own opaque id on every
+    // distribute.you link (NEWSLETTER-WHO-CLICKED-1024).
+    const linkIds = await ensureLinkIds(recipientMembers.map((m) => m.id));
+    const subscriberIdOf = new Map(recipientMembers.map((m) => [m.email, m.id]));
+
     const failures: Failure[] = [];
     let sentCount = 0;
 
@@ -428,12 +436,14 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
       const wave = recipients.slice(offset, offset + SEND_CONCURRENCY);
       const outcomes = await Promise.all(
         wave.map(async (email) => {
+          const linkId = linkIds.get(subscriberIdOf.get(email)!);
+          const copy = linkId ? stampSubscriberLinks({ htmlBody, textBody }, linkId) : { htmlBody, textBody };
           try {
             await sendEmail({
               to: email,
               subject,
-              htmlBody,
-              textBody,
+              htmlBody: copy.htmlBody,
+              textBody: copy.textBody,
               tag: `mailing-list-${slug}`,
               orgId: identity.orgId,
               userId: identity.userId,

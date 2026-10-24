@@ -11,6 +11,7 @@ import transferBrandRoutes from "./routes/transfer-brand.js";
 import outcomeBackfillRoutes from "./routes/outcome-backfill.js";
 import mailingListsRoutes from "./routes/mailing-lists.js";
 import mailingListReleasesRoutes from "./routes/mailing-list-releases.js";
+import subscriberLinksRoutes from "./routes/subscriber-links.js";
 import { seedStaffTemplates } from "./templates/staff-alerts.js";
 import { startReleaseWorker, stopReleaseWorker } from "./lib/release-worker.js";
 import { db } from "./db/index.js";
@@ -29,6 +30,7 @@ app.use(transferBrandRoutes);
 app.use(outcomeBackfillRoutes);
 app.use(mailingListsRoutes);
 app.use(mailingListReleasesRoutes);
+app.use(subscriberLinksRoutes);
 app.use(openapiRoutes);
 
 app.use((_req, res) => {

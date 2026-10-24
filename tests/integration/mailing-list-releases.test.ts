@@ -1164,3 +1164,83 @@ describe("changing the pace while a release is running", () => {
       .expect(401);
   });
 });
+
+describe("who clicked (NEWSLETTER-WHO-CLICKED-1024)", () => {
+  const BODY =
+    "Read [the study](https://distribute.you/blog/jev-gtm?utm_source=newsletter&utm_medium=email&utm_campaign=jev-gtm) " +
+    "or [the source](https://example.com/paper?utm_source=newsletter).";
+
+  function linkIdIn(html: string): string | null {
+    const m = html.match(/href="https:\/\/distribute\.you\/blog\/jev-gtm\?[^"]*dy_sub=([A-Za-z0-9_-]+)/);
+    return m ? m[1] : null;
+  }
+
+  it("stamps each subscriber's own id on every distribute.you link, none on a third-party one, and resolves it", async () => {
+    await seedList(2);
+    await createRelease({ subject: "jev-gtm", body: BODY, dailyLimit: 100 });
+    await drain();
+
+    const calls = vi.mocked(sendEmail).mock.calls.map(([p]) => p);
+    expect(calls).toHaveLength(2);
+
+    const ids = calls.map((c) => linkIdIn(c.htmlBody));
+    expect(ids.every(Boolean)).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+    for (const c of calls) {
+      expect(c.htmlBody).toContain('href="https://example.com/paper?utm_source=newsletter"');
+      expect(c.htmlBody).not.toContain(c.to);
+      expect(c.textBody).toContain(`dy_sub=${linkIdIn(c.htmlBody)}`);
+    }
+
+    for (const c of calls) {
+      const res = await request(app).get(`/internal/subscriber-links/${linkIdIn(c.htmlBody)}`).set({ "x-api-key": API_KEY });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("valid");
+      expect(res.body.subscriber.email).toBe(c.to);
+      expect(res.body.subscriber.name).toBeNull();
+      expect(res.body.list.slug).toBe(SLUG);
+    }
+  });
+
+  it("reuses the same id on a later release", async () => {
+    await seedList(1);
+    await createRelease({ subject: "one", body: BODY, dailyLimit: 100 });
+    await drain();
+    await createRelease({ subject: "two", body: BODY + " again", dailyLimit: 100 });
+    await drain();
+
+    const ids = vi.mocked(sendEmail).mock.calls.map(([p]) => linkIdIn(p.htmlBody));
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
+  });
+
+  it("answers tampered, unknown and revoked distinctly, and refuses a caller without the key", async () => {
+    await seedList(1);
+    await createRelease({ subject: "jev-gtm", body: BODY, dailyLimit: 100 });
+    await drain();
+    const [[sent]] = vi.mocked(sendEmail).mock.calls;
+    const id = linkIdIn(sent.htmlBody)!;
+    const get = (linkId: string) => request(app).get(`/internal/subscriber-links/${encodeURIComponent(linkId)}`).set({ "x-api-key": API_KEY });
+
+    expect((await request(app).get(`/internal/subscriber-links/${id}`)).status).toBe(401);
+
+    const forged = (id[0] === "A" ? "B" : "A") + id.slice(1);
+    const tampered = await get(forged);
+    expect(tampered.status).toBe(400);
+    expect(tampered.body).toEqual({ status: "tampered", linkId: forged });
+
+    const { mintLinkId } = await import("../../src/lib/subscriber-link.js");
+    const unknown = await get(mintLinkId());
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.status).toBe("unknown");
+
+    await request(app)
+      .delete(`/mailing-lists/${SLUG}/subscribers`)
+      .query({ email: sent.to })
+      .set(AUTH)
+      .expect(200);
+    const revoked = await get(id);
+    expect(revoked.status).toBe(410);
+    expect(revoked.body).toEqual({ status: "revoked", linkId: id });
+  });
+});
