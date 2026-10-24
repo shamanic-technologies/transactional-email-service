@@ -58,7 +58,7 @@ export function decodeCursor(cursor: string): { sentAt: Date; id: string } | nul
 const STAFF_ROUTED = [...ADMIN_NOTIFICATION_EVENTS, ...Object.keys(PLATFORM_STAFF_ALERTS)];
 
 /**
- * A send made before messages were stored (migration 0023) is re-rendered from
+ * A send made before messages were stored (migration 0024) is re-rendered from
  * its CURRENT template with the variables stored on the row: close to what was
  * sent, not guaranteed byte-equal, and labelled so. A template that no longer
  * exists cannot be replayed: the row is still served (the send happened) with

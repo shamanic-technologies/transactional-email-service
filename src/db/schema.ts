@@ -25,12 +25,12 @@ export const emailEvents = pgTable(
     // The message exactly as it went on the wire, written when the send is
     // confirmed (status "sent"), so the recipient's Unibox thread can show what
     // we told them (GET /internal/sent-emails). Null on rows sent before
-    // migration 0023 and on every unsent row.
+    // migration 0024 and on every unsent row.
     subject: text("subject"),
     htmlBody: text("html_body"),
     textBody: text("text_body"),
     fromAddress: text("from_address"),
-    // When the gateway accepted the send. Rows sent before 0023 carry created_at.
+    // When the gateway accepted the send. Rows sent before 0024 carry created_at.
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -117,6 +117,27 @@ export const mailingListSubscribers = pgTable(
 );
 
 export type MailingListSubscriber = typeof mailingListSubscribers.$inferSelect;
+
+/**
+ * The opaque id a release stamps on every distribute.you link it sends a
+ * subscriber (`dy_sub`, see `src/lib/subscriber-link.ts`), so our own apps can
+ * tell WHO clicked without an address ever travelling in a URL. One per
+ * subscriber, minted on their first send and reused on every later one.
+ * Removing the subscriber nulls `subscriber_id`: the id then answers `revoked`
+ * rather than `unknown`, and names nobody.
+ */
+export const mailingListSubscriberLinks = pgTable(
+  "mailing_list_subscriber_links",
+  {
+    linkId: text("link_id").primaryKey(),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => mailingLists.id, { onDelete: "cascade" }),
+    subscriberId: uuid("subscriber_id").references(() => mailingListSubscribers.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("idx_mailing_list_subscriber_links_subscriber").on(table.subscriberId)]
+);
 
 /**
  * One written update broadcast to a list. Stores the body exactly as sent

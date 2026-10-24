@@ -224,6 +224,28 @@ export const SentEmailsResponseSchema = z
   })
   .openapi("SentEmailsResponse");
 
+// --- GET /internal/subscriber-links/:linkId (NEWSLETTER-WHO-CLICKED-1024) ---
+
+export const SubscriberLinkResolutionSchema = z
+  .object({
+    status: z.enum(["valid", "revoked", "unknown", "tampered"]).openapi({
+      description:
+        "valid = the id names a subscriber still on the list. revoked = it was given to a subscriber since removed from the list (names nobody). " +
+        "unknown = well-formed but never given. tampered = not an id this service minted (wrong length, alphabet or checksum).",
+    }),
+    linkId: z.string(),
+    subscriber: z
+      .object({
+        id: z.string().openapi({ description: "mailing_list_subscribers.id" }),
+        email: z.string(),
+        name: z.string().nullable().openapi({ description: "Always null today: a list stores bare addresses." }),
+      })
+      .optional()
+      .openapi({ description: "Present only when status is valid." }),
+    list: z.object({ slug: z.string() }).optional().openapi({ description: "Present only when status is valid." }),
+  })
+  .openapi("SubscriberLinkResolution");
+
 // --- Mailing lists (platform-level, staff-only) ---
 
 export const MailingListSubscriberSchema = z
@@ -1033,6 +1055,27 @@ registry.registerPath({
     200: { description: "One page of sent emails", content: { "application/json": { schema: SentEmailsResponseSchema } } },
     400: { description: "Invalid query or cursor", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/subscriber-links/{linkId}",
+  summary: "Who a newsletter link's dy_sub names (NEWSLETTER-WHO-CLICKED-1024)",
+  description:
+    "Every link to distribute.you or a subdomain in a mailing-list send carries `dy_sub=<linkId>`: an opaque 26-character base64url id, one per " +
+    "subscriber, minted on their first send and reused on every later one, with no expiry. It holds no email, name or phone. Links to other " +
+    "sites are untouched. This read turns the id back into the subscriber, for our own apps server side (API key only). The status code " +
+    "mirrors `status`: 200 valid, 410 revoked, 404 unknown, 400 tampered.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ linkId: z.string() }) },
+  responses: {
+    200: { description: "valid", content: { "application/json": { schema: SubscriberLinkResolutionSchema } } },
+    400: { description: "tampered", content: { "application/json": { schema: SubscriberLinkResolutionSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "unknown", content: { "application/json": { schema: SubscriberLinkResolutionSchema } } },
+    410: { description: "revoked", content: { "application/json": { schema: SubscriberLinkResolutionSchema } } },
   },
 });
 

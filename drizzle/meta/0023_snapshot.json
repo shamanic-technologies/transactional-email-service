@@ -1,5 +1,5 @@
 {
-  "id": "bf5394ea-c851-4b72-8b9a-564b2945655d",
+  "id": "ab4e228f-d250-4a45-8051-7d73c1fee1b1",
   "prevId": "54a09068-ddd6-4a18-a126-9f318313b116",
   "version": "7",
   "dialect": "postgresql",
@@ -94,36 +94,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "html_body": {
-          "name": "html_body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "text_body": {
-          "name": "text_body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "from_address": {
-          "name": "from_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -144,27 +114,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_email_events_sent_at": {
-          "name": "idx_email_events_sent_at",
-          "columns": [
-            {
-              "expression": "sent_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -724,6 +673,87 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mailing_list_subscriber_links": {
+      "name": "mailing_list_subscriber_links",
+      "schema": "",
+      "columns": {
+        "link_id": {
+          "name": "link_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "list_id": {
+          "name": "list_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscriber_id": {
+          "name": "subscriber_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_mailing_list_subscriber_links_subscriber": {
+          "name": "idx_mailing_list_subscriber_links_subscriber",
+          "columns": [
+            {
+              "expression": "subscriber_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mailing_list_subscriber_links_list_id_mailing_lists_id_fk": {
+          "name": "mailing_list_subscriber_links_list_id_mailing_lists_id_fk",
+          "tableFrom": "mailing_list_subscriber_links",
+          "tableTo": "mailing_lists",
+          "columnsFrom": [
+            "list_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mailing_list_subscriber_links_subscriber_id_mailing_list_subscribers_id_fk": {
+          "name": "mailing_list_subscriber_links_subscriber_id_mailing_list_subscribers_id_fk",
+          "tableFrom": "mailing_list_subscriber_links",
+          "tableTo": "mailing_list_subscribers",
+          "columnsFrom": [
+            "subscriber_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
