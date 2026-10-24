@@ -173,3 +173,53 @@ export interface DeclareOutcomesBatchResult {
 export async function declareOutcomesBatch(body: DeclareOutcomesBatchBody): Promise<DeclareOutcomesBatchResult> {
   return platformRunsRequest<DeclareOutcomesBatchResult>("/v1/platform-runs/outcomes/batch", "POST", body);
 }
+
+// ─── Subject equivalences (LEDGER-HISTORY-1024) ─────────────────────────────
+//
+// The owner of a subject states it is the same subject as one of another space
+// (a subscriber of ours == a lead-service lead), so one `email_checked` is
+// consumed under both and declared once. All or nothing per call: a refused
+// item 422s the whole call with per-item reasons (see ledger-subjects.ts).
+
+export interface SubjectEquivalence {
+  subjectService: string;
+  subjectId: string;
+  targetService: string;
+  targetId: string;
+}
+
+export interface EquivalenceRefusal {
+  index: number;
+  reason: string;
+}
+
+export class EquivalencesRefusedError extends Error {
+  constructor(public readonly refusals: EquivalenceRefusal[]) {
+    super(`runs-service refused ${refusals.length} subject equivalence(s)`);
+    this.name = "EquivalencesRefusedError";
+  }
+}
+
+export async function stateSubjectEquivalences(body: {
+  items: SubjectEquivalence[];
+  reason: string;
+  statedBy: string;
+}): Promise<{ recordedCount: number; alreadyRecordedCount: number }> {
+  const path = "/v1/platform-runs/subject-equivalences";
+  const response = await fetch(`${RUNS_SERVICE_URL}${path}`, {
+    method: "POST",
+    headers: platformHeaders(),
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (response.status === 422) {
+    const parsed = JSON.parse(text) as { error?: string; details?: { refusals?: EquivalenceRefusal[] } };
+    if (parsed.error === "invalid_equivalences" && Array.isArray(parsed.details?.refusals)) {
+      throw new EquivalencesRefusedError(parsed.details.refusals);
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`runs-service POST ${path} failed: ${response.status} - ${text.slice(0, 500)}`);
+  }
+  return JSON.parse(text) as { recordedCount: number; alreadyRecordedCount: number };
+}

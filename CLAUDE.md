@@ -80,6 +80,12 @@ apollo declares `email_checked` on each check asked before the live `subjects` (
 release verified it FIRST (our recipient rows), else the oldest row; apollo refuses two subjects for one address. Idempotent, run once;
 the live path covers every check since.
 
+A subscriber who is also a lead is ONE subject: `src/lib/subscriber-leads.ts` resolves every subscriber address at lead-service
+(`/internal/leads/ids/by-email`, org-free, never a guess) and states subscriber == lead at runs-service
+(`/v1/platform-runs/subject-equivalences`), on demand (`POST /internal/ledger-subjects/leads`) and in process every 6h (first pass
+~60s after boot). Never declare the check a second time under the lead. Stateless: runs-service rows are immutable, a replay is
+`already_recorded`; a 422 retries without the refused items and reports them, never forces them.
+
 ## A release sends ONLY verdict `valid` — and no verdict means no send
 
 Every slice is verified by apollo-service `POST /email-verifications` after the
