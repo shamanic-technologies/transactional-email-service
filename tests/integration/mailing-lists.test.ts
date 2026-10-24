@@ -236,7 +236,13 @@ describe("an update authored as HTML", () => {
     expect(sent.body.recipientCount).toBe(2);
     // As authored, signed with the company's why after it.
     const signedHtml = signWithWhy({ htmlBody: AUTHORED, textBody: "" }, { withLink: true }).htmlBody;
-    expect(vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody)).toEqual([signedHtml, signedHtml]);
+    // Each copy differs only by its subscriber's own id on the distribute.you links.
+    const htmls = vi.mocked(sendEmail).mock.calls.map((c: any) => c[0].htmlBody as string);
+    const unstamped = (html: string) => html.replace(/(\?|&amp;)dy_sub=[A-Za-z0-9_-]{26}/g, "");
+    expect(htmls.map(unstamped)).toEqual([signedHtml, signedHtml]);
+    const ids = htmls.map((h) => h.match(/dy_sub=([A-Za-z0-9_-]{26})/)?.[1]);
+    expect(ids[0]).toBeTruthy();
+    expect(ids[0]).not.toBe(ids[1]);
     expect((vi.mocked(sendEmail).mock.calls[0][0] as any).textBody).toContain("https://distribute.you/bench");
 
     const history = await request(app).get("/mailing-lists/investors/updates").set(AUTH);
