@@ -108,6 +108,27 @@ export const mailingListSubscribers = pgTable(
 export type MailingListSubscriber = typeof mailingListSubscribers.$inferSelect;
 
 /**
+ * The opaque id a release stamps on every distribute.you link it sends a
+ * subscriber (`dy_sub`, see `src/lib/subscriber-link.ts`), so our own apps can
+ * tell WHO clicked without an address ever travelling in a URL. One per
+ * subscriber, minted on their first send and reused on every later one.
+ * Removing the subscriber nulls `subscriber_id`: the id then answers `revoked`
+ * rather than `unknown`, and names nobody.
+ */
+export const mailingListSubscriberLinks = pgTable(
+  "mailing_list_subscriber_links",
+  {
+    linkId: text("link_id").primaryKey(),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => mailingLists.id, { onDelete: "cascade" }),
+    subscriberId: uuid("subscriber_id").references(() => mailingListSubscribers.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("idx_mailing_list_subscriber_links_subscriber").on(table.subscriberId)]
+);
+
+/**
  * One written update broadcast to a list. Stores the body exactly as sent
  * (rendered HTML) alongside the markdown the author typed, plus the outcome of
  * every recipient send — a partial failure is recorded as `partial`, never as a

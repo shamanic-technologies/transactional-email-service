@@ -263,6 +263,10 @@ export async function register() {
 
 Declares the outcomes of PAST release sends (COST-BACKFILL-1023): every recipient `sent` before the live subscriber declarations went live (2026-10-23T14:33:24Z) becomes one `message_sent` on its release's own run (subject `transactional-email-service` / subscriber id), through runs-service `POST /v1/platform-runs/outcomes/batch` with the send's instant as `occurredAt`. Idempotent (a replay records nothing); a failure is a 502 and a re-run resumes. Returns `{ dryRun, releaseRuns, occurrences, calls, recorded, alreadyRecorded }`.
 
+### `GET /internal/subscriber-links/{linkId}`
+
+**Internal endpoint** — requires `x-api-key` only (our own apps, server side). Every link to distribute.you or one of its subdomains in a mailing-list send (sync update and paced release) carries `dy_sub=<linkId>`, the subscriber's own opaque id (26 base64url chars: 128 random bits + a 4-char checksum; no email, name or phone; one per subscriber, reused on every send, no expiry). Third-party links are untouched. This read answers who the id names: `200 {status:"valid", linkId, subscriber:{id, email, name:null}, list:{slug}}`, `410 {status:"revoked"}` (subscriber since removed from the list), `404 {status:"unknown"}` (well-formed, never given), `400 {status:"tampered"}` (not an id this service minted).
+
 ### `POST /internal/transfer-brand`
 
 **Internal endpoint** — requires `x-api-key` only, no identity headers.
@@ -646,7 +650,7 @@ src/
   schemas.ts            # Zod schemas + OpenAPI registry (single source of truth)
   db/
     index.ts            # Database connection
-    schema.ts           # Drizzle schema (email_events, email_templates, mailing_lists, mailing_list_subscribers, mailing_list_updates, mailing_list_releases, mailing_list_release_recipients)
+    schema.ts           # Drizzle schema (email_events, email_templates, mailing_lists, mailing_list_subscribers, mailing_list_subscriber_links, mailing_list_updates, mailing_list_releases, mailing_list_release_recipients)
   lib/
     address-blob.ts     # Lenient parser for a pasted blob of email addresses
     brand-transfer.ts   # Moves a brand's email_events rows to another org (POST /internal/transfer-brand)
@@ -671,6 +675,8 @@ src/
     runs-client.ts      # Runs service client (create/update runs, org-less platform runs)
 │   │   ├── orgless-events.ts   # Closed list of events sendable with no org (POST /platform-orgless-send)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
+    subscriber-link.ts  # Pure: mint/check a subscriber's link id, stamp it (dy_sub) on distribute.you links
+    subscriber-link-store.ts # Mint each subscriber's link id once; resolve an id to valid/revoked/unknown/tampered
   middleware/
     auth.ts             # API key + identity header authentication (full identity, or org-only for machine callers)
   routes/
@@ -683,6 +689,7 @@ src/
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
     outcome-backfill.ts # POST /internal/outcome-backfill (declare past release sends' outcomes)
+    subscriber-links.ts # GET /internal/subscriber-links/:linkId (who clicked a newsletter link)
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
     syntax.ts           # Template syntax contract: refuses any {{ that is not a {{name}} placeholder

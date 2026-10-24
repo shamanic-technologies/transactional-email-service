@@ -597,6 +597,63 @@
           "htmlBody"
         ]
       },
+      "SubscriberLinkResolution": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "revoked",
+              "unknown",
+              "tampered"
+            ],
+            "description": "valid = the id names a subscriber still on the list. revoked = it was given to a subscriber since removed from the list (names nobody). unknown = well-formed but never given. tampered = not an id this service minted (wrong length, alphabet or checksum)."
+          },
+          "linkId": {
+            "type": "string"
+          },
+          "subscriber": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "mailing_list_subscribers.id"
+              },
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "nullable": true,
+                "description": "Always null today: a list stores bare addresses."
+              }
+            },
+            "required": [
+              "id",
+              "email",
+              "name"
+            ],
+            "description": "Present only when status is valid."
+          },
+          "list": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "slug"
+            ],
+            "description": "Present only when status is valid."
+          }
+        },
+        "required": [
+          "status",
+          "linkId"
+        ]
+      },
       "OutcomeBackfillResponse": {
         "type": "object",
         "properties": {
@@ -2135,6 +2192,82 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/subscriber-links/{linkId}": {
+      "get": {
+        "summary": "Who a newsletter link's dy_sub names (NEWSLETTER-WHO-CLICKED-1024)",
+        "description": "Every link to distribute.you or a subdomain in a mailing-list send carries `dy_sub=<linkId>`: an opaque 26-character base64url id, one per subscriber, minted on their first send and reused on every later one, with no expiry. It holds no email, name or phone. Links to other sites are untouched. This read turns the id back into the subscriber, for our own apps server side (API key only). The status code mirrors `status`: 200 valid, 410 revoked, 404 unknown, 400 tampered.",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "linkId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberLinkResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "tampered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberLinkResolution"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberLinkResolution"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberLinkResolution"
                 }
               }
             }

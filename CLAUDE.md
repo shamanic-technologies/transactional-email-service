@@ -113,6 +113,24 @@ dedup key). Cost 2026-10-20: a client read "Hi{{#firstName}} Liudvikas{{/firstNa
 Do not add mustache sections to make such a template pass, and do not relax
 the check to the RENDERED output: metadata may legitimately contain `{{`.
 
+## A newsletter link says WHO clicked: `dy_sub`, an opaque id (NEWSLETTER-WHO-CLICKED-1024)
+
+Every mailing-list send (sync update and paced release) stamps each subscriber's
+copy: every link to distribute.you or a subdomain gains `dy_sub=<linkId>`
+(appended as text, authored bytes kept, before any `#`); third-party links,
+`mailto:` and visible text stay as written. The stored update/release body is
+the UNSTAMPED one. `linkId` = 26 base64url chars, 22 random (128 bits, the
+unforgeability) + a 4-char sha256 checksum (only to tell `tampered` from
+`unknown`; no signing key exists, none to rotate). One per subscriber in
+`mailing_list_subscriber_links`, minted at first send, reused forever, no
+expiry; removing the subscriber nulls the row's `subscriber_id` (= `revoked`).
+Never put an email, name or phone in a URL. Our apps resolve it server side:
+`GET /internal/subscriber-links/:linkId` (API key only) → 200 valid
+`{subscriber:{id,email,name:null},list:{slug}}` / 410 revoked / 404 unknown /
+400 tampered. Opted-out subscribers still resolve (they clicked us); mail sent
+before 2026-10-24 has no ids. Pure stamping in `src/lib/subscriber-link.ts`, DB in
+`subscriber-link-store.ts` (own module: route unit tests fake the db).
+
 ## Commands
 
 - `npm test` — run tests (Vitest)
