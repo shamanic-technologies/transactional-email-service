@@ -792,6 +792,82 @@
           "dryRun"
         ]
       },
+      "LedgerSubjectsLeadsResponse": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "subscribers": {
+            "type": "integer",
+            "description": "Subscriber rows read (every list)."
+          },
+          "resolved": {
+            "type": "integer",
+            "description": "Subscribers whose address is a lead-service lead: one equivalence each."
+          },
+          "notALead": {
+            "type": "integer",
+            "description": "Subscribers whose address is nobody's lead (yet): stated on a later pass once they are."
+          },
+          "ambiguous": {
+            "type": "integer",
+            "description": "Subscribers whose address two leads hold: never a pick, nothing stated."
+          },
+          "recorded": {
+            "type": "integer",
+            "description": "Equivalences newly recorded by runs-service (0 on a dry run)."
+          },
+          "alreadyRecorded": {
+            "type": "integer"
+          },
+          "refused": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subscriberId": {
+                  "type": "string"
+                },
+                "leadId": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "subscriberId",
+                "leadId",
+                "reason"
+              ]
+            },
+            "description": "Items runs-service refused (one target per subject, one hop, immutable), with its reason. The rest of their call is still stated."
+          }
+        },
+        "required": [
+          "dryRun",
+          "subscribers",
+          "resolved",
+          "notALead",
+          "ambiguous",
+          "recorded",
+          "alreadyRecorded",
+          "refused"
+        ]
+      },
+      "LedgerSubjectsLeadsRequest": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "true = resolve and count; nothing is stated at runs-service."
+          }
+        },
+        "required": [
+          "dryRun"
+        ]
+      },
       "OutcomeBackfillResponse": {
         "type": "object",
         "properties": {
@@ -2539,6 +2615,72 @@
           },
           "502": {
             "description": "apollo-service refused or was unreachable; re-run to resume (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/ledger-subjects/leads": {
+      "post": {
+        "summary": "State that each subscriber who is a lead is the same ledger subject as that lead (LEDGER-HISTORY-1024)",
+        "description": "Resolves every subscriber address at lead-service POST /internal/leads/ids/by-email (org-free) and states, for each subscriber whose address is a lead, subscriber == lead at runs-service POST /v1/platform-runs/subject-equivalences, so one email_checked is consumed under both and declared once. The same pass runs every 6 hours in process (a subscriber who becomes a lead is stated on the next pass). Idempotent. Items runs-service refuses are reported, never forced; the rest of their call is stated.",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LedgerSubjectsLeadsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What was (or would be) stated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerSubjectsLeadsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "lead-service or runs-service failed; re-run to resume (idempotent)",
             "content": {
               "application/json": {
                 "schema": {

@@ -207,6 +207,29 @@ export const LedgerSubjectsChecksResponseSchema = z
   })
   .openapi("LedgerSubjectsChecksResponse");
 
+// --- POST /internal/ledger-subjects/leads (LEDGER-HISTORY-1024) ---
+
+export const LedgerSubjectsLeadsRequestSchema = z
+  .object({
+    dryRun: z.boolean().openapi({ description: "true = resolve and count; nothing is stated at runs-service." }),
+  })
+  .openapi("LedgerSubjectsLeadsRequest");
+
+export const LedgerSubjectsLeadsResponseSchema = z
+  .object({
+    dryRun: z.boolean(),
+    subscribers: z.number().int().openapi({ description: "Subscriber rows read (every list)." }),
+    resolved: z.number().int().openapi({ description: "Subscribers whose address is a lead-service lead: one equivalence each." }),
+    notALead: z.number().int().openapi({ description: "Subscribers whose address is nobody's lead (yet): stated on a later pass once they are." }),
+    ambiguous: z.number().int().openapi({ description: "Subscribers whose address two leads hold: never a pick, nothing stated." }),
+    recorded: z.number().int().openapi({ description: "Equivalences newly recorded by runs-service (0 on a dry run)." }),
+    alreadyRecorded: z.number().int(),
+    refused: z
+      .array(z.object({ subscriberId: z.string(), leadId: z.string(), reason: z.string() }))
+      .openapi({ description: "Items runs-service refused (one target per subject, one hop, immutable), with its reason. The rest of their call is still stated." }),
+  })
+  .openapi("LedgerSubjectsLeadsResponse");
+
 // --- GET /internal/sent-emails (TX-EMAIL-IN-UNIBOX-1024) ---
 
 export const SentEmailsQuerySchema = z
@@ -1116,6 +1139,26 @@ registry.registerPath({
     400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     502: { description: "apollo-service refused or was unreachable; re-run to resume (idempotent)", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/ledger-subjects/leads",
+  summary: "State that each subscriber who is a lead is the same ledger subject as that lead (LEDGER-HISTORY-1024)",
+  description:
+    "Resolves every subscriber address at lead-service POST /internal/leads/ids/by-email (org-free) and states, for each subscriber " +
+    "whose address is a lead, subscriber == lead at runs-service POST /v1/platform-runs/subject-equivalences, so one email_checked is " +
+    "consumed under both and declared once. The same pass runs every 6 hours in process (a subscriber who becomes a lead is stated on " +
+    "the next pass). Idempotent. Items runs-service refuses are reported, never forced; the rest of their call is stated.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { body: { required: true, content: { "application/json": { schema: LedgerSubjectsLeadsRequestSchema } } } },
+  responses: {
+    200: { description: "What was (or would be) stated", content: { "application/json": { schema: LedgerSubjectsLeadsResponseSchema } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "lead-service or runs-service failed; re-run to resume (idempotent)", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
