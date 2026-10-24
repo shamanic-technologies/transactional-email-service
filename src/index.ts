@@ -16,6 +16,7 @@ import mailingListReleasesRoutes from "./routes/mailing-list-releases.js";
 import subscriberLinksRoutes from "./routes/subscriber-links.js";
 import { seedStaffTemplates } from "./templates/staff-alerts.js";
 import { startReleaseWorker, stopReleaseWorker } from "./lib/release-worker.js";
+import { startSubscriberLeadSweep, stopSubscriberLeadSweep } from "./lib/subscriber-leads.js";
 import { db } from "./db/index.js";
 
 const app = express();
@@ -62,6 +63,9 @@ if (process.env.NODE_ENV !== "test") {
         // size of any list, so it cannot stretch the boot window or the health
         // check that follows it.
         startReleaseWorker();
+        // LEDGER-HISTORY-1024: subscriber == lead equivalences, first pass
+        // ~60s after boot, then every 6h (subscriber-leads.ts).
+        startSubscriberLeadSweep();
       });
 
       // A redeploy sends SIGTERM. Stopping the worker first lets the slice it
@@ -70,6 +74,7 @@ if (process.env.NODE_ENV !== "test") {
       // the next tick instead.
       const shutdown = (signal: string) => {
         console.log(`[transactional-email-service] ${signal} received, letting the release worker settle`);
+        stopSubscriberLeadSweep();
         stopReleaseWorker().finally(() => server.close(() => process.exit(0)));
       };
       process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -269,6 +269,12 @@ Declares the outcomes of PAST release sends (COST-BACKFILL-1023): every recipien
 
 LEDGER-HISTORY-1024: names the subscriber of every past release check at apollo-service, so a send reusing a verdict checked before 2026-10-23 consumes an `email_checked` that has a producer. One subscriber per address (the list whose release verified it first, else the oldest subscriber row), sent through apollo-service `POST /internal/outcome-declarations/named-subjects` (`callerLabel` `transactional-email-service:mailing-list-release`, <= 500 per call); apollo declares `email_checked` on each check, dated at the check. Idempotent; a failure is a 502 and a re-run resumes. Returns apollo's answers summed: `{ dryRun, calls, subjects, checks, subjectsWithoutCheck, parked }`.
 
+### `POST /internal/ledger-subjects/leads`
+
+**Internal endpoint** — requires `x-api-key` only. Body `{ "dryRun": boolean }` (required).
+
+LEDGER-HISTORY-1024: a subscriber who is also a lead is ONE ledger subject. Resolves every subscriber address at lead-service `POST /internal/leads/ids/by-email` (org-free) and states, per subscriber row whose address is a lead, subscriber == lead at runs-service `POST /v1/platform-runs/subject-equivalences` (<= 1000 per call), so the one `email_checked` made for the newsletter is consumed under both and declared once. `not_a_lead` / `ambiguous` state nothing. The same pass runs in process ~60s after boot and every 6 hours (a subscriber who becomes a lead is stated on the next pass). Idempotent. A 422 drops only the refused items (reported with their reason) and states the rest. Returns `{ dryRun, subscribers, resolved, notALead, ambiguous, recorded, alreadyRecorded, refused: [{ subscriberId, leadId, reason }] }`.
+
 ### `GET /internal/sent-emails`
 
 **Internal endpoint** — requires `x-api-key` only. Query: `after` (the previous page's `nextCursor`), `limit` (1-500, default 200).
@@ -627,6 +633,8 @@ database with another run or with a deployed environment.
 | `EMAIL_GATEWAY_SERVICE_API_KEY` | Email Gateway API key |
 | `APOLLO_SERVICE_URL` | apollo-service base URL (pre-send verification of every release slice; a missing value sends nothing) |
 | `APOLLO_SERVICE_API_KEY` | apollo-service API key |
+| `LEAD_SERVICE_URL` | lead-service base URL (which lead each subscriber address is, for the ledger's subscriber == lead equivalences) |
+| `LEAD_SERVICE_API_KEY` | lead-service API key |
 | `RUNS_SERVICE_URL` | Runs service endpoint (default: http://localhost:3006) |
 | `RUNS_SERVICE_API_KEY` | Runs service API key |
 | `CLIENT_SERVICE_URL` | Client service endpoint (default: http://localhost:3010) |
@@ -680,6 +688,7 @@ src/
     outcome-subject.ts  # Cost ledger: a release send names its subscriber (message_sent) and consumes email_checked; transactional sends name nobody
     outcome-backfill.ts # Cost ledger: declares message_sent on past release runs (sends before the live path) via runs-service's batch door
     ledger-subjects.ts  # Cost ledger: names each subscriber of past release checks at apollo-service (LEDGER-HISTORY-1024)
+    subscriber-leads.ts # Cost ledger: subscriber == lead equivalences at runs-service, on demand and every 6h (LEDGER-HISTORY-1024)
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
@@ -705,7 +714,7 @@ src/
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
     outcome-backfill.ts # POST /internal/outcome-backfill (declare past release sends' outcomes)
-    ledger-subjects.ts  # POST /internal/ledger-subjects/checks (name past checks' subscribers at apollo-service)
+    ledger-subjects.ts  # POST /internal/ledger-subjects/checks + /leads (ledger subjects: past checks, subscriber == lead)
     sent-emails.ts      # GET /internal/sent-emails (sent client emails, for the Unibox thread)
     subscriber-links.ts # GET /internal/subscriber-links/:linkId (who clicked a newsletter link)
   templates/
