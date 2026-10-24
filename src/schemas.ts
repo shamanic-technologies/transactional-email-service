@@ -188,6 +188,42 @@ export const OutcomeBackfillResponseSchema = z
   })
   .openapi("OutcomeBackfillResponse");
 
+// --- GET /internal/sent-emails (TX-EMAIL-IN-UNIBOX-1024) ---
+
+export const SentEmailsQuerySchema = z
+  .object({
+    after: z.string().min(1).optional().openapi({ description: "The nextCursor of the previous page. Absent = from the first email ever sent." }),
+    limit: z.coerce.number().int().min(1).max(500).optional().openapi({ description: "Page size, 1-500. Default 200." }),
+  })
+  .strict()
+  .openapi("SentEmailsQuery");
+
+export const SentEmailSchema = z
+  .object({
+    id: z.string().openapi({ description: "Stable id of this send (one per recipient). Idempotency key for a mirror." }),
+    eventType: z.string().openapi({ description: "The template the email was rendered from." }),
+    recipientEmail: z.string(),
+    orgId: z.string().nullable().openapi({ description: "Org the send was billed to. Null on an org-less send (a person with no account yet)." }),
+    brandIds: z.array(z.string()).nullable(),
+    from: z.string().nullable(),
+    subject: z.string().nullable(),
+    textBody: z.string().nullable(),
+    htmlBody: z.string().nullable(),
+    sentAt: z.string().openapi({ format: "date-time" }),
+    messageSource: z.enum(["stored", "replayed", "unavailable"]).openapi({
+      description:
+        "stored = the exact message put on the wire. replayed = a send made before messages were stored (2026-10-24), re-rendered from its current template with the stored variables: close to, not guaranteed byte-equal. unavailable = such a send whose template no longer exists (subject and bodies null).",
+    }),
+  })
+  .openapi("SentEmail");
+
+export const SentEmailsResponseSchema = z
+  .object({
+    emails: z.array(SentEmailSchema),
+    nextCursor: z.string().nullable().openapi({ description: "Pass as `after` to continue. An empty page returns the cursor sent; null only when nothing was ever sent." }),
+  })
+  .openapi("SentEmailsResponse");
+
 // --- Mailing lists (platform-level, staff-only) ---
 
 export const MailingListSubscriberSchema = z
@@ -978,6 +1014,25 @@ registry.registerPath({
       description: "unsupported_template_syntax: a template uses syntax the renderer would leave raw; the error names the template and the token, and `templates` lists each {name, field, token}. Nothing was written.",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/sent-emails",
+  summary: "Every transactional email sent to a client, for its Unibox thread (TX-EMAIL-IN-UNIBOX-1024)",
+  description:
+    "Sent emails only (a failed send is never served), oldest first by sentAt then id, the whole history. Staff-routed alerts " +
+    "(mail to staff ABOUT a client) are never served: each email here went to recipientEmail as a message from us. Rows can commit " +
+    "slightly out of sentAt order, so re-reading from a cursor a few minutes back is safe (dedupe on id). Read by crm-service to show " +
+    "each email in the recipient's Unibox thread; the send itself never waits on any reader.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { query: SentEmailsQuerySchema },
+  responses: {
+    200: { description: "One page of sent emails", content: { "application/json": { schema: SentEmailsResponseSchema } } },
+    400: { description: "Invalid query or cursor", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

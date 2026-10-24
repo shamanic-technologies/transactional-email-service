@@ -263,6 +263,12 @@ export async function register() {
 
 Declares the outcomes of PAST release sends (COST-BACKFILL-1023): every recipient `sent` before the live subscriber declarations went live (2026-10-23T14:33:24Z) becomes one `message_sent` on its release's own run (subject `transactional-email-service` / subscriber id), through runs-service `POST /v1/platform-runs/outcomes/batch` with the send's instant as `occurredAt`. Idempotent (a replay records nothing); a failure is a 502 and a re-run resumes. Returns `{ dryRun, releaseRuns, occurrences, calls, recorded, alreadyRecorded }`.
 
+### `GET /internal/sent-emails`
+
+**Internal endpoint** — requires `x-api-key` only. Query: `after` (the previous page's `nextCursor`), `limit` (1-500, default 200).
+
+Every transactional email sent to a client, so it shows in that person's Unibox thread (TX-EMAIL-IN-UNIBOX-1024, read by crm-service). Sending is unchanged; the message put on the wire (subject, HTML, text, from) is stored on the `email_events` row in the same write that marks it `sent`, with `sent_at`. Served: `sent` rows only (a failed send never appears), oldest first by `sentAt` then `id`, staff-routed alerts excluded. Returns `{ emails: [{ id, eventType, recipientEmail, orgId, brandIds, from, subject, textBody, htmlBody, sentAt, messageSource }], nextCursor }`. `messageSource`: `stored` (exact), `replayed` (sent before 2026-10-24, re-rendered from the current template with the stored variables), `unavailable` (that template is gone; subject and bodies null). Re-reading from a slightly older cursor is safe; dedupe on `id`.
+
 ### `POST /internal/transfer-brand`
 
 **Internal endpoint** — requires `x-api-key` only, no identity headers.
@@ -528,7 +534,7 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 
 Monthly per-brand dedup caps a send to at most once per org per brand per calendar month. Brand and month derive entirely from the existing request (`x-brand-id` header, or `brandIds` body field). A send in a new calendar month, or for a different brand, goes through; a repeat within the same brand and month returns `{ sent: false, reason: "duplicate" }`. If no brand identity is present the event falls through to no-dedup (repeatable).
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `send.ts`, never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `src/lib/staff-recipients.ts` (event set in `src/lib/staff-events.ts`), never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
 
 `campaign_failing` is raised by campaign-service when a campaign has failed every run for a sustained stretch (once per failing episode, latched on the campaign). Staff only: no `recipientEmail`/`bccEmails`/`ccEmails` on either route. Required non-empty metadata: `campaignId`, `consecutiveFailures`, `failingSince`, `retryInterval`; optional `campaignName`, `featureSlug`, `brandId`, `whereToLook`. The campaign is never stopped by this; the customer is never told by it.
 
@@ -667,6 +673,9 @@ src/
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
+    staff-events.ts     # Event types routed to the staff list instead of a client (ADMIN_NOTIFICATION_EVENTS)
+    sign-rendered.ts    # Dresses a rendered customer template as distribute.you (layout / why); shared by send, preview, Unibox replay
+    sent-emails.ts      # Stores the message a send put on the wire; serves sent client emails for the Unibox
     suppression.ts      # Postmark broadcast-stream suppression, per address, via key-service; short-lived cache, bypassed on send
     runs-client.ts      # Runs service client (create/update runs, org-less platform runs)
 │   │   ├── orgless-events.ts   # Closed list of events sendable with no org (POST /platform-orgless-send)
@@ -683,6 +692,7 @@ src/
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
     outcome-backfill.ts # POST /internal/outcome-backfill (declare past release sends' outcomes)
+    sent-emails.ts      # GET /internal/sent-emails (sent client emails, for the Unibox thread)
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
     syntax.ts           # Template syntax contract: refuses any {{ that is not a {{name}} placeholder
