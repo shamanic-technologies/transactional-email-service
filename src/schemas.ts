@@ -203,7 +203,7 @@ export const SentEmailSchema = z
     id: z.string().openapi({ description: "Stable id of this send (one per recipient). Idempotency key for a mirror." }),
     eventType: z.string().openapi({ description: "The template the email was rendered from." }),
     recipientEmail: z.string(),
-    orgId: z.string().nullable().openapi({ description: "Org the send was billed to. Null on an org-less send (a person with no account yet)." }),
+    orgId: z.string().nullable().openapi({ description: "Internal org UUID the send was billed to. Null on an org-less send (a person with no account yet) and on February 2026 rows that predate internal org ids (stored as \"legacy\" or a Clerk org_ id)." }),
     brandIds: z.array(z.string()).nullable(),
     from: z.string().nullable(),
     subject: z.string().nullable(),

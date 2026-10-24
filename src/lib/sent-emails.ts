@@ -55,6 +55,15 @@ export function decodeCursor(cursor: string): { sentAt: Date; id: string } | nul
   return { sentAt, id };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Rows from February 2026 carry "legacy" or a Clerk "org_…" id from before
+// internal org ids existed: neither names an org a reader can look up, so the
+// feed says "no org" rather than serve a placeholder.
+export function internalOrgId(orgId: string | null): string | null {
+  return orgId !== null && UUID.test(orgId) ? orgId : null;
+}
+
 const STAFF_ROUTED = [...ADMIN_NOTIFICATION_EVENTS, ...Object.keys(PLATFORM_STAFF_ALERTS)];
 
 /**
@@ -112,7 +121,7 @@ export async function listSentEmails(opts: { after: { sentAt: Date; id: string }
       id: row.id,
       eventType: row.eventType,
       recipientEmail: row.recipientEmail,
-      orgId: row.orgId,
+      orgId: internalOrgId(row.orgId),
       brandIds: row.brandIds,
       sentAt: row.sentAt!.toISOString(),
       ...message,
