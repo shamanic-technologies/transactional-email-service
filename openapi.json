@@ -634,7 +634,7 @@
           "orgId": {
             "type": "string",
             "nullable": true,
-            "description": "Org the send was billed to. Null on an org-less send (a person with no account yet)."
+            "description": "Internal org UUID the send was billed to. Null on an org-less send (a person with no account yet) and on February 2026 rows that predate internal org ids (stored as \"legacy\" or a Clerk org_ id)."
           },
           "brandIds": {
             "type": "array",

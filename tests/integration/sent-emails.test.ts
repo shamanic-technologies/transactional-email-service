@@ -27,7 +27,8 @@ import { emailEvents, emailTemplates } from "../../src/db/schema.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
-const HEADERS = { "x-org-id": "org_test", "x-user-id": "user_test", "x-run-id": "run_test" };
+const ORG = "06ffd332-b05d-4468-bc33-fe2789caad95";
+const HEADERS = { "x-org-id": ORG, "x-user-id": "user_test", "x-run-id": "run_test" };
 
 // One template per kind of client email; every one goes through the same path.
 const CLIENT_TEMPLATES = [
@@ -87,7 +88,7 @@ describe("GET /internal/sent-emails", () => {
       const wire = vi.mocked(sendEmail).mock.calls.find(([arg]) => arg.tag === email.eventType)![0];
       expect(email).toMatchObject({
         recipientEmail: "client@test.com",
-        orgId: "org_test",
+        orgId: ORG,
         brandIds: ["brand_test"],
         subject: wire.subject,
         htmlBody: wire.htmlBody,
@@ -165,6 +166,17 @@ describe("GET /internal/sent-emails", () => {
     expect(emails).toHaveLength(2);
     expect(emails[0]).toMatchObject({ eventType: "credit-depleted", subject: "Your credit ran out, Bo", messageSource: "replayed", sentAt: "2026-03-01T10:00:00.000Z" });
     expect(emails[1]).toMatchObject({ eventType: "template-long-gone", subject: null, htmlBody: null, messageSource: "unavailable" });
+  });
+
+  it("serves no org for a row that predates internal org ids", async () => {
+    await db.insert(emailEvents).values([
+      { eventType: "welcome", recipientEmail: "feb@test.com", orgId: "legacy", status: "sent", sentAt: new Date("2026-02-16T10:00:00Z") },
+      { eventType: "welcome", recipientEmail: "feb@test.com", orgId: "org_38y0ZSEtw1lz0KtH9Kwy53jBu67", status: "sent", sentAt: new Date("2026-02-17T10:00:00Z") },
+      { eventType: "welcome", recipientEmail: "now@test.com", orgId: "06ffd332-b05d-4468-bc33-fe2789caad95", status: "sent", sentAt: new Date("2026-10-24T10:00:00Z") },
+    ]);
+
+    const { emails } = await feed();
+    expect(emails.map((e) => e.orgId)).toEqual([null, null, "06ffd332-b05d-4468-bc33-fe2789caad95"]);
   });
 
   it("refuses a cursor it never issued", async () => {
