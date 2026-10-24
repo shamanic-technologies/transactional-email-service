@@ -72,6 +72,14 @@ to; an unknown-provenance consumption would charge the check twice). Sends after
 declared live by postmark-service: never move the cutoff later. Transactional `email-*` runs are
 support functions and are never backfilled.
 
+## Past checks name their subscriber at apollo (LEDGER-HISTORY-1024)
+
+`POST /internal/ledger-subjects/checks {dryRun}` (`src/lib/ledger-subjects.ts`) names every subscriber address at apollo-service
+`POST /internal/outcome-declarations/named-subjects` (callerLabel = the release's verification `source`, a test pins them equal), so
+apollo declares `email_checked` on each check asked before the live `subjects` (2026-10-23). One subscriber per address: the list whose
+release verified it FIRST (our recipient rows), else the oldest row; apollo refuses two subjects for one address. Idempotent, run once;
+the live path covers every check since.
+
 ## A release sends ONLY verdict `valid` — and no verdict means no send
 
 Every slice is verified by apollo-service `POST /email-verifications` after the
