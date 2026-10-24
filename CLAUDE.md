@@ -113,6 +113,17 @@ dedup key). Cost 2026-10-20: a client read "Hi{{#firstName}} Liudvikas{{/firstNa
 Do not add mustache sections to make such a template pass, and do not relax
 the check to the RENDERED output: metadata may legitimately contain `{{`.
 
+## Every sent client email is served for the Unibox (TX-EMAIL-IN-UNIBOX-1024)
+
+Owner 2026-10-24: « ça n'annule pas le transactionnel. Mais le transactionnel envoyé doit aussi être ajouté à l'Unibox ».
+The send is untouched; the write that marks a row `sent` also stores the message as it went on the wire
+(`sentMessageColumns` in `src/lib/sent-emails.ts`: subject, html, text, from, `sent_at`), on every send path.
+`GET /internal/sent-emails` serves those rows for crm-service to MIRROR (crm reads siblings, never pushed to).
+One sent row = one Unibox message; a failed row is never served; staff-routed events (`isStaffRoutedEvent`) never.
+No per-template rule: every template takes this path. Rows sent before 0024 are REPLAYED from the current template
+(`messageSource: "replayed"`), never written back. `sent_at` is millisecond-precision on purpose: the cursor is ISO ms,
+a microsecond value would re-serve the same row forever.
+
 ## A newsletter link says WHO clicked: `dy_sub`, an opaque id (NEWSLETTER-WHO-CLICKED-1024)
 
 Every mailing-list send (sync update and paced release) stamps each subscriber's
@@ -149,7 +160,7 @@ before 2026-10-24 has no ids. Pure stamping in `src/lib/subscriber-link.ts`, DB 
 
 - `src/schemas.ts` — Zod schemas (source of truth for validation + OpenAPI)
 - `src/index.ts` — Express app entry point
-- `src/routes/` — Route handlers (`send.ts`, `stats.ts`, `health.ts`, `openapi.ts`, `templates.ts`, `transfer-brand.ts`, `mailing-lists.ts`)
+- `src/routes/` — Route handlers (`send.ts`, `stats.ts`, `health.ts`, `openapi.ts`, `templates.ts`, `transfer-brand.ts`, `mailing-lists.ts`, `sent-emails.ts`)
 - `src/middleware/auth.ts` — API key + identity-header authentication
 - `src/lib/client-service.ts` — client-service user email resolution
 - `src/lib/email-gateway.ts` — Email Gateway client. **Adds no blind copy of its own**: a caller's `bccEmails` is forwarded exactly as supplied, and the standing blind copy is decided one layer up in `src/routes/send.ts`, where a customer-facing send can be told apart from a staff-list one. It does set `replyTo` on **every** send, defaulting to `FOUNDER_EMAIL` (`src/lib/founder.ts`), so a customer who hits reply reaches a human rather than wherever the sending address routes; a caller that names its own `replyTo` keeps it. `POST /send` exposes this as `replyToEmail` (e.g. instantly-service forwarding a prospect's reply so the customer answers the prospect); absent = founder default, refused on `STAFF_ONLY_DELIVERY_EVENTS` and on `/platform-send` like `ccEmails`.

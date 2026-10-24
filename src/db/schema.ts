@@ -22,10 +22,21 @@ export const emailEvents = pgTable(
     workflowSlug: text("workflow_slug"),
     featureSlug: text("feature_slug"),
     audienceId: text("audience_id"),
+    // The message exactly as it went on the wire, written when the send is
+    // confirmed (status "sent"), so the recipient's Unibox thread can show what
+    // we told them (GET /internal/sent-emails). Null on rows sent before
+    // migration 0024 and on every unsent row.
+    subject: text("subject"),
+    htmlBody: text("html_body"),
+    textBody: text("text_body"),
+    fromAddress: text("from_address"),
+    // When the gateway accepted the send. Rows sent before 0024 carry created_at.
+    sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("idx_email_events_dedup").on(table.dedupKey),
+    index("idx_email_events_sent_at").on(table.sentAt, table.id),
     index("idx_email_events_org_type").on(table.orgId, table.eventType),
     index("idx_email_events_recipient").on(table.recipientEmail),
     index("idx_email_events_brand_ids").using("gin", table.brandIds),

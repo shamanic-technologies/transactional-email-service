@@ -14,8 +14,9 @@ import { traceEvent } from "../lib/trace-event.js";
 import { OrglessSendRequestSchema, PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
 import { ORGLESS_PLATFORM_EVENTS, isOrglessPlatformEvent } from "../lib/orgless-events.js";
 import { PLATFORM_STAFF_ALERTS, isPlatformStaffAlert, platformStaffAlertDedupKey } from "../lib/platform-staff-alerts.js";
-import { isDistributeSender, signWithWhy } from "../lib/why.js";
-import { isFullHtmlDocument, wrapInBrandLayout } from "../lib/brand-layout.js";
+import { ADMIN_NOTIFICATION_EVENTS } from "../lib/staff-events.js";
+import { signRendered } from "../lib/sign-rendered.js";
+import { sentMessageColumns } from "../lib/sent-emails.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
 import { ADMIN_EMAILS, isStaffRecipientActor, payerFor } from "../lib/staff-recipients.js";
 
@@ -94,52 +95,6 @@ const REQUIRED_METADATA: Record<string, string[]> = {
 // is internal and has no customer-facing form.
 const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed", "trigger_silent", "trigger_occurrence_stuck"]);
 
-// Events where recipient is hardcoded to admin.
-// brand_daily_budget_changed is emitted by billing-service on every real change to a
-// brand's daily budget. It belongs to no dedup set above, so every change notifies.
-// payment_method_removed is emitted by stripe-service when a customer detaches a card
-// inside Stripe's billing portal. It belongs to no dedup set above, so every removal
-// notifies — losing one of two cards and going to zero are different situations.
-// staff_daily_digest is emitted once a day by the customer dashboard, which owns and
-// registers the template under that exact name. It belongs to no dedup set above: the
-// dashboard decides when a digest goes out.
-// provider_credits_exhausted is raised by any backend service that detects a paid
-// third-party provider has run out of credits. It is deduped once per org per
-// calendar day (ORG_DAILY_EVENTS) so a service hitting the wall on thousands of
-// consecutive operations cannot mail-bomb.
-// campaign_failing is raised by campaign-service when a campaign has failed every
-// run for a sustained stretch (CAMPAIGN_DAILY_EVENTS bounds it per campaign per day).
-// audience_refill_failed is raised by campaign-service when a campaign ran out of
-// people and the automatic refill produced nobody new, at the moment the customer
-// is asked to extend an audience (same per campaign per day bound).
-// trigger_silent is raised by campaign-service when a reactive trigger has gone
-// silent for days while live campaigns depend on it (TRIGGER_DAILY_EVENTS bounds
-// it per trigger per day, fleet-wide).
-// trigger_occurrence_stuck is raised by campaign-service when one trigger
-// occurrence carrying a person or an item has waited undelivered because a
-// campaign behind it cannot run (OCCURRENCE_ONCE_EVENTS: once per occurrence).
-// unpaid_debt_uncollectable is emitted by billing-service when an org's balance has
-// gone negative and there is no card on file to collect it on. It belongs to no dedup
-// set above: billing-service decides when a debt is worth reporting, and two orgs
-// going uncollectable on the same day are two separate pieces of news.
-// The recipient list itself lives in lib/staff-recipients.ts, hardcoded rather
-// than env-configured so the routing cannot silently drift or be disabled by a
-// variable nobody set; the mailing-list release worker sends there too and has
-// no request to read one from.
-const ADMIN_NOTIFICATION_EVENTS = new Set([
-  "signup_notification",
-  "signin_notification",
-  "user_active",
-  "brand_daily_budget_changed",
-  "payment_method_removed",
-  "staff_daily_digest",
-  "provider_credits_exhausted",
-  "unpaid_debt_uncollectable",
-  "campaign_failing",
-  "audience_refill_failed",
-  "trigger_silent",
-  "trigger_occurrence_stuck",
-]);
 
 
 // Blind copy for a send that goes to a CUSTOMER. The founder reads what we tell
@@ -158,34 +113,6 @@ function buildBccList(eventType: string, callerBcc: string[] | undefined): strin
   if (ADMIN_NOTIFICATION_EVENTS.has(eventType)) return bcc;
   if (!bcc.some((address) => address.toLowerCase() === FOUNDER_EMAIL)) bcc.push(FOUNDER_EMAIL);
   return bcc;
-}
-
-// The rendered message a send would put on the wire, dressed as distribute.you
-// where the message is distribute.you's own word to a customer: not on a
-// staff-routed alert, and not under a template that names a sender outside
-// distribute.you (the legacy GrowthAgency.dev templates). Shared by the send and
-// its preview so the preview cannot drift from what lands in the inbox.
-//
-// A customer template whose rendered body is a fragment, not a full HTML
-// document, is delivered inside the brand layout, which carries the why in its
-// footer. A full document keeps its own chrome and only gets the why signed in
-// if it lacks it. A template registered with layout "none" (one addressed to
-// the agency inbox rather than a customer) is never wrapped.
-//
-// A template delivered on the "transactional" stream is person-to-person mail
-// the recipient answers with Reply (instantly-service's answer-it-yourself email,
-// Reply-To = the prospect). It goes out exactly as registered: no layout and no
-// why. Its reply quotes the message, so a sign-off we add would travel into the
-// customer's own conversation with their prospect.
-type RenderedTemplate = ReturnType<Awaited<ReturnType<typeof getTemplate>>>;
-function signRendered(eventType: string, template: RenderedTemplate): RenderedTemplate {
-  // Staff mail is never signed: a platform staff alert goes out unsigned, so its preview is too
-  if (ADMIN_NOTIFICATION_EVENTS.has(eventType) || isPlatformStaffAlert(eventType) || !isDistributeSender(template.from)) return template;
-  if (template.stream === "transactional") return template;
-  if (template.layout === "brand" && !isFullHtmlDocument(template.htmlBody)) {
-    return { ...template, ...wrapInBrandLayout(template) };
-  }
-  return { ...template, ...signWithWhy(template, { withLink: false }) };
 }
 
 /**
@@ -541,10 +468,11 @@ async function handleSend(req: Request, res: Response) {
           workflowHeaders: { campaignId: headerCampaignId, brandId: headerBrandIds?.join(","), workflowSlug, featureSlug, audienceId },
         });
 
-        // Mark as sent only after successful delivery
+        // Mark as sent only after successful delivery, recording the message
+        // as it went out: this row is what the recipient's Unibox thread shows
         await db
           .update(emailEvents)
-          .set({ status: "sent" })
+          .set(sentMessageColumns(template))
           .where(eq(emailEvents.id, insertedEventId));
 
         traceEvent(run.id, { service: "transactional-email-service", event: "send-done", detail: `Sent ${body.eventType} to ${email}` }, traceHeaders);
@@ -699,7 +627,7 @@ async function handleOrglessPlatformSend(req: Request, res: Response) {
     return;
   }
 
-  await db.update(emailEvents).set({ status: "sent" }).where(eq(emailEvents.id, eventId));
+  await db.update(emailEvents).set(sentMessageColumns(template)).where(eq(emailEvents.id, eventId));
   await updatePlatformRun(run.id, "completed");
   res.json({ sent: true, eventId, runId: run.id });
 }
@@ -828,7 +756,7 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
       return;
     }
 
-    await db.update(emailEvents).set({ status: "sent" }).where(eq(emailEvents.id, rowId));
+    await db.update(emailEvents).set(sentMessageColumns(template)).where(eq(emailEvents.id, rowId));
     await updatePlatformRun(run.id, "completed");
     sentRunId = run.id;
     sentCount += 1;

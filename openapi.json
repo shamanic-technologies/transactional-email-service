@@ -597,6 +597,96 @@
           "htmlBody"
         ]
       },
+      "SentEmailsResponse": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SentEmail"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Pass as `after` to continue. An empty page returns the cursor sent; null only when nothing was ever sent."
+          }
+        },
+        "required": [
+          "emails",
+          "nextCursor"
+        ]
+      },
+      "SentEmail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable id of this send (one per recipient). Idempotency key for a mirror."
+          },
+          "eventType": {
+            "type": "string",
+            "description": "The template the email was rendered from."
+          },
+          "recipientEmail": {
+            "type": "string"
+          },
+          "orgId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Org the send was billed to. Null on an org-less send (a person with no account yet)."
+          },
+          "brandIds": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "from": {
+            "type": "string",
+            "nullable": true
+          },
+          "subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "textBody": {
+            "type": "string",
+            "nullable": true
+          },
+          "htmlBody": {
+            "type": "string",
+            "nullable": true
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messageSource": {
+            "type": "string",
+            "enum": [
+              "stored",
+              "replayed",
+              "unavailable"
+            ],
+            "description": "stored = the exact message put on the wire. replayed = a send made before messages were stored (2026-10-24), re-rendered from its current template with the stored variables: close to, not guaranteed byte-equal. unavailable = such a send whose template no longer exists (subject and bodies null)."
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "recipientEmail",
+          "orgId",
+          "brandIds",
+          "from",
+          "subject",
+          "textBody",
+          "htmlBody",
+          "sentAt",
+          "messageSource"
+        ]
+      },
       "SubscriberLinkResolution": {
         "type": "object",
         "properties": {
@@ -2188,6 +2278,77 @@
           },
           "422": {
             "description": "unsupported_template_syntax: a template uses syntax the renderer would leave raw; the error names the template and the token, and `templates` lists each {name, field, token}. Nothing was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/sent-emails": {
+      "get": {
+        "summary": "Every transactional email sent to a client, for its Unibox thread (TX-EMAIL-IN-UNIBOX-1024)",
+        "description": "Sent emails only (a failed send is never served), oldest first by sentAt then id, the whole history. Staff-routed alerts (mail to staff ABOUT a client) are never served: each email here went to recipientEmail as a message from us. Rows can commit slightly out of sentAt order, so re-reading from a cursor a few minutes back is safe (dedupe on id). Read by crm-service to show each email in the recipient's Unibox thread; the send itself never waits on any reader.",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The nextCursor of the previous page. Absent = from the first email ever sent."
+            },
+            "required": false,
+            "description": "The nextCursor of the previous page. Absent = from the first email ever sent.",
+            "name": "after",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "Page size, 1-500. Default 200."
+            },
+            "required": false,
+            "description": "Page size, 1-500. Default 200.",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of sent emails",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentEmailsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
             "content": {
               "application/json": {
                 "schema": {

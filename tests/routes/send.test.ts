@@ -547,7 +547,7 @@ describe("POST /send", () => {
 
     // Should have called db.update to set status to "sent"
     expect(mockUpdate).toHaveBeenCalled();
-    expect(mockSet).toHaveBeenCalledWith({ status: "sent" });
+    expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }));
   });
 
   it("updates event status to 'failed' when gateway returns an error", async () => {
@@ -2458,7 +2458,7 @@ describe("POST /send — a message only staff read is platform-paid", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toMatch(/\/orgs\/send$/);
     expect(bodyOf(0).payer).toBe("platform");
-    expect(mockSet).toHaveBeenCalledWith({ status: "sent" });
+    expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }));
   });
 
   it("an org with no credit still gets the staff mail out: the gateway would 402 only an org-paid send", async () => {
