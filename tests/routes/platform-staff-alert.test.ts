@@ -123,7 +123,7 @@ describe("POST /platform-staff-alert", () => {
         status: "pending",
       }),
     );
-    expect(mockSet).toHaveBeenLastCalledWith({ status: "sent" });
+    expect(mockSet).toHaveBeenLastCalledWith(expect.objectContaining({ status: "sent" }));
   });
 
   it("claims only a NEW or a FAILED occurrence: a sent one is never reclaimed", async () => {

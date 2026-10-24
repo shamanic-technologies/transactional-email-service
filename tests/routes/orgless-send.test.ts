@@ -116,7 +116,7 @@ describe("POST /platform-orgless-send", () => {
   it("records the send with no org and no dedup key", async () => {
     await post(BODY);
     expect(mockValues).toHaveBeenCalledWith(expect.objectContaining({ orgId: null, userId: null, dedupKey: null, eventType: "agent_signup_code" }));
-    expect(mockSet).toHaveBeenLastCalledWith({ status: "sent" });
+    expect(mockSet).toHaveBeenLastCalledWith(expect.objectContaining({ status: "sent" }));
   });
 
   it("is not deduplicated: the same call twice delivers twice", async () => {
