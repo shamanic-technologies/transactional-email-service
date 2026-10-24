@@ -263,6 +263,12 @@ export async function register() {
 
 Declares the outcomes of PAST release sends (COST-BACKFILL-1023): every recipient `sent` before the live subscriber declarations went live (2026-10-23T14:33:24Z) becomes one `message_sent` on its release's own run (subject `transactional-email-service` / subscriber id), through runs-service `POST /v1/platform-runs/outcomes/batch` with the send's instant as `occurredAt`. Idempotent (a replay records nothing); a failure is a 502 and a re-run resumes. Returns `{ dryRun, releaseRuns, occurrences, calls, recorded, alreadyRecorded }`.
 
+### `POST /internal/ledger-subjects/checks`
+
+**Internal endpoint** — requires `x-api-key` only. Body `{ "dryRun": boolean }` (required).
+
+LEDGER-HISTORY-1024: names the subscriber of every past release check at apollo-service, so a send reusing a verdict checked before 2026-10-23 consumes an `email_checked` that has a producer. One subscriber per address (the list whose release verified it first, else the oldest subscriber row), sent through apollo-service `POST /internal/outcome-declarations/named-subjects` (`callerLabel` `transactional-email-service:mailing-list-release`, <= 500 per call); apollo declares `email_checked` on each check, dated at the check. Idempotent; a failure is a 502 and a re-run resumes. Returns apollo's answers summed: `{ dryRun, calls, subjects, checks, subjectsWithoutCheck, parked }`.
+
 ### `GET /internal/sent-emails`
 
 **Internal endpoint** — requires `x-api-key` only. Query: `after` (the previous page's `nextCursor`), `limit` (1-500, default 200).
@@ -673,6 +679,7 @@ src/
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
     outcome-subject.ts  # Cost ledger: a release send names its subscriber (message_sent) and consumes email_checked; transactional sends name nobody
     outcome-backfill.ts # Cost ledger: declares message_sent on past release runs (sends before the live path) via runs-service's batch door
+    ledger-subjects.ts  # Cost ledger: names each subscriber of past release checks at apollo-service (LEDGER-HISTORY-1024)
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
@@ -698,6 +705,7 @@ src/
     templates.ts        # PUT /templates endpoint for template registration
     transfer-brand.ts   # POST /internal/transfer-brand for brand ownership transfer
     outcome-backfill.ts # POST /internal/outcome-backfill (declare past release sends' outcomes)
+    ledger-subjects.ts  # POST /internal/ledger-subjects/checks (name past checks' subscribers at apollo-service)
     sent-emails.ts      # GET /internal/sent-emails (sent client emails, for the Unibox thread)
     subscriber-links.ts # GET /internal/subscriber-links/:linkId (who clicked a newsletter link)
   templates/
