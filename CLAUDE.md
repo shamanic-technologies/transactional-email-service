@@ -85,6 +85,12 @@ A subscriber who is also a lead is ONE subject: `src/lib/subscriber-leads.ts` re
 (`/v1/platform-runs/subject-equivalences`), on demand (`POST /internal/ledger-subjects/leads`) and in process every 6h (first pass
 ~60s after boot). Never declare the check a second time under the lead. Stateless: runs-service rows are immutable, a replay is
 `already_recorded`; a 422 retries without the refused items and reports them, never forces them.
+Each pass re-asks EVERY subscriber, so one with no lead last time is stated once lead-service answers. lead-service answers only a
+lead someone KEPT (a `leads_campaigns` row): an address it holds on an unkept lead is `not_a_lead` (147 on 2026-10-25, none consuming
+`email_checked`). Measured 2026-10-25 (LEDGER-RESIDUAL-1025): the 344 leads whose only check is ours all carry the equivalence; a lead
+consumption still without producer is not fed by our check (an `invalid` verdict declares nothing at apollo, a loss by design; or
+the check was apollo's own). Measure before coding: join run_outcomes consumed `email_checked` x subject_equivalences x apollo
+`email_verifications.source`.
 
 ## A release sends ONLY verdict `valid` — and no verdict means no send
 
