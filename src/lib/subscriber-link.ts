@@ -44,7 +44,10 @@ export function isOurSite(url: URL): boolean {
   return host === "distribute.you" || host.endsWith(".distribute.you");
 }
 
-function stampUrl(raw: string, linkId: string): string {
+/** One query parameter appended to our links: its name and its (URL-safe) value. */
+export type LinkParam = readonly [name: string, value: string];
+
+function stampUrl(raw: string, params: readonly LinkParam[]): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -52,17 +55,17 @@ function stampUrl(raw: string, linkId: string): string {
     return raw;
   }
   if (!isOurSite(url)) return raw;
-  if (url.searchParams.has(SUBSCRIBER_LINK_PARAM)) {
-    url.searchParams.set(SUBSCRIBER_LINK_PARAM, linkId);
+  if (params.some(([name]) => url.searchParams.has(name))) {
+    for (const [name, value] of params) url.searchParams.set(name, value);
     return url.toString();
   }
   // Appended as text so the authored URL keeps its exact bytes (no trailing
-  // slash added, no re-encoded query), the parameter going before any fragment.
+  // slash added, no re-encoded query), the parameters going before any fragment.
   const hashAt = raw.indexOf("#");
   const head = hashAt === -1 ? raw : raw.slice(0, hashAt);
   const fragment = hashAt === -1 ? "" : raw.slice(hashAt);
   const joiner = !head.includes("?") ? "?" : head.endsWith("?") || head.endsWith("&") ? "" : "&";
-  return `${head}${joiner}${SUBSCRIBER_LINK_PARAM}=${linkId}${fragment}`;
+  return `${head}${joiner}${params.map(([name, value]) => `${name}=${value}`).join("&")}${fragment}`;
 }
 
 const HREF = /(\bhref\s*=\s*)(["'])(.*?)\2/gi;
@@ -80,9 +83,22 @@ export function stampSubscriberLinks(
   body: { htmlBody: string; textBody: string },
   linkId: string
 ): { htmlBody: string; textBody: string } {
+  return stampOurLinks(body, [[SUBSCRIBER_LINK_PARAM, linkId]]);
+}
+
+/**
+ * Same stamping, any parameters (in order): a release send adds the email's own
+ * Unit (`dy_unit`, newsletter-units.ts) beside the subscriber's `dy_sub`.
+ * Nothing is stamped when `params` is empty.
+ */
+export function stampOurLinks(
+  body: { htmlBody: string; textBody: string },
+  params: readonly LinkParam[]
+): { htmlBody: string; textBody: string } {
+  if (params.length === 0) return body;
   const htmlBody = body.htmlBody.replace(HREF, (whole, prefix: string, quote: string, value: string) => {
     const decoded = value.replace(/&amp;/g, "&");
-    const stamped = stampUrl(decoded, linkId);
+    const stamped = stampUrl(decoded, params);
     if (stamped === decoded) return whole;
     return `${prefix}${quote}${stamped.replace(/&/g, "&amp;")}${quote}`;
   });
@@ -90,7 +106,7 @@ export function stampSubscriberLinks(
   const textBody = body.textBody.replace(BARE_URL, (match) => {
     const trailing = match.match(TRAILING_PUNCTUATION)?.[0] ?? "";
     const url = trailing ? match.slice(0, -trailing.length) : match;
-    return stampUrl(url, linkId) + trailing;
+    return stampUrl(url, params) + trailing;
   });
 
   return { htmlBody, textBody };
