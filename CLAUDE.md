@@ -162,6 +162,15 @@ Never put an email, name or phone in a URL. Our apps resolve it server side:
 before 2026-10-24 has no ids. Pure stamping in `src/lib/subscriber-link.ts`, DB in
 `subscriber-link-store.ts` (own module: route unit tests fake the db).
 
+## A halted release is RELAUNCHED, never resumed (NEWSLETTER-RELAUNCH-HALTED-1107)
+
+`POST /mailing-lists/releases/:id/relaunch {dailyLimit?}` (halted or cancelled source only) creates a NEW release with the
+source's exact content, sender and identity (same org pays), its own run (its own halt check, same thresholds), and
+`relaunched_from_release_id` = the source (unique: asking again returns that relaunch, `created: false`). Recipients = the
+list NOW minus every address the source's LINEAGE sent to (`sent`, `sending`, `failed` with `INTERRUPTED_REASON`); skipped,
+pending, cancelled, gateway-failed and newly joined addresses go back through suppression + verification. A relaunch that
+halts is relaunched from ITSELF. Never resume a halted release in place, never raise the bounce threshold to push one through.
+
 ## Every newsletter email is ONE `newsletter_email_sent` Unit (OUTCOME-FINEST-1106)
 
 Owner 2026-11-06: « le QUOI c'est l'outcome, toujours aussi fin que possible »; a newsletter is not a post and not a

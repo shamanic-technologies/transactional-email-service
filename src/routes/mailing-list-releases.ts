@@ -15,8 +15,8 @@ import { resolveBody } from "../lib/update-body.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { readProgress, runReleaseTick } from "../lib/release-worker.js";
-import { estimateDaysRemaining, tickAllowance } from "../lib/release-pacing.js";
-import { CreateReleaseRequestSchema, UpdateReleasePaceRequestSchema } from "../schemas.js";
+import { INTERRUPTED_REASON, estimateDaysRemaining, tickAllowance } from "../lib/release-pacing.js";
+import { CreateReleaseRequestSchema, RelaunchReleaseRequestSchema, UpdateReleasePaceRequestSchema } from "../schemas.js";
 import { DEFAULT_MAILING_LIST_FROM_ADDRESS } from "../lib/mailing-list-sender.js";
 
 /**
@@ -152,6 +152,7 @@ async function describe(release: MailingListRelease, slug: string, now = new Dat
             tickAllowance({ dailyLimit: release.dailyLimit, sentToday: progress.todayUsed, now })
           )
         : 0,
+    relaunchedFromReleaseId: release.relaunchedFromReleaseId ?? null,
     createdAt: release.createdAt.toISOString(),
     completedAt: release.completedAt?.toISOString() ?? null,
   };
@@ -581,6 +582,233 @@ router.patch("/mailing-lists/releases/:releaseId/pace", requireApiKey, requireOr
   } catch (error: any) {
     console.error("[transactional-email-service] Release pace error:", error);
     res.status(500).json({ error: messageOf(error) || "Failed to change release pace" });
+  }
+});
+
+/** Statuses a release can be relaunched from: it ended with people never sent to. */
+const RELAUNCHABLE_STATUSES = ["halted", "cancelled"];
+
+function relaunchRefusal(status: string): string {
+  if (status === "running" || status === "paused")
+    return `This release is ${status} and still owns its remaining subscribers. Pause, resume or cancel it; a relaunch is for a release that has stopped for good.`;
+  if (status === "completed") return "This release has finished: every subscriber is accounted for, nobody is left to relaunch to.";
+  return `A release that is ${status} cannot be relaunched`;
+}
+
+/**
+ * The subscribers of a relaunch: the list as it stands now, minus every address
+ * the source release's lineage (it, and every release it was itself relaunched
+ * from) SENT to. "Sent" is `sent`, a claim still `sending`, and a claim settled
+ * `failed` because the worker died holding it — that one may have left, and the
+ * service's rule is that mailing somebody twice is worse than missing them.
+ * Everything else (pending, cancelled, skipped, a gateway refusal, a subscriber
+ * who joined since) is included, and the worker's per-slice suppression and
+ * verification decide again exactly as for any release.
+ *
+ * Returned as SQL fragments so the count and the insert are one predicate.
+ */
+function relaunchAudience(sourceReleaseId: string, listId: string) {
+  return raw`
+    FROM mailing_list_subscribers s
+    WHERE s.list_id = ${listId}::uuid
+      AND NOT EXISTS (
+        SELECT 1 FROM mailing_list_release_recipients h
+        WHERE h.release_id IN (
+            WITH RECURSIVE lineage(id, parent) AS (
+              SELECT id, relaunched_from_release_id FROM mailing_list_releases WHERE id = ${sourceReleaseId}::uuid
+              UNION
+              SELECT p.id, p.relaunched_from_release_id
+              FROM mailing_list_releases p JOIN lineage l ON p.id = l.parent
+            )
+            SELECT id FROM lineage
+          )
+          AND h.email = s.email
+          AND (h.status IN ('sent', 'sending') OR (h.status = 'failed' AND h.reason = ${INTERRUPTED_REASON}))
+      )
+  `;
+}
+
+/**
+ * POST /mailing-lists/releases/:releaseId/relaunch
+ *
+ * A halted release never resumes (its halt is a decision on the provider's own
+ * outcomes), and creating the same update again would mail every subscriber,
+ * the ones it already reached included. This creates a NEW release carrying the
+ * source's exact content, sender and send identity (org, user, campaign, brands:
+ * the same payer as the source), going only to subscribers the source never sent
+ * to. It has its own run, so its delivery outcomes are read on their own and it
+ * halts itself on the same thresholds as any release.
+ *
+ * One relaunch per release (unique index): asking again returns that relaunch
+ * with `created: false`, so a retried request cannot start a second one. A
+ * relaunch that halts in turn is relaunched from ITSELF, and its lineage carries
+ * every ancestor's sends.
+ */
+router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  const releaseId = readReleaseId(req, res);
+  if (!releaseId) return;
+
+  const parsed = RelaunchReleaseRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+
+  const actingUserId = requireActingUser(res);
+  if (!actingUserId) return;
+  const identity = identityOf(res);
+
+  try {
+    const found = await findRelease(releaseId);
+    if (!found) {
+      res.status(404).json({ error: `No release '${releaseId}'` });
+      return;
+    }
+    const source = found.release;
+
+    const [existing] = await db
+      .select()
+      .from(mailingListReleases)
+      .where(eq(mailingListReleases.relaunchedFromReleaseId, source.id))
+      .limit(1);
+    if (existing) {
+      res.json({
+        created: false,
+        estimatedDays: Math.ceil(existing.recipientCount / existing.dailyLimit),
+        ...(await describe(existing, found.slug)),
+      });
+      return;
+    }
+
+    if (!RELAUNCHABLE_STATUSES.includes(source.status)) {
+      res.status(409).json({ error: relaunchRefusal(source.status) });
+      return;
+    }
+
+    const audience = relaunchAudience(source.id, source.listId);
+    const [counted] = (await db.execute(raw`SELECT count(*)::int AS count ${audience}`)) as unknown as Array<{
+      count: number;
+    }>;
+    const eligible = Number(counted?.count ?? 0);
+    if (eligible === 0) {
+      res.status(409).json({ error: "Every subscriber of this list was already sent this update. Nobody is left to relaunch to." });
+      return;
+    }
+
+    const dailyLimit = parsed.data.dailyLimit ?? source.dailyLimit;
+    const workflowHeaders = {
+      campaignId: source.campaignId ?? undefined,
+      brandId: source.brandIds?.join(","),
+      workflowSlug: source.workflowSlug ?? undefined,
+      featureSlug: source.featureSlug ?? undefined,
+      audienceId: source.audienceId ?? undefined,
+    };
+
+    // Same order as creating a release: a relaunch that cannot be tracked does
+    // not start, because its run is the key its own halt check reads by.
+    const run = await createRun({
+      orgId: source.orgId,
+      userId: source.userId,
+      serviceName: "transactional-email-service",
+      taskName: `mailing-list-release-${found.slug}`,
+      parentRunId: identity.runId,
+      brandIds: source.brandIds ?? undefined,
+      campaignId: source.campaignId ?? undefined,
+      workflowHeaders,
+    });
+
+    let relaunch: MailingListRelease;
+    try {
+      relaunch = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(mailingListReleases)
+          .values({
+            listId: source.listId,
+            subject: source.subject,
+            fromAddress: source.fromAddress,
+            bodyKind: source.bodyKind,
+            bodyMarkdown: source.bodyMarkdown,
+            htmlBody: source.htmlBody,
+            textBody: source.textBody,
+            dedupKey: source.dedupKey,
+            dailyLimit,
+            status: "running",
+            recipientCount: 0,
+            orgId: source.orgId,
+            userId: source.userId,
+            runId: run.id,
+            campaignId: source.campaignId,
+            brandIds: source.brandIds,
+            workflowSlug: source.workflowSlug,
+            featureSlug: source.featureSlug,
+            audienceId: source.audienceId,
+            relaunchedFromReleaseId: source.id,
+          })
+          .returning();
+
+        const [inserted] = (await tx.execute(raw`
+          WITH ins AS (
+            INSERT INTO mailing_list_release_recipients (id, release_id, email, status)
+            SELECT gen_random_uuid(), ${row.id}::uuid, s.email, 'pending'
+            ${relaunchAudience(source.id, source.listId)}
+            ON CONFLICT DO NOTHING
+            RETURNING 1
+          )
+          SELECT count(*)::int AS count FROM ins
+        `)) as unknown as Array<{ count: number }>;
+
+        const [updated] = await tx
+          .update(mailingListReleases)
+          .set({ recipientCount: Number(inserted?.count ?? 0) })
+          .where(eq(mailingListReleases.id, row.id))
+          .returning();
+        return updated;
+      });
+    } catch (error: any) {
+      // Two relaunches of one release raced: the unique index let one through.
+      if (String(error?.code ?? error?.cause?.code) === "23505") {
+        const [winner] = await db
+          .select()
+          .from(mailingListReleases)
+          .where(eq(mailingListReleases.relaunchedFromReleaseId, source.id))
+          .limit(1);
+        if (winner) {
+          res.json({
+            created: false,
+            estimatedDays: Math.ceil(winner.recipientCount / winner.dailyLimit),
+            ...(await describe(winner, found.slug)),
+          });
+          return;
+        }
+      }
+      throw error;
+    }
+
+    traceEvent(
+      run.id,
+      {
+        service: "transactional-email-service",
+        event: "mailing-list-release-relaunched",
+        detail: `'${source.subject}' relaunched from ${source.status} release ${source.id} by ${actingUserId}: ${relaunch.recipientCount} subscriber(s) of '${found.slug}' it never sent to, at most ${dailyLimit} a day`,
+      },
+      {
+        "x-org-id": source.orgId,
+        "x-user-id": source.userId,
+        "x-campaign-id": source.campaignId ?? undefined,
+        "x-workflow-slug": source.workflowSlug ?? undefined,
+        "x-feature-slug": source.featureSlug ?? undefined,
+        "x-audience-id": source.audienceId ?? undefined,
+      }
+    );
+
+    res.status(201).json({
+      created: true,
+      estimatedDays: Math.ceil(relaunch.recipientCount / dailyLimit),
+      ...(await describe(relaunch, found.slug)),
+    });
+  } catch (error: any) {
+    console.error("[transactional-email-service] Relaunch release error:", error);
+    res.status(502).json({ error: messageOf(error) || "Failed to relaunch release" });
   }
 });
 

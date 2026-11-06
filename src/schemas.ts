@@ -738,6 +738,22 @@ export const UpdateReleasePaceRequestSchema = z
   })
   .openapi("UpdateReleasePaceRequest");
 
+/**
+ * Sending a halted (or cancelled) update again, to the subscribers it never
+ * reached. The content, list, sender and send identity are the source
+ * release's, byte for byte; only the pace may be restated.
+ */
+export const RelaunchReleaseRequestSchema = z
+  .object({
+    dailyLimit: z.number().int().min(1).max(MAX_DAILY_LIMIT).optional().openapi({
+      description:
+        "Most messages per UTC day for the relaunch. Absent = the source release's pace. Same ceiling as creating a release (" +
+        `${MAX_DAILY_LIMIT}` +
+        ").",
+    }),
+  })
+  .openapi("RelaunchReleaseRequest");
+
 export const ReleaseSchema = z
   .object({
     releaseId: z.string(),
@@ -772,6 +788,10 @@ export const ReleaseSchema = z
     }),
     nextSliceSize: z.number().openapi({
       description: "How many the next tick would take, which is 0 when today's allowance is spent or the release is not running",
+    }),
+    relaunchedFromReleaseId: z.string().nullable().openapi({
+      description:
+        "The halted or cancelled release this one sends again, to the subscribers that release (and its own ancestors) never sent to. Null for a release created from scratch.",
     }),
     createdAt: z.string().openapi({ format: "date-time" }),
     completedAt: z.string().nullable().openapi({ format: "date-time" }),
@@ -1621,6 +1641,36 @@ registry.registerPath({
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
     409: { description: "The release has ended or stopped itself, and its decision stands", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/releases/{releaseId}/relaunch",
+  summary: "Send a halted or cancelled update again, only to the subscribers it never sent to",
+  description:
+    `${releasesDescription} A halted release never resumes, and creating the same update again would mail every ` +
+    "subscriber, including those it already reached. This creates a NEW release with the source's exact content, " +
+    "sender and send identity, whose recipients are the list's current subscribers minus every address the source " +
+    "release (and, for a relaunch of a relaunch, every ancestor) sent to: `sent`, still `sending`, or `failed` because " +
+    "the worker died mid-send (it may have left). Addresses the source skipped (opted out, undeliverable), never " +
+    "reached, or that joined since are included, and the normal per-slice suppression and verification rules apply " +
+    "to them again. The relaunch has its own run and halts itself on the same bounce/complaint thresholds. One " +
+    "relaunch per release: asking again returns the existing one with `created: false`.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ releaseId: z.string() }),
+    body: { required: false, content: { "application/json": { schema: RelaunchReleaseRequestSchema } } },
+  },
+  parameters: [releaseIdParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    201: { description: "The relaunch, newly created and running", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
+    200: { description: "This release was already relaunched; that relaunch is returned untouched", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
+    400: { description: "Invalid release id, missing headers, or a pace the worker cannot deliver", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "The release is still running, paused or completed, or every subscriber was already sent to", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
