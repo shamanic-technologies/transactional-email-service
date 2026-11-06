@@ -162,6 +162,21 @@ Never put an email, name or phone in a URL. Our apps resolve it server side:
 before 2026-10-24 has no ids. Pure stamping in `src/lib/subscriber-link.ts`, DB in
 `subscriber-link-store.ts` (own module: route unit tests fake the db).
 
+## Every newsletter email is ONE `newsletter_email_sent` Unit (OUTCOME-FINEST-1106)
+
+Owner 2026-11-06: « le QUOI c'est l'outcome, toujours aussi fin que possible »; a newsletter is not a post and not a
+cold email. `src/lib/newsletter-units.ts` declares, for every sent recipient row, produced `newsletter_email_sent`
+(subject = the recipient row id, so a click names THIS email) consuming the send's `message_sent` (subject = the
+subscriber; none when the address left the list), `occurredAt` = `settled_at`, on ONE spend-free child run per release
+(`units_run_id`, task `newsletter-email-units`, release org + user, closed at once). Never on the release run itself:
+it already produces the past `message_sent` (one run = one produced key). Declared by an in-process pass every minute
+(first ~60 s after boot), oldest undeclared first (`unit_declared_at` + partial index), never in the send path; a
+refusal stops the pass loud and the rows wait. Links to our sites carry `dy_unit=<outcome>:<subjectService>:<id>`
+beside `dy_sub` (the capture script strips only `dy_sub`, so the visit's entry URL keeps it). `GET
+/internal/mailing-list-releases` serves each release's `runId`/`unitsRunId`; cost and what consumed the Units are read
+off runs-service. Catalogue step created in prod 2026-11-06 (features-service `declared_steps`). Every release send
+bills the release's org (checked 2026-11-06: all child runs on it); keep it so.
+
 ## Commands
 
 - `npm test` — run tests (Vitest)

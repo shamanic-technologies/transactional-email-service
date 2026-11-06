@@ -14,9 +14,11 @@ import sentEmailsRoutes from "./routes/sent-emails.js";
 import mailingListsRoutes from "./routes/mailing-lists.js";
 import mailingListReleasesRoutes from "./routes/mailing-list-releases.js";
 import subscriberLinksRoutes from "./routes/subscriber-links.js";
+import newsletterUnitsRoutes from "./routes/newsletter-units.js";
 import { seedStaffTemplates } from "./templates/staff-alerts.js";
 import { startReleaseWorker, stopReleaseWorker } from "./lib/release-worker.js";
 import { startSubscriberLeadSweep, stopSubscriberLeadSweep } from "./lib/subscriber-leads.js";
+import { startNewsletterUnitsWorker, stopNewsletterUnitsWorker } from "./lib/newsletter-units.js";
 import { db } from "./db/index.js";
 
 const app = express();
@@ -36,6 +38,7 @@ app.use(sentEmailsRoutes);
 app.use(mailingListsRoutes);
 app.use(mailingListReleasesRoutes);
 app.use(subscriberLinksRoutes);
+app.use(newsletterUnitsRoutes);
 app.use(openapiRoutes);
 
 app.use((_req, res) => {
@@ -66,6 +69,9 @@ if (process.env.NODE_ENV !== "test") {
         // LEDGER-HISTORY-1024: subscriber == lead equivalences, first pass
         // ~60s after boot, then every 6h (subscriber-leads.ts).
         startSubscriberLeadSweep();
+        // OUTCOME-FINEST-1106: every sent newsletter email declared as one
+        // newsletter_email_sent Unit, first pass ~60s after boot, then every minute.
+        startNewsletterUnitsWorker();
       });
 
       // A redeploy sends SIGTERM. Stopping the worker first lets the slice it
@@ -75,6 +81,7 @@ if (process.env.NODE_ENV !== "test") {
       const shutdown = (signal: string) => {
         console.log(`[transactional-email-service] ${signal} received, letting the release worker settle`);
         stopSubscriberLeadSweep();
+        stopNewsletterUnitsWorker();
         stopReleaseWorker().finally(() => server.close(() => process.exit(0)));
       };
       process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, integer } from "drizzle-orm/pg-core";
 
 export const emailEvents = pgTable(
@@ -273,6 +274,12 @@ export const mailingListReleases = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /**
+     * The spend-free run (child of `runId`, same org) every `newsletter_email_sent`
+     * Unit of this release is declared on (newsletter-units.ts). Opened on the
+     * first declaration pass after the first send; null until then.
+     */
+    unitsRunId: uuid("units_run_id"),
   },
   (table) => [
     index("idx_mailing_list_releases_list").on(table.listId, table.createdAt),
@@ -326,9 +333,17 @@ export const mailingListReleaseRecipients = pgTable(
     verdict: text("verdict"),
     /** apollo-service's email_verifications row the verdict came from. */
     verificationId: text("verification_id"),
+    /**
+     * When this sent email's `newsletter_email_sent` Unit landed on runs-service
+     * (newsletter-units.ts). Null = sent and not declared yet (the next pass does).
+     */
+    unitDeclaredAt: timestamp("unit_declared_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("idx_mailing_list_release_recipients_unique").on(table.releaseId, table.email),
+    index("idx_mailing_list_release_recipients_undeclared")
+      .on(table.settledAt)
+      .where(sql`${table.status} = 'sent' AND ${table.unitDeclaredAt} IS NULL`),
     index("idx_mailing_list_release_recipients_claim").on(table.releaseId, table.status),
     index("idx_mailing_list_release_recipients_settled").on(table.releaseId, table.settledAt),
   ]

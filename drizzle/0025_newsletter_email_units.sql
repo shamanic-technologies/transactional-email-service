@@ -1,0 +1,3 @@
+ALTER TABLE "mailing_list_release_recipients" ADD COLUMN IF NOT EXISTS "unit_declared_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "mailing_list_releases" ADD COLUMN IF NOT EXISTS "units_run_id" uuid;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_mailing_list_release_recipients_undeclared" ON "mailing_list_release_recipients" USING btree ("settled_at") WHERE "mailing_list_release_recipients"."status" = 'sent' AND "mailing_list_release_recipients"."unit_declared_at" IS NULL;
