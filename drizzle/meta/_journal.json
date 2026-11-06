@@ -176,6 +176,13 @@
       "when": 1792843224056,
       "tag": "0024_sent_email_message",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793986096114,
+      "tag": "0025_newsletter_email_units",
+      "breakpoints": true
     }
   ]
 }

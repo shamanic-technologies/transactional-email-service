@@ -188,6 +188,56 @@ export const OutcomeBackfillResponseSchema = z
   })
   .openapi("OutcomeBackfillResponse");
 
+// --- Newsletter Units (OUTCOME-FINEST-1106) ---
+
+export const NewsletterReleaseUnitsSchema = z
+  .object({
+    releaseId: z.string(),
+    listSlug: z.string(),
+    subject: z.string(),
+    status: z.string(),
+    orgId: z.string().openapi({ description: "The org the release was created under: every send, verification and Unit of it is on this org." }),
+    userId: z.string(),
+    brandIds: z.array(z.string()).openapi({ description: "Empty when the release was created with no x-brand-id." }),
+    campaignId: z.string().nullable(),
+    runId: z.string().openapi({ description: "The release's own run (every send's parent run)." }),
+    unitsRunId: z.string().nullable().openapi({
+      description: "The spend-free child run every newsletter_email_sent Unit of this release is declared on. Null until the first declaration pass after the first send.",
+    }),
+    recipientCount: z.number().int(),
+    emailsSent: z.number().int().openapi({ description: "Emails that reached the gateway (one Unit each)." }),
+    unitsDeclared: z.number().int().openapi({ description: "Of those, Units already on runs-service (the rest land on the next pass)." }),
+    firstSentAt: z.string().nullable(),
+    lastSentAt: z.string().nullable(),
+    createdAt: z.string().nullable(),
+    completedAt: z.string().nullable(),
+  })
+  .openapi("NewsletterReleaseUnits");
+
+export const NewsletterReleasesResponseSchema = z
+  .object({
+    outcomeKey: z.literal("newsletter_email_sent"),
+    subjectService: z.literal("transactional-email-service"),
+    unitLinkParam: z.literal("dy_unit").openapi({
+      description: "Every link to our sites in a release email carries dy_unit=newsletter_email_sent:transactional-email-service:<recipient id>: the Unit a click came from.",
+    }),
+    count: z.number().int(),
+    releases: z.array(NewsletterReleaseUnitsSchema),
+  })
+  .openapi("NewsletterReleasesResponse");
+
+export const NewsletterUnitsPassSchema = z
+  .object({
+    units: z.number().int().openapi({ description: "Sent emails read with no Unit declared yet (at most 5000 per pass)." }),
+    calls: z.number().int(),
+    declared: z.number().int(),
+    recorded: z.number().int(),
+    alreadyRecorded: z.number().int(),
+    unitsRunsOpened: z.number().int(),
+    error: z.string().nullable().openapi({ description: "The runs-service failure that stopped the pass; its emails stay undeclared for the next pass." }),
+  })
+  .openapi("NewsletterUnitsPass");
+
 // --- POST /internal/ledger-subjects/checks (LEDGER-HISTORY-1024) ---
 
 export const LedgerSubjectsChecksRequestSchema = z
@@ -1159,6 +1209,41 @@ registry.registerPath({
     400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     502: { description: "lead-service or runs-service failed; re-run to resume (idempotent)", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/mailing-list-releases",
+  summary: "Every newsletter release with the ledger handles of its Units (OUTCOME-FINEST-1106)",
+  description:
+    "Each email a release sends to one subscriber is ONE `newsletter_email_sent` Unit on runs-service: produced on the release's spend-free " +
+    "child run `unitsRunId` (the release's org), subject transactional-email-service / mailing_list_release_recipients.id, consuming the send's " +
+    "`message_sent` (subject the subscriber), dated at the send. Per release, read from runs-service GET /internal/outcome-occurrences: the Units " +
+    "and their cost (runIds=<unitsRunId>, outcomeKey=newsletter_email_sent), and what consumed them (subjectService=transactional-email-service, " +
+    "outcomeKey=newsletter_email_sent, direction=consumed: a website visit through a `dy_unit` link, then the signups consuming that visit). " +
+    "Newest first.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  responses: {
+    200: { description: "Releases", content: { "application/json": { schema: NewsletterReleasesResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/newsletter-units/declare",
+  summary: "Declare every sent newsletter email not on the ledger yet (OUTCOME-FINEST-1106)",
+  description:
+    "The same pass the in-process worker runs every minute (first ~60s after boot): up to 5000 sent emails with no Unit yet, oldest first, " +
+    "one runs-service POST /v1/runs/{unitsRunId}/outcomes per (release, send instant). Idempotent.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  responses: {
+    200: { description: "What the pass declared", content: { "application/json": { schema: NewsletterUnitsPassSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "The pass failed", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

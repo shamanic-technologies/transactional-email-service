@@ -30,10 +30,16 @@ vi.mock("../../src/lib/email-verification.js", async (importOriginal) => ({
   fetchVerdicts: vi.fn(),
 }));
 
+vi.mock("../../src/lib/run-outcomes.js", () => ({
+  declareRunOutcomes: vi.fn(),
+}));
+
 import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
-import { createRun } from "../../src/lib/runs-client.js";
+import { createRun, updateRun } from "../../src/lib/runs-client.js";
+import { declareRunOutcomes } from "../../src/lib/run-outcomes.js";
+import { declareNewsletterUnits } from "../../src/lib/newsletter-units.js";
 import { fetchSuppressed } from "../../src/lib/suppression.js";
 import { fetchDeliveryOutcomes } from "../../src/lib/release-health.js";
 import { fetchVerdicts, VerificationUnavailableError, type Verdict } from "../../src/lib/email-verification.js";
@@ -145,6 +151,11 @@ beforeEach(async () => {
   vi.mocked(fetchDeliveryOutcomes).mockResolvedValue({ sent: 0, bounced: 0, unsubscribed: 0 });
   vi.mocked(fetchVerdicts).mockReset();
   vi.mocked(fetchVerdicts).mockImplementation(verdicts());
+  vi.mocked(declareRunOutcomes).mockReset();
+  vi.mocked(declareRunOutcomes).mockImplementation(async (_runId, _identity, body) => ({
+    recordedCount: (body.produced?.length ?? 0) + (body.consumed?.length ?? 0),
+    alreadyRecordedCount: 0,
+  }));
   vi.mocked(createRun).mockReset();
   vi.mocked(createRun).mockImplementation(async () => {
     runSeq += 1;
@@ -1242,5 +1253,108 @@ describe("who clicked (NEWSLETTER-WHO-CLICKED-1024)", () => {
     const revoked = await get(id);
     expect(revoked.status).toBe(410);
     expect(revoked.body).toEqual({ status: "revoked", linkId: id });
+  });
+});
+
+describe("every newsletter email is one newsletter_email_sent Unit on the release's org (OUTCOME-FINEST-1106)", () => {
+  const BODY = "Read [the study](https://distribute.you/blog/jev-gtm?utm_source=newsletter) or [the source](https://example.com/paper).";
+
+  async function subscriberIds(): Promise<Map<string, string>> {
+    const rows = await sql<Array<{ id: string; email: string }>>`SELECT id::text AS id, email FROM mailing_list_subscribers`;
+    return new Map(rows.map((r) => [r.email, r.id]));
+  }
+
+  async function recipientRows(releaseId: string) {
+    return sql<Array<{ id: string; email: string; unit_declared_at: Date | null }>>`
+      SELECT id::text AS id, email, unit_declared_at FROM mailing_list_release_recipients WHERE release_id = ${releaseId}::uuid AND status = 'sent'`;
+  }
+
+  it("declares one Unit per subscriber reached, on a spend-free child run of the release's run, on the release's org", async () => {
+    await seedList(6);
+    const created = await createRelease({ subject: "units", body: BODY, dailyLimit: 100 });
+    expect(created.status).toBe(201);
+    const releaseRunId = vi.mocked(createRun).mock.results[0].value;
+    await drain();
+    expect(mailed()).toHaveLength(6);
+
+    const report = await declareNewsletterUnits();
+    expect(report).toMatchObject({ units: 6, declared: 6, unitsRunsOpened: 1, error: null });
+
+    // The Units run: the release's org and acting user, a child of the release's run.
+    const unitsRunCall = vi.mocked(createRun).mock.calls.find(([p]) => p.taskName === "newsletter-email-units")!;
+    expect(unitsRunCall[0]).toMatchObject({
+      orgId: "org_test",
+      userId: "user_staff",
+      serviceName: "transactional-email-service",
+      parentRunId: (await releaseRunId).id,
+    });
+    const unitsRunId = (await vi.mocked(createRun).mock.results[vi.mocked(createRun).mock.calls.indexOf(unitsRunCall)].value).id;
+    expect(vi.mocked(updateRun)).toHaveBeenCalledWith(unitsRunId, "completed", { orgId: "org_test", userId: "user_staff" }, expect.anything());
+
+    const calls = vi.mocked(declareRunOutcomes).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [runId, identity] of calls) {
+      expect(runId).toBe(unitsRunId);
+      expect(identity).toEqual({ orgId: "org_test", userId: "user_staff" });
+    }
+
+    const rows = await recipientRows(created.body.releaseId);
+    const subs = await subscriberIds();
+    const produced = calls.flatMap(([, , body]) => body.produced ?? []);
+    const consumed = calls.flatMap(([, , body]) => body.consumed ?? []);
+    expect(produced).toHaveLength(6);
+    expect(produced.map((p) => p.outcomeKey)).toEqual(Array(6).fill("newsletter_email_sent"));
+    expect(new Set(produced.map((p) => p.subjectService))).toEqual(new Set(["transactional-email-service"]));
+    expect(produced.map((p) => p.subjectId).sort()).toEqual(rows.map((r) => r.id).sort());
+    // Each Unit is made of its send: the subscriber's message_sent.
+    expect(consumed.map((c) => c.outcomeKey)).toEqual(Array(6).fill("message_sent"));
+    expect(consumed.map((c) => c.subjectId).sort()).toEqual(rows.map((r) => subs.get(r.email)!).sort());
+    for (const [, , body] of calls) expect(Number.isNaN(Date.parse(body.occurredAt!))).toBe(false);
+
+    expect(rows.every((r) => r.unit_declared_at !== null)).toBe(true);
+
+    // Each email's links name its own Unit.
+    for (const [p] of vi.mocked(sendEmail).mock.calls) {
+      const row = rows.find((r) => r.email === p.to)!;
+      expect(p.htmlBody).toContain(`dy_unit=newsletter_email_sent:transactional-email-service:${row.id}`);
+      expect(p.textBody).toContain(`dy_unit=newsletter_email_sent:transactional-email-service:${row.id}`);
+      expect(p.htmlBody).toContain('href="https://example.com/paper"');
+    }
+
+    // A second pass finds nothing left; a later release opens its own Units run.
+    expect(await declareNewsletterUnits()).toMatchObject({ units: 0, declared: 0 });
+    const res = await request(app).get("/internal/mailing-list-releases").set({ "x-api-key": API_KEY }).expect(200);
+    expect(res.body.outcomeKey).toBe("newsletter_email_sent");
+    expect(res.body.releases[0]).toMatchObject({
+      releaseId: created.body.releaseId,
+      orgId: "org_test",
+      runId: (await releaseRunId).id,
+      unitsRunId,
+      emailsSent: 6,
+      unitsDeclared: 6,
+    });
+  });
+
+  it("keeps the rows undeclared when runs-service refuses, and declares them on the next pass", async () => {
+    await seedList(3);
+    const created = await createRelease({ subject: "units-retry", body: BODY, dailyLimit: 100 });
+    await drain();
+
+    vi.mocked(declareRunOutcomes).mockRejectedValueOnce(new Error("runs-service POST failed: 400 - unknown_outcome_key"));
+    const failed = await declareNewsletterUnits();
+    expect(failed.error).toContain("unknown_outcome_key");
+    expect(failed.declared).toBe(0);
+    expect((await recipientRows(created.body.releaseId)).every((r) => r.unit_declared_at === null)).toBe(true);
+
+    const retried = await declareNewsletterUnits();
+    expect(retried).toMatchObject({ declared: 3, unitsRunsOpened: 0, error: null });
+    expect((await recipientRows(created.body.releaseId)).every((r) => r.unit_declared_at !== null)).toBe(true);
+    // One Units run for the release, reused by the retry.
+    expect(vi.mocked(createRun).mock.calls.filter(([p]) => p.taskName === "newsletter-email-units")).toHaveLength(1);
+  });
+
+  it("refuses the release list without the API key", async () => {
+    await request(app).get("/internal/mailing-list-releases").expect(401);
+    await request(app).post("/internal/newsletter-units/declare").expect(401);
   });
 });

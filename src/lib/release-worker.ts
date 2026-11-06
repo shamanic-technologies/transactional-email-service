@@ -1,5 +1,6 @@
 import { ensureLinkIds } from "./subscriber-link-store.js";
-import { stampSubscriberLinks } from "./subscriber-link.js";
+import { stampOurLinks, SUBSCRIBER_LINK_PARAM } from "./subscriber-link.js";
+import { UNIT_LINK_PARAM, unitLinkValue } from "./newsletter-units.js";
 import { messageOf } from "./db-error.js";
 import { and, eq, inArray, sql as raw } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -533,7 +534,12 @@ async function releaseSlice(
       wave.map(async (row) => {
         const linkId = row.subscriberId ? linkIds.get(row.subscriberId) : undefined;
         const body = { htmlBody: release.htmlBody, textBody: release.textBody };
-        const { htmlBody, textBody } = linkId ? stampSubscriberLinks(body, linkId) : body;
+        // Who clicked (dy_sub) and which email they clicked in (dy_unit: this
+        // email's own newsletter_email_sent Unit, newsletter-units.ts).
+        const { htmlBody, textBody } = stampOurLinks(body, [
+          ...(linkId ? [[SUBSCRIBER_LINK_PARAM, linkId] as const] : []),
+          [UNIT_LINK_PARAM, unitLinkValue(row.id)] as const,
+        ]);
         try {
           await sendEmail({
             to: row.email,

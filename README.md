@@ -285,6 +285,10 @@ Every transactional email sent to a client, so it shows in that person's Unibox 
 
 **Internal endpoint** — requires `x-api-key` only (our own apps, server side). Every link to distribute.you or one of its subdomains in a mailing-list send (sync update and paced release) carries `dy_sub=<linkId>`, the subscriber's own opaque id (26 base64url chars: 128 random bits + a 4-char checksum; no email, name or phone; one per subscriber, reused on every send, no expiry). Third-party links are untouched. This read answers who the id names: `200 {status:"valid", linkId, subscriber:{id, email, name:null}, list:{slug}}`, `410 {status:"revoked"}` (subscriber since removed from the list), `404 {status:"unknown"}` (well-formed, never given), `400 {status:"tampered"}` (not an id this service minted).
 
+### `GET /internal/mailing-list-releases` and `POST /internal/newsletter-units/declare`
+
+**Internal endpoints** — `x-api-key` only (OUTCOME-FINEST-1106). Every email a release sends to one subscriber is one `newsletter_email_sent` Unit on runs-service: produced on the release's spend-free child run (`unitsRunId`, the release's org), subject `transactional-email-service` / the recipient row id, consuming the send's `message_sent` (subject the subscriber), dated at the send. An in-process pass (first ~60 s after boot, then every minute) declares every sent email not declared yet; the POST runs one pass now. Every link to our sites also carries `dy_unit=newsletter_email_sent:transactional-email-service:<recipient id>`, the Unit a click came from. The GET lists every release newest first with `releaseId, listSlug, subject, status, orgId, brandIds, campaignId, runId, unitsRunId, recipientCount, emailsSent, unitsDeclared, firstSentAt, lastSentAt`; cost and what consumed the Units (visits, then signups) are read off runs-service `GET /internal/outcome-occurrences` by `unitsRunId` / subject.
+
 ### `POST /internal/transfer-brand`
 
 **Internal endpoint** — requires `x-api-key` only, no identity headers.
@@ -700,7 +704,9 @@ src/
     runs-client.ts      # Runs service client (create/update runs, org-less platform runs)
 │   │   ├── orgless-events.ts   # Closed list of events sendable with no org (POST /platform-orgless-send)
     trace-event.ts      # Fire-and-forget event tracing to runs-service
-    subscriber-link.ts  # Pure: mint/check a subscriber's link id, stamp it (dy_sub) on distribute.you links
+    subscriber-link.ts  # Pure: mint/check a subscriber's link id, stamp it (dy_sub, dy_unit) on distribute.you links
+    newsletter-units.ts # Cost ledger: one newsletter_email_sent Unit per sent release email, declared every minute
+    run-outcomes.ts     # runs-service POST /v1/runs/:id/outcomes (org door)
     subscriber-link-store.ts # Mint each subscriber's link id once; resolve an id to valid/revoked/unknown/tampered
   middleware/
     auth.ts             # API key + identity header authentication (full identity, or org-only for machine callers)
@@ -717,6 +723,7 @@ src/
     ledger-subjects.ts  # POST /internal/ledger-subjects/checks + /leads (ledger subjects: past checks, subscriber == lead)
     sent-emails.ts      # GET /internal/sent-emails (sent client emails, for the Unibox thread)
     subscriber-links.ts # GET /internal/subscriber-links/:linkId (who clicked a newsletter link)
+    newsletter-units.ts # GET /internal/mailing-list-releases, POST /internal/newsletter-units/declare
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
     syntax.ts           # Template syntax contract: refuses any {{ that is not a {{name}} placeholder
