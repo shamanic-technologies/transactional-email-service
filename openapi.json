@@ -1637,6 +1637,11 @@
             "type": "number",
             "description": "How many the next tick would take, which is 0 when today's allowance is spent or the release is not running"
           },
+          "relaunchedFromReleaseId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The halted or cancelled release this one sends again, to the subscribers that release (and its own ancestors) never sent to. Null for a release created from scratch."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -1667,6 +1672,7 @@
           "todayUsed",
           "estimatedDaysRemaining",
           "nextSliceSize",
+          "relaunchedFromReleaseId",
           "createdAt",
           "completedAt"
         ]
@@ -1745,6 +1751,17 @@
         "required": [
           "dailyLimit"
         ]
+      },
+      "RelaunchReleaseRequest": {
+        "type": "object",
+        "properties": {
+          "dailyLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 28800,
+            "description": "Most messages per UTC day for the relaunch. Absent = the source release's pace. Same ceiling as creating a release (28800)."
+          }
+        }
       },
       "ReleaseTickResponse": {
         "type": "object",
@@ -4220,6 +4237,130 @@
           },
           "409": {
             "description": "The release has ended or stopped itself, and its decision stands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/releases/{releaseId}/relaunch": {
+      "post": {
+        "summary": "Send a halted or cancelled update again, only to the subscribers it never sent to",
+        "description": "Staff-only. A release sends one written update to a mailing list over several days at a stated daily pace. Nothing is sent inside the request that creates it: an in-process worker releases it afterwards, so no caller holds a connection open and a restart changes nothing. Every address is a ledger row from the moment the release is created, which is what makes never mailing anybody twice structural rather than careful, and what progress is counted from. Provider suppression is re-read for each slice at the moment that slice is sent. A halted release never resumes, and creating the same update again would mail every subscriber, including those it already reached. This creates a NEW release with the source's exact content, sender and send identity, whose recipients are the list's current subscribers minus every address the source release (and, for a relaunch of a relaunch, every ancestor) sent to: `sent`, still `sending`, or `failed` because the worker died mid-send (it may have left). Addresses the source skipped (opted out, undeliverable), never reached, or that joined since are included, and the normal per-slice suppression and verification rules apply to them again. The relaunch has its own run and halts itself on the same bounce/complaint thresholds. One relaunch per release: asking again returns the existing one with `created: false`.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The release's id, as returned when it was created."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "releaseId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelaunchReleaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "This release was already relaunched; that relaunch is returned untouched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateReleaseResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The relaunch, newly created and running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateReleaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid release id, missing headers, or a pace the worker cannot deliver",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The release is still running, paused or completed, or every subscriber was already sent to",
             "content": {
               "application/json": {
                 "schema": {

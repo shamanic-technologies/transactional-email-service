@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, jsonb, integer, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 export const emailEvents = pgTable(
   "email_events",
@@ -280,11 +280,22 @@ export const mailingListReleases = pgTable(
      * first declaration pass after the first send; null until then.
      */
     unitsRunId: uuid("units_run_id"),
+    /**
+     * The halted or cancelled release this one sends again (NEWSLETTER-RELAUNCH-HALTED-1107).
+     * Its recipients are the list minus every address this release's lineage
+     * already sent to. One relaunch per release (unique), so a lineage is a
+     * line and a relaunch of a relaunch excludes every ancestor's sends.
+     */
+    relaunchedFromReleaseId: uuid("relaunched_from_release_id").references(
+      (): AnyPgColumn => mailingListReleases.id,
+      { onDelete: "set null" }
+    ),
   },
   (table) => [
     index("idx_mailing_list_releases_list").on(table.listId, table.createdAt),
     index("idx_mailing_list_releases_status").on(table.status),
     index("idx_mailing_list_releases_dedup").on(table.listId, table.dedupKey),
+    uniqueIndex("idx_mailing_list_releases_relaunched_from").on(table.relaunchedFromReleaseId),
   ]
 );
 
