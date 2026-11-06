@@ -1358,3 +1358,168 @@ describe("every newsletter email is one newsletter_email_sent Unit on the releas
     await request(app).post("/internal/newsletter-units/declare").expect(401);
   });
 });
+
+describe("relaunching a halted release to the subscribers it never sent to (NEWSLETTER-RELAUNCH-HALTED-1107)", () => {
+  async function relaunch(releaseId: string, body: Record<string, unknown> = {}) {
+    return request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).set(AUTH).send(body);
+  }
+
+  async function recipientsOf(releaseId: string): Promise<string[]> {
+    const rows = await sql<Array<{ email: string }>>`
+      SELECT email FROM mailing_list_release_recipients WHERE release_id = ${releaseId}::uuid ORDER BY email`;
+    return rows.map((r) => r.email);
+  }
+
+  async function sentBy(releaseId: string): Promise<string[]> {
+    const rows = await sql<Array<{ email: string }>>`
+      SELECT email FROM mailing_list_release_recipients
+      WHERE release_id = ${releaseId}::uuid AND status = 'sent' ORDER BY email`;
+    return rows.map((r) => r.email);
+  }
+
+  async function halt(releaseId: string) {
+    await sql`
+      UPDATE mailing_list_releases SET status = 'halted', halted_reason = '5.01% of messages bounced'
+      WHERE id = ${releaseId}::uuid`;
+  }
+
+  /** A 50-address list whose release sent its first day (10) and then halted. */
+  async function haltedAfterADay() {
+    await seedList(50);
+    const created = await createRelease({ subject: "0% markup", body: "# Big news", dailyLimit: 10 });
+    expect(created.status).toBe(201);
+    await drain();
+    const releaseId = created.body.releaseId as string;
+    const sent = await sentBy(releaseId);
+    expect(sent).toHaveLength(10);
+    await halt(releaseId);
+    return { releaseId, sent };
+  }
+
+  it("creates a release whose recipients are the list minus exactly the addresses the halted one sent to", async () => {
+    const { releaseId, sent } = await haltedAfterADay();
+
+    const res = await relaunch(releaseId);
+    expect(res.status).toBe(201);
+    expect(res.body.created).toBe(true);
+    expect(res.body.relaunchedFromReleaseId).toBe(releaseId);
+    expect(res.body.releaseId).not.toBe(releaseId);
+    expect(res.body.status).toBe("running");
+    expect(res.body.recipientCount).toBe(40);
+
+    const expected = addresses(50).filter((a) => !sent.includes(a)).sort();
+    expect(await recipientsOf(res.body.releaseId)).toEqual(expected);
+
+    // The halted release is left exactly as it was: it never resumes.
+    expect((await readRelease(releaseId)).status).toBe("halted");
+  });
+
+  it("never mails anyone the halted release reached, and reaches everyone else", async () => {
+    const { releaseId, sent } = await haltedAfterADay();
+    const res = await relaunch(releaseId, { dailyLimit: 100 });
+    expect(res.body.dailyLimit).toBe(100);
+
+    vi.mocked(sendEmail).mockClear();
+    await drain();
+
+    const reached = mailed();
+    expect(reached.filter((a) => sent.includes(a))).toEqual([]);
+    expect([...reached].sort()).toEqual(addresses(50).filter((a) => !sent.includes(a)).sort());
+    expect((await readRelease(res.body.releaseId)).status).toBe("completed");
+  });
+
+  it("keeps the source's content, sender and payer, on a run of its own", async () => {
+    const { releaseId } = await haltedAfterADay();
+    const [source] = await sql<Array<Record<string, unknown>>>`SELECT * FROM mailing_list_releases WHERE id = ${releaseId}::uuid`;
+
+    const res = await relaunch(releaseId);
+    const [copy] = await sql<Array<Record<string, unknown>>>`SELECT * FROM mailing_list_releases WHERE id = ${res.body.releaseId}::uuid`;
+
+    for (const col of ["subject", "from_address", "body_kind", "body_markdown", "html_body", "text_body", "dedup_key", "org_id", "user_id", "daily_limit"]) {
+      expect(copy[col]).toEqual(source[col]);
+    }
+    expect(copy.run_id).not.toEqual(source.run_id);
+  });
+
+  it("counts as sent a claim still in flight and one the worker died holding, and re-includes skipped, failed and new subscribers", async () => {
+    await seedList(10);
+    const created = await createRelease({ subject: "mixed", body: "hi", dailyLimit: 10 });
+    const releaseId = created.body.releaseId as string;
+    const set = (email: string, status: string, reason: string | null = null) =>
+      sql`UPDATE mailing_list_release_recipients SET status = ${status}, reason = ${reason}
+          WHERE release_id = ${releaseId}::uuid AND email = ${email}`;
+    const [a, b, c, d, e, f] = addresses(10);
+    await set(a, "sent");
+    await set(b, "sending");
+    await set(c, "failed", (await import("../../src/lib/release-pacing.js")).INTERRUPTED_REASON);
+    await set(d, "failed", "gateway 422");
+    await set(e, "skipped_opted_out", "ManualSuppression");
+    await set(f, "skipped_undeliverable");
+    await halt(releaseId);
+    await request(app).post(`/mailing-lists/${SLUG}/subscribers`).set(AUTH).send({ raw: "joined.later@example.com" }).expect(200);
+
+    const res = await relaunch(releaseId);
+    expect(res.status).toBe(201);
+    const recipients = await recipientsOf(res.body.releaseId);
+    expect(recipients).not.toContain(a);
+    expect(recipients).not.toContain(b);
+    expect(recipients).not.toContain(c);
+    expect(recipients).toEqual(expect.arrayContaining([d, e, f, "joined.later@example.com"]));
+    expect(recipients).toHaveLength(11 - 3);
+  });
+
+  it("a relaunch of a relaunch excludes what every ancestor sent", async () => {
+    const { releaseId, sent: firstDay } = await haltedAfterADay();
+    const second = await relaunch(releaseId);
+    await drain();
+    const secondDay = await sentBy(second.body.releaseId);
+    expect(secondDay).toHaveLength(10);
+    await halt(second.body.releaseId);
+
+    const third = await relaunch(second.body.releaseId);
+    expect(third.status).toBe(201);
+    const recipients = await recipientsOf(third.body.releaseId);
+    expect(recipients).toHaveLength(30);
+    expect(recipients.filter((r) => firstDay.includes(r) || secondDay.includes(r))).toEqual([]);
+  });
+
+  it("returns the existing relaunch when asked twice, rather than starting a second one", async () => {
+    const { releaseId } = await haltedAfterADay();
+    const first = await relaunch(releaseId);
+    const again = await relaunch(releaseId);
+    expect(again.status).toBe(200);
+    expect(again.body.created).toBe(false);
+    expect(again.body.releaseId).toBe(first.body.releaseId);
+    const [{ count }] = await sql<Array<{ count: number }>>`
+      SELECT count(*)::int AS count FROM mailing_list_releases WHERE relaunched_from_release_id = ${releaseId}::uuid`;
+    expect(count).toBe(1);
+  });
+
+  it("refuses a release still running, one that completed, and one whose whole list was already sent", async () => {
+    await seedList(5);
+    const running = await createRelease({ subject: "live", body: "hi", dailyLimit: 100 });
+    const r1 = await relaunch(running.body.releaseId);
+    expect(r1.status).toBe(409);
+    expect(r1.body.error).toContain("running");
+
+    await drain();
+    expect((await readRelease(running.body.releaseId)).status).toBe("completed");
+    const r2 = await relaunch(running.body.releaseId);
+    expect(r2.status).toBe(409);
+    expect(r2.body.error).toContain("finished");
+
+    await halt(running.body.releaseId);
+    const r3 = await relaunch(running.body.releaseId);
+    expect(r3.status).toBe(409);
+    expect(r3.body.error).toContain("already sent");
+  });
+
+  it("answers 404 for a release that does not exist, 400 for a pace the worker cannot deliver, 401 without a key", async () => {
+    const missing = await relaunch("00000000-0000-4000-8000-000000000000");
+    expect(missing.status).toBe(404);
+    const { releaseId } = await haltedAfterADay();
+    const tooFast = await relaunch(releaseId, { dailyLimit: MAX_DAILY_LIMIT + 1 });
+    expect(tooFast.status).toBe(400);
+    await request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).send({}).expect(401);
+  });
+});

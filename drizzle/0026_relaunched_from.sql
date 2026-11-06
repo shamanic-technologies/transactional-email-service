@@ -1,0 +1,3 @@
+ALTER TABLE "mailing_list_releases" ADD COLUMN IF NOT EXISTS "relaunched_from_release_id" uuid;--> statement-breakpoint
+ALTER TABLE "mailing_list_releases" ADD CONSTRAINT "mailing_list_releases_relaunched_from_release_id_mailing_list_releases_id_fk" FOREIGN KEY ("relaunched_from_release_id") REFERENCES "public"."mailing_list_releases"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_mailing_list_releases_relaunched_from" ON "mailing_list_releases" USING btree ("relaunched_from_release_id");
