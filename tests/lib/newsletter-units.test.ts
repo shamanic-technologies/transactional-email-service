@@ -15,10 +15,17 @@ import { stampOurLinks, SUBSCRIBER_LINK_PARAM } from "../../src/lib/subscriber-l
 const T1 = new Date("2026-11-02T08:00:00.000Z");
 const T2 = new Date("2026-11-02T08:01:00.000Z");
 
-const unit = (recipientId: string, releaseId: string, settledAt: Date, subscriberId: string | null = `sub-${recipientId}`): SentUnit => ({
+const unit = (
+  recipientId: string,
+  releaseId: string,
+  settledAt: Date,
+  subscriberId: string | null = `sub-${recipientId}`,
+  draftId: string | null = null
+): SentUnit => ({
   recipientId,
   releaseId,
   subscriberId,
+  draftId,
   settledAt,
 });
 
@@ -46,11 +53,23 @@ describe("planUnitCalls", () => {
     expect(call.consumed).toEqual([]);
   });
 
+  it("consumes the release's newsletter_validated once per call when the release sends a draft (NEWSLETTER-OUTCOMES-1107)", () => {
+    const calls = planUnitCalls([unit("r1", "relA", T1, "s1", "d1"), unit("r2", "relA", T1, "s2", "d1"), unit("r3", "relA", T2, null, "d1")]);
+    expect(calls[0].consumed).toEqual([
+      { outcomeKey: "newsletter_validated", subjectService: "transactional-email-service", subjectId: "d1" },
+      { outcomeKey: "message_sent", subjectService: "transactional-email-service", subjectId: "s1" },
+      { outcomeKey: "message_sent", subjectService: "transactional-email-service", subjectId: "s2" },
+    ]);
+    expect(calls[1].consumed).toEqual([{ outcomeKey: "newsletter_validated", subjectService: "transactional-email-service", subjectId: "d1" }]);
+  });
+
   it("never states more than runs-service takes in one call", () => {
     const many = Array.from({ length: MAX_UNITS_PER_CALL * 2 + 1 }, (_, i) => unit(`r${String(i).padStart(5, "0")}`, "relA", T1));
     const calls = planUnitCalls(many);
     expect(calls.map((c) => c.recipientIds.length)).toEqual([MAX_UNITS_PER_CALL, MAX_UNITS_PER_CALL, 1]);
     for (const c of calls) expect(c.produced.length + c.consumed.length).toBeLessThanOrEqual(1000);
+    const drafted = planUnitCalls(many.map((u) => ({ ...u, draftId: "d1" })));
+    for (const c of drafted) expect(c.produced.length + c.consumed.length).toBeLessThanOrEqual(1000);
   });
 });
 

@@ -21,6 +21,9 @@
  *     declared by postmark-service on the send's run (before 2026-10-23: by our backfill on the release run).
  *     The Unit's cost is that send's standard cost (and, through it, the `email_checked` it consumed).
  *     An address no longer on the list consumes nothing (the send named nobody either).
+ *   - consumed `newsletter_validated`, subject = the release's draft (NEWSLETTER-OUTCOMES-1107, newsletter-drafts.ts):
+ *     the owner's go the emails were sent on, once per call (runs-service keeps one occurrence per run). A release made
+ *     from no draft (a test, every release before 2026-11-07) consumes no validation.
  *   - `occurredAt` = the send's own instant, so consumption resolution picks this send's `message_sent`.
  *
  * WHAT IT LED TO: every link to our sites in the email carries `dy_unit=<outcome>:<subjectService>:<subjectId>`
@@ -40,6 +43,7 @@ import { messageOf } from "./db-error.js";
 import { createRun, updateRun } from "./runs-client.js";
 import { declareRunOutcomes, type OutcomeOccurrence } from "./run-outcomes.js";
 import { SUBJECT_SERVICE, subscriberSubject } from "./outcome-subject.js";
+import { validatedSubject } from "./newsletter-drafts.js";
 
 /** The catalogue step every newsletter email is a Unit of. */
 export const NEWSLETTER_EMAIL_SENT = "newsletter_email_sent";
@@ -49,8 +53,11 @@ export const NEWSLETTER_EMAIL_CONSUMES = "message_sent";
 export const UNIT_LINK_PARAM = "dy_unit";
 export const UNITS_TASK = "newsletter-email-units";
 
-/** runs-service's ceiling per call is 1000 occurrences; a Unit states at most 2 (produced + consumed). */
-export const MAX_UNITS_PER_CALL = 500;
+/**
+ * runs-service's ceiling per call is 1000 occurrences; a Unit states at most 2 (produced + consumed) and a call from a
+ * drafted release adds ONE consumed `newsletter_validated`: 2 x 499 + 1 = 999.
+ */
+export const MAX_UNITS_PER_CALL = 499;
 /** Rows read per pass: bounds one pass's work (the backlog drains over a few passes). */
 export const MAX_UNITS_PER_PASS = 5000;
 export const UNITS_INTERVAL_MS = 60_000;
@@ -71,6 +78,8 @@ export interface SentUnit {
   releaseId: string;
   /** The subscriber the send named, or null (address no longer on the list). */
   subscriberId: string | null;
+  /** The draft the release sends (its validation), or null. */
+  draftId: string | null;
   settledAt: Date;
 }
 
@@ -99,6 +108,7 @@ export function planUnitCalls(units: readonly SentUnit[]): UnitCall[] {
     const at = u.settledAt.toISOString();
     if (!current || current.releaseId !== u.releaseId || current.occurredAt !== at || current.recipientIds.length >= MAX_UNITS_PER_CALL) {
       current = { releaseId: u.releaseId, occurredAt: at, recipientIds: [], produced: [], consumed: [] };
+      if (u.draftId) current.consumed.push(validatedSubject(u.draftId));
       calls.push(current);
     }
     current.recipientIds.push(u.recipientId);
@@ -111,20 +121,21 @@ export function planUnitCalls(units: readonly SentUnit[]): UnitCall[] {
 /** Sent emails whose Unit is not declared yet, oldest first (the partial index's predicate, verbatim). */
 export async function readUndeclaredUnits(limit = MAX_UNITS_PER_PASS): Promise<SentUnit[]> {
   const rows = (await db.execute(raw`
-    SELECT x.id::text AS recipient_id, x.release_id::text AS release_id, s.id::text AS subscriber_id, x.settled_at
+    SELECT x.id::text AS recipient_id, x.release_id::text AS release_id, s.id::text AS subscriber_id, r.draft_id::text AS draft_id, x.settled_at
       FROM mailing_list_release_recipients x
       JOIN mailing_list_releases r ON r.id = x.release_id
       LEFT JOIN mailing_list_subscribers s ON s.list_id = r.list_id AND s.email = x.email
      WHERE x.status = 'sent' AND x.unit_declared_at IS NULL
      ORDER BY x.settled_at, x.id
      LIMIT ${limit}
-  `)) as unknown as Array<{ recipient_id: string; release_id: string; subscriber_id: string | null; settled_at: Date | string | null }>;
+  `)) as unknown as Array<{ recipient_id: string; release_id: string; subscriber_id: string | null; draft_id: string | null; settled_at: Date | string | null }>;
   return rows
     .filter((r) => r.settled_at !== null)
     .map((r) => ({
       recipientId: r.recipient_id,
       releaseId: r.release_id,
       subscriberId: r.subscriber_id,
+      draftId: r.draft_id,
       settledAt: new Date(r.settled_at as Date | string),
     }));
 }

@@ -9,14 +9,22 @@ import {
   mailingListReleases,
   mailingLists,
   mailingListSubscribers,
+  newsletterDrafts,
   type MailingListRelease,
+  type NewsletterDraft,
 } from "../db/schema.js";
+import { declareDrafted, describeDraft, draftFingerprint, openDraftedRun, validateDraft } from "../lib/newsletter-drafts.js";
 import { resolveBody } from "../lib/update-body.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { readProgress, runReleaseTick } from "../lib/release-worker.js";
 import { INTERRUPTED_REASON, estimateDaysRemaining, tickAllowance } from "../lib/release-pacing.js";
-import { CreateReleaseRequestSchema, RelaunchReleaseRequestSchema, UpdateReleasePaceRequestSchema } from "../schemas.js";
+import {
+  CreateNewsletterDraftRequestSchema,
+  CreateReleaseRequestSchema,
+  RelaunchReleaseRequestSchema,
+  UpdateReleasePaceRequestSchema,
+} from "../schemas.js";
 import { DEFAULT_MAILING_LIST_FROM_ADDRESS } from "../lib/mailing-list-sender.js";
 
 /**
@@ -153,6 +161,7 @@ async function describe(release: MailingListRelease, slug: string, now = new Dat
           )
         : 0,
     relaunchedFromReleaseId: release.relaunchedFromReleaseId ?? null,
+    draftId: release.draftId ?? null,
     createdAt: release.createdAt.toISOString(),
     completedAt: release.completedAt?.toISOString() ?? null,
   };
@@ -253,6 +262,26 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
       return;
     }
 
+    // NEWSLETTER-OUTCOMES-1107: naming a draft is the owner's go on it. Checked and declared before the release
+    // exists, like its run: a release whose validation cannot be recorded does not start.
+    let draft: NewsletterDraft | null = null;
+    if (parsed.data.draftId) {
+      [draft] = await db.select().from(newsletterDrafts).where(eq(newsletterDrafts.id, parsed.data.draftId)).limit(1);
+      if (!draft) {
+        res.status(404).json({ error: `No newsletter draft '${parsed.data.draftId}'` });
+        return;
+      }
+      if (draft.listId !== list.id) {
+        res.status(409).json({ error: `Draft '${draft.id}' was written for another list: a release validates only a draft of its own list.` });
+        return;
+      }
+      if (draft.orgId !== identity.orgId) {
+        res.status(409).json({ error: `Draft '${draft.id}' belongs to another org.` });
+        return;
+      }
+      draft = await validateDraft(draft, { userId });
+    }
+
     // The run is created before anything is written, because it is the key the
     // provider's outcomes for this release are read back by and the identity
     // every message days from now is tracked under. A release that cannot be
@@ -296,6 +325,7 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
         workflowSlug: identity.workflowSlug ?? null,
         featureSlug: identity.featureSlug ?? null,
         audienceId: identity.audienceId ?? null,
+        draftId: draft?.id ?? null,
       })
       .returning();
 
@@ -335,6 +365,120 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
   } catch (error: any) {
     console.error("[transactional-email-service] Create release error:", error);
     res.status(502).json({ error: messageOf(error) || "Failed to create release" });
+  }
+});
+
+/**
+ * POST /mailing-lists/:slug/drafts (NEWSLETTER-OUTCOMES-1107)
+ *
+ * The drafter registers an issue as written. One `newsletter_drafted` Unit on a spend-free run opened here; nothing is
+ * sent. The same subject and body again returns the first draft and declares what was still missing (a retry after a
+ * 502 is the same call).
+ */
+router.post("/mailing-lists/:slug/drafts", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  const slug = readSlug(req, res);
+  if (!slug) return;
+
+  const parsed = CreateNewsletterDraftRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+  const draftedAt = parsed.data.draftedAt ? new Date(parsed.data.draftedAt) : new Date();
+  if (draftedAt.getTime() > Date.now() + 60_000) {
+    res.status(400).json({ error: "`draftedAt` is in the future: a draft is registered once it is written." });
+    return;
+  }
+
+  const resolved = resolveBody(parsed.data);
+  if ("error" in resolved) {
+    res.status(400).json({ error: resolved.error });
+    return;
+  }
+  if (resolved.unrenderableImages.length > 0) {
+    res.status(400).json({
+      error: `Email clients do not render SVG images. Use a PNG or JPEG for: ${resolved.unrenderableImages.join(", ")}`,
+    });
+    return;
+  }
+
+  const userId = requireActingUser(res);
+  if (!userId) return;
+  const identity = identityOf(res);
+
+  try {
+    const list = await findList(slug);
+    if (!list) {
+      res.status(404).json({ error: `No mailing list '${slug}'` });
+      return;
+    }
+
+    const dedupKey = draftFingerprint({ subject: parsed.data.subject, htmlBody: resolved.htmlBody, textBody: resolved.textBody });
+    const findExisting = async () =>
+      (
+        await db
+          .select()
+          .from(newsletterDrafts)
+          .where(and(eq(newsletterDrafts.listId, list.id), eq(newsletterDrafts.dedupKey, dedupKey)))
+          .limit(1)
+      )[0];
+
+    let existing = await findExisting();
+    let created = false;
+    if (!existing) {
+      const draftedRunId = await openDraftedRun({ orgId: identity.orgId, userId, runId: identity.runId, brandIds: identity.brandIds });
+      const [row] = await db
+        .insert(newsletterDrafts)
+        .values({
+          listId: list.id,
+          subject: parsed.data.subject,
+          bodyKind: resolved.bodyKind,
+          bodyMarkdown: resolved.markdown,
+          htmlBody: resolved.htmlBody,
+          textBody: resolved.textBody,
+          dedupKey,
+          orgId: identity.orgId,
+          userId,
+          brandIds: identity.brandIds?.length ? identity.brandIds : null,
+          draftedAt,
+          draftedRunId,
+        })
+        .onConflictDoNothing()
+        .returning();
+      created = Boolean(row);
+      existing = row ?? (await findExisting());
+    }
+
+    const draft = await declareDrafted(existing!);
+    res.status(created ? 201 : 200).json({ created, ...describeDraft(draft, slug) });
+  } catch (error: any) {
+    console.error("[transactional-email-service] Register newsletter draft error:", error);
+    res.status(502).json({ error: messageOf(error) || "Failed to register the draft" });
+  }
+});
+
+/** GET /mailing-lists/drafts/:draftId: one draft and where it stands. */
+router.get("/mailing-lists/drafts/:draftId", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  const id = req.params.draftId;
+  if (!UUID_RE.test(id)) {
+    res.status(400).json({ error: `Invalid draft id '${id}'` });
+    return;
+  }
+  try {
+    const [row] = await db
+      .select({ draft: newsletterDrafts, slug: mailingLists.slug })
+      .from(newsletterDrafts)
+      .innerJoin(mailingLists, eq(mailingLists.id, newsletterDrafts.listId))
+      .where(eq(newsletterDrafts.id, id))
+      .limit(1);
+    if (!row) {
+      res.status(404).json({ error: `No newsletter draft '${id}'` });
+      return;
+    }
+    res.json(describeDraft(row.draft, row.slug));
+  } catch (error: any) {
+    console.error("[transactional-email-service] Read newsletter draft error:", error);
+    res.status(500).json({ error: messageOf(error) || "Failed to read the draft" });
   }
 });
 
@@ -743,6 +887,7 @@ router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requir
             featureSlug: source.featureSlug,
             audienceId: source.audienceId,
             relaunchedFromReleaseId: source.id,
+            draftId: source.draftId,
           })
           .returning();
 

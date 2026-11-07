@@ -877,6 +877,18 @@
               "newsletter_email_sent"
             ]
           },
+          "draftedOutcomeKey": {
+            "type": "string",
+            "enum": [
+              "newsletter_drafted"
+            ]
+          },
+          "validatedOutcomeKey": {
+            "type": "string",
+            "enum": [
+              "newsletter_validated"
+            ]
+          },
           "subjectService": {
             "type": "string",
             "enum": [
@@ -902,6 +914,8 @@
         },
         "required": [
           "outcomeKey",
+          "draftedOutcomeKey",
+          "validatedOutcomeKey",
           "subjectService",
           "unitLinkParam",
           "count",
@@ -950,6 +964,21 @@
             "nullable": true,
             "description": "The spend-free child run every newsletter_email_sent Unit of this release is declared on. Null until the first declaration pass after the first send."
           },
+          "draftId": {
+            "type": "string",
+            "nullable": true,
+            "description": "NEWSLETTER-OUTCOMES-1107: the draft this release sends. Subject (transactional-email-service / draftId) of its newsletter_drafted and newsletter_validated Units; every newsletter_email_sent Unit of the release consumes the validated one. Null for a release made from no draft."
+          },
+          "draftedRunId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The spend-free run the draft's newsletter_drafted Unit is on."
+          },
+          "validatedRunId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The spend-free run the draft's newsletter_validated Unit is on (child of draftedRunId)."
+          },
           "recipientCount": {
             "type": "integer"
           },
@@ -989,6 +1018,9 @@
           "campaignId",
           "runId",
           "unitsRunId",
+          "draftId",
+          "draftedRunId",
+          "validatedRunId",
           "recipientCount",
           "emailsSent",
           "unitsDeclared",
@@ -1642,6 +1674,11 @@
             "nullable": true,
             "description": "The halted or cancelled release this one sends again, to the subscribers that release (and its own ancestors) never sent to. Null for a release created from scratch."
           },
+          "draftId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The newsletter draft this release sends (its validation). Null for a release made from no draft."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -1673,6 +1710,7 @@
           "estimatedDaysRemaining",
           "nextSliceSize",
           "relaunchedFromReleaseId",
+          "draftId",
           "createdAt",
           "completedAt"
         ]
@@ -1709,6 +1747,11 @@
             "minimum": 1,
             "maximum": 28800,
             "description": "The most messages this release may send per UTC calendar day. Required, with no default: the pace is the reason a release exists and this service will not pick one on staff's behalf. The day's allowance is spread across the day rather than spent at midnight, and a day where the allowance is reached simply stops until the next one. The ceiling is 28800, which is the most the worker's own pace can deliver in a day; a larger number is refused rather than silently under-delivered. Pick it for the sending reputation you have, not the list you hold: a subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands."
+          },
+          "draftId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The newsletter draft this release sends (`POST /mailing-lists/{slug}/drafts`, same list and org). Naming it IS the owner's validation of that draft: a `newsletter_validated` Unit is declared (once per draft) consuming its `newsletter_drafted` Unit, and every email of the release consumes the validation. The body sent is the one stated here (edits after the draft are the validated version). Omit it for a test release (list `newsletter-test`): a test is not an approval."
           }
         },
         "required": [
@@ -1750,6 +1793,116 @@
         },
         "required": [
           "dailyLimit"
+        ]
+      },
+      "CreateNewsletterDraftResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/NewsletterDraft"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "boolean",
+                "description": "False when the same subject and body were already registered for this list: that draft is returned."
+              }
+            },
+            "required": [
+              "created"
+            ]
+          }
+        ]
+      },
+      "NewsletterDraft": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "Pass it as `draftId` when creating the release that sends this draft (the owner's go)."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "bodyKind": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html"
+            ]
+          },
+          "draftedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "draftedRunId": {
+            "type": "string",
+            "description": "The spend-free run its `newsletter_drafted` Unit is declared on."
+          },
+          "draftedDeclared": {
+            "type": "boolean"
+          },
+          "validatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When a release first named this draft. Null = not validated yet."
+          },
+          "validatedRunId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The spend-free run its `newsletter_validated` Unit is declared on."
+          },
+          "validatedDeclared": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "draftId",
+          "slug",
+          "subject",
+          "bodyKind",
+          "draftedAt",
+          "draftedRunId",
+          "draftedDeclared",
+          "validatedAt",
+          "validatedRunId",
+          "validatedDeclared"
+        ]
+      },
+      "CreateNewsletterDraftRequest": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The draft as markdown, rendered exactly as a release renders it. Mutually exclusive with `htmlBody`; exactly one of the two is required."
+          },
+          "htmlBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The draft as a complete HTML document, kept byte-for-byte. Mutually exclusive with `body`."
+          },
+          "textBody": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The plain-text part beside `htmlBody`; derived when omitted."
+          },
+          "draftedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the draft was written (ISO). Absent = now. Never in the future. The `newsletter_drafted` Unit counts on that instant."
+          }
+        },
+        "required": [
+          "subject"
         ]
       },
       "RelaunchReleaseRequest": {
@@ -2880,7 +3033,7 @@
     "/internal/mailing-list-releases": {
       "get": {
         "summary": "Every newsletter release with the ledger handles of its Units (OUTCOME-FINEST-1106)",
-        "description": "Each email a release sends to one subscriber is ONE `newsletter_email_sent` Unit on runs-service: produced on the release's spend-free child run `unitsRunId` (the release's org), subject transactional-email-service / mailing_list_release_recipients.id, consuming the send's `message_sent` (subject the subscriber), dated at the send. Per release, read from runs-service GET /internal/outcome-occurrences: the Units and their cost (runIds=<unitsRunId>, outcomeKey=newsletter_email_sent), and what consumed them (subjectService=transactional-email-service, outcomeKey=newsletter_email_sent, direction=consumed: a website visit through a `dy_unit` link, then the signups consuming that visit). Newest first.",
+        "description": "Each email a release sends to one subscriber is ONE `newsletter_email_sent` Unit on runs-service: produced on the release's spend-free child run `unitsRunId` (the release's org), subject transactional-email-service / mailing_list_release_recipients.id, consuming the send's `message_sent` (subject the subscriber), dated at the send. Per release, read from runs-service GET /internal/outcome-occurrences: the Units and their cost (runIds=<unitsRunId>, outcomeKey=newsletter_email_sent), and what consumed them (subjectService=transactional-email-service, outcomeKey=newsletter_email_sent, direction=consumed: a website visit through a `dy_unit` link, then the signups consuming that visit). Before the emails (NEWSLETTER-OUTCOMES-1107): a release made from a draft names `draftId`; its newsletter_drafted Unit is on `draftedRunId` and its newsletter_validated Unit (consuming the drafted one) on `validatedRunId`, both subject transactional-email-service / draftId, both spend-free ($0: drafting on a subscription, approval by a human). Newest first.",
         "tags": [
           "Internal"
         ],
@@ -3746,7 +3899,17 @@
             }
           },
           "404": {
-            "description": "No such list",
+            "description": "No such list, or no draft `draftId`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`draftId` names a draft of another list or another org",
             "content": {
               "application/json": {
                 "schema": {
@@ -3756,7 +3919,7 @@
             }
           },
           "502": {
-            "description": "The release could not be tracked, so it was not started",
+            "description": "The release could not be tracked (its run, or the draft's validation), so it was not started",
             "content": {
               "application/json": {
                 "schema": {
@@ -4237,6 +4400,203 @@
           },
           "409": {
             "description": "The release has ended or stopped itself, and its decision stands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/drafts": {
+      "post": {
+        "summary": "Register a newsletter draft (one newsletter_drafted Unit)",
+        "description": "NEWSLETTER-OUTCOMES-1107. A newsletter is drafted, then validated, then sent: three outcomes. The drafter calls this with the issue as written; the answer's `draftId` is what the release that sends it names (`draftId` on `POST /mailing-lists/{slug}/releases`), which declares the owner's validation. One `newsletter_drafted` Unit (subject = the draft) is declared on a spend-free run opened here, under the caller's org and user (`x-brand-id` charts it per brand). Nothing is sent. Registering the same subject and body again returns the first draft (`created: false`) and declares whatever was still missing. No cost is stated: drafting on a subscription and a human approval spend nothing metered.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "name": "x-user-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNewsletterDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The same draft was already registered for this list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateNewsletterDraftResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The draft, registered and its drafted Unit declared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateNewsletterDraftResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, missing headers, or an SVG image no mail client renders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "runs-service refused or was unreachable: the drafted Unit is not declared yet; retry the same call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/drafts/{draftId}": {
+      "get": {
+        "summary": "Read one newsletter draft and where it stands (drafted, validated)",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "draftId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsletterDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid draft id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such draft",
             "content": {
               "application/json": {
                 "schema": {
