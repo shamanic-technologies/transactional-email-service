@@ -7,7 +7,7 @@
  *
  *   newsletter_drafted   (subject = the draft row)  produced on the draft's own spend-free run
  *        ↓ consumed by
- *   newsletter_validated (subject = the same draft) produced on a spend-free child run of the drafted one
+ *   newsletter_validated (subject = the same draft) produced on a spend-free run of the validator
  *        ↓ consumed by
  *   newsletter_email_sent (subject = one recipient row) per email, on the release's Units run (newsletter-units.ts)
  *
@@ -104,7 +104,7 @@ export async function declareDrafted(draft: NewsletterDraft): Promise<Newsletter
  * the validator's (the release's acting user) on the draft's org. Throws on a refusal: the validated run id is kept, so
  * the retry declares on the same run.
  */
-export async function validateDraft(draft: NewsletterDraft, validator: { userId: string }): Promise<NewsletterDraft> {
+export async function validateDraft(draft: NewsletterDraft, validator: { userId: string; runId?: string }): Promise<NewsletterDraft> {
   let current = await declareDrafted(draft);
   if (current.validatedDeclaredAt) return current;
 
@@ -113,7 +113,10 @@ export async function validateDraft(draft: NewsletterDraft, validator: { userId:
     const runId = await openSpendFreeRun(
       { orgId: current.orgId, userId: validator.userId, brandIds: current.brandIds ?? undefined },
       VALIDATED_TASK,
-      current.draftedRunId
+      // The validator's own run, never the drafted one: the drafted run states a fact dated at `draftedAt` (before
+      // the run opened), and runs-service gives such a run no child run (409 run_holds_dated_facts, seen in prod
+      // 2026-11-07). The chain lives in the ledger (validated consumes drafted), not in the run tree.
+      validator.runId
     );
     const [stored] = await db
       .update(newsletterDrafts)

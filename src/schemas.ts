@@ -208,7 +208,7 @@ export const NewsletterReleaseUnitsSchema = z
       description: "NEWSLETTER-OUTCOMES-1107: the draft this release sends. Subject (transactional-email-service / draftId) of its newsletter_drafted and newsletter_validated Units; every newsletter_email_sent Unit of the release consumes the validated one. Null for a release made from no draft.",
     }),
     draftedRunId: z.string().nullable().openapi({ description: "The spend-free run the draft's newsletter_drafted Unit is on." }),
-    validatedRunId: z.string().nullable().openapi({ description: "The spend-free run the draft's newsletter_validated Unit is on (child of draftedRunId)." }),
+    validatedRunId: z.string().nullable().openapi({ description: "The spend-free run the draft's newsletter_validated Unit is on (its own run, not a child of draftedRunId)." }),
     recipientCount: z.number().int(),
     emailsSent: z.number().int().openapi({ description: "Emails that reached the gateway (one Unit each)." }),
     unitsDeclared: z.number().int().openapi({ description: "Of those, Units already on runs-service (the rest land on the next pass)." }),

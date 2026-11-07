@@ -401,7 +401,7 @@ export const newsletterDrafts = pgTable(
     /** The first release that named this draft: the owner's go. Null = not validated yet. */
     validatedAt: timestamp("validated_at", { withTimezone: true }),
     validatedByUserId: text("validated_by_user_id"),
-    /** The spend-free run (child of `draftedRunId`) the `newsletter_validated` Unit is declared on. */
+    /** The spend-free run (the validator's, never a child of `draftedRunId`) the `newsletter_validated` Unit is declared on. */
     validatedRunId: uuid("validated_run_id"),
     validatedDeclaredAt: timestamp("validated_declared_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
