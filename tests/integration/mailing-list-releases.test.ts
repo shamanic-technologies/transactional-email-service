@@ -1359,6 +1359,138 @@ describe("every newsletter email is one newsletter_email_sent Unit on the releas
   });
 });
 
+describe("a newsletter is drafted, then validated, then sent: three outcomes (NEWSLETTER-OUTCOMES-1107)", () => {
+  const DRAFT = { subject: "Issue 12", body: "Read [the study](https://distribute.you/blog/x)." };
+  const DRAFTED_AT = "2026-11-07T04:07:00.000Z";
+
+  async function registerDraft(body: Record<string, unknown> = DRAFT, slug = SLUG) {
+    return request(app).post(`/mailing-lists/${slug}/drafts`).set({ ...AUTH, "x-brand-id": "brand_dy" }).send(body);
+  }
+
+  function runOf(task: string) {
+    const i = vi.mocked(createRun).mock.calls.findIndex(([p]) => p.taskName === task);
+    return i < 0 ? null : { params: vi.mocked(createRun).mock.calls[i][0], result: vi.mocked(createRun).mock.results[i].value as Promise<{ id: string }> };
+  }
+
+  it("registers a draft as one newsletter_drafted Unit on a spend-free run, once", async () => {
+    await seedList(3);
+    const res = await registerDraft({ ...DRAFT, draftedAt: DRAFTED_AT });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ created: true, slug: SLUG, subject: "Issue 12", draftedAt: DRAFTED_AT, draftedDeclared: true, validatedAt: null });
+    expect(sendEmail).not.toHaveBeenCalled();
+
+    const drafted = runOf("newsletter-drafted")!;
+    expect(drafted.params).toMatchObject({ orgId: "org_test", userId: "user_staff", serviceName: "transactional-email-service", brandIds: ["brand_dy"] });
+    const draftedRunId = (await drafted.result).id;
+    expect(res.body.draftedRunId).toBe(draftedRunId);
+    expect(vi.mocked(updateRun)).toHaveBeenCalledWith(draftedRunId, "completed", { orgId: "org_test", userId: "user_staff" }, expect.anything());
+    expect(vi.mocked(declareRunOutcomes).mock.calls).toEqual([
+      [
+        draftedRunId,
+        { orgId: "org_test", userId: "user_staff" },
+        {
+          produced: [{ outcomeKey: "newsletter_drafted", subjectService: "transactional-email-service", subjectId: res.body.draftId }],
+          occurredAt: DRAFTED_AT,
+        },
+      ],
+    ]);
+
+    const again = await registerDraft();
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ created: false, draftId: res.body.draftId });
+    expect(vi.mocked(createRun).mock.calls.filter(([p]) => p.taskName === "newsletter-drafted")).toHaveLength(1);
+    expect(vi.mocked(declareRunOutcomes)).toHaveBeenCalledTimes(1);
+
+    const read = await request(app).get(`/mailing-lists/drafts/${res.body.draftId}`).set(AUTH).expect(200);
+    expect(read.body).toMatchObject({ draftId: res.body.draftId, draftedDeclared: true, validatedDeclared: false });
+  });
+
+  it("keeps a draft undeclared when runs-service refuses, and the same call declares it", async () => {
+    await seedList(1);
+    vi.mocked(declareRunOutcomes).mockRejectedValueOnce(new Error("runs-service POST failed: 400 - unknown_outcome_key"));
+    const failed = await registerDraft();
+    expect(failed.status).toBe(502);
+    expect(failed.body.error).toContain("unknown_outcome_key");
+
+    const retried = await registerDraft();
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({ created: false, draftedDeclared: true });
+    expect(vi.mocked(createRun).mock.calls.filter(([p]) => p.taskName === "newsletter-drafted")).toHaveLength(1);
+  });
+
+  it("a release naming the draft is its validation, and each email consumes it", async () => {
+    await seedList(4);
+    const draft = (await registerDraft()).body;
+    vi.mocked(declareRunOutcomes).mockClear();
+
+    const created = await createRelease({ ...DRAFT, dailyLimit: 100, draftId: draft.draftId });
+    expect(created.status).toBe(201);
+    expect(created.body.draftId).toBe(draft.draftId);
+
+    const validated = runOf("newsletter-validated")!;
+    expect(validated.params).toMatchObject({ orgId: "org_test", userId: "user_staff", parentRunId: draft.draftedRunId });
+    const validatedRunId = (await validated.result).id;
+    expect(vi.mocked(declareRunOutcomes).mock.calls).toEqual([
+      [
+        validatedRunId,
+        { orgId: "org_test", userId: "user_staff" },
+        {
+          produced: [{ outcomeKey: "newsletter_validated", subjectService: "transactional-email-service", subjectId: draft.draftId }],
+          consumed: [{ outcomeKey: "newsletter_drafted", subjectService: "transactional-email-service", subjectId: draft.draftId }],
+          occurredAt: expect.any(String),
+        },
+      ],
+    ]);
+    const read = await request(app).get(`/mailing-lists/drafts/${draft.draftId}`).set(AUTH).expect(200);
+    expect(read.body).toMatchObject({ validatedRunId, validatedDeclared: true });
+
+    await drain();
+    expect(mailed()).toHaveLength(4);
+    vi.mocked(declareRunOutcomes).mockClear();
+    expect(await declareNewsletterUnits()).toMatchObject({ declared: 4, error: null });
+    for (const [, , body] of vi.mocked(declareRunOutcomes).mock.calls) {
+      expect(body.produced!.every((p) => p.outcomeKey === "newsletter_email_sent")).toBe(true);
+      expect(body.consumed!.filter((c) => c.outcomeKey === "newsletter_validated")).toEqual([
+        { outcomeKey: "newsletter_validated", subjectService: "transactional-email-service", subjectId: draft.draftId },
+      ]);
+    }
+    expect(vi.mocked(declareRunOutcomes).mock.calls.flatMap(([, , b]) => b.produced!)).toHaveLength(4);
+
+    const list = await request(app).get("/internal/mailing-list-releases").set({ "x-api-key": API_KEY }).expect(200);
+    expect(list.body).toMatchObject({ draftedOutcomeKey: "newsletter_drafted", validatedOutcomeKey: "newsletter_validated" });
+    expect(list.body.releases[0]).toMatchObject({ draftId: draft.draftId, draftedRunId: draft.draftedRunId, validatedRunId });
+
+    // A second release from the same draft (this one completed) is not a second approval.
+    const again = await createRelease({ ...DRAFT, dailyLimit: 100, draftId: draft.draftId });
+    expect(again.status).toBe(201);
+    expect(vi.mocked(createRun).mock.calls.filter(([p]) => p.taskName === "newsletter-validated")).toHaveLength(1);
+  });
+
+  it("a release with no draft consumes no validation (a test send is not an approval)", async () => {
+    await seedList(2);
+    await createRelease({ subject: "test", body: "test", dailyLimit: 100 });
+    await drain();
+    vi.mocked(declareRunOutcomes).mockClear();
+    await declareNewsletterUnits();
+    const consumed = vi.mocked(declareRunOutcomes).mock.calls.flatMap(([, , b]) => b.consumed ?? []);
+    expect(consumed.map((c) => c.outcomeKey)).toEqual(["message_sent", "message_sent"]);
+    expect(runOf("newsletter-validated")).toBeNull();
+  });
+
+  it("refuses a draft of another list or an unknown draft, and starts nothing", async () => {
+    await seedList(1);
+    await request(app).post(`/mailing-lists/other-list/subscribers`).set(AUTH).send({ raw: "x@example.com" }).expect(200);
+    const other = (await registerDraft(DRAFT, "other-list")).body;
+    const mismatch = await createRelease({ ...DRAFT, dailyLimit: 10, draftId: other.draftId });
+    expect(mismatch.status).toBe(409);
+    const unknown = await createRelease({ ...DRAFT, dailyLimit: 10, draftId: "3f0c9a52-0000-4000-8000-000000000000" });
+    expect(unknown.status).toBe(404);
+    expect(runOf("newsletter-validated")).toBeNull();
+    const rows = await sql`SELECT id FROM mailing_list_releases`;
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe("relaunching a halted release to the subscribers it never sent to (NEWSLETTER-RELAUNCH-HALTED-1107)", () => {
   async function relaunch(releaseId: string, body: Record<string, unknown> = {}) {
     return request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).set(AUTH).send(body);

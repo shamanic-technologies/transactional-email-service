@@ -204,6 +204,11 @@ export const NewsletterReleaseUnitsSchema = z
     unitsRunId: z.string().nullable().openapi({
       description: "The spend-free child run every newsletter_email_sent Unit of this release is declared on. Null until the first declaration pass after the first send.",
     }),
+    draftId: z.string().nullable().openapi({
+      description: "NEWSLETTER-OUTCOMES-1107: the draft this release sends. Subject (transactional-email-service / draftId) of its newsletter_drafted and newsletter_validated Units; every newsletter_email_sent Unit of the release consumes the validated one. Null for a release made from no draft.",
+    }),
+    draftedRunId: z.string().nullable().openapi({ description: "The spend-free run the draft's newsletter_drafted Unit is on." }),
+    validatedRunId: z.string().nullable().openapi({ description: "The spend-free run the draft's newsletter_validated Unit is on (child of draftedRunId)." }),
     recipientCount: z.number().int(),
     emailsSent: z.number().int().openapi({ description: "Emails that reached the gateway (one Unit each)." }),
     unitsDeclared: z.number().int().openapi({ description: "Of those, Units already on runs-service (the rest land on the next pass)." }),
@@ -217,6 +222,8 @@ export const NewsletterReleaseUnitsSchema = z
 export const NewsletterReleasesResponseSchema = z
   .object({
     outcomeKey: z.literal("newsletter_email_sent"),
+    draftedOutcomeKey: z.literal("newsletter_drafted"),
+    validatedOutcomeKey: z.literal("newsletter_validated"),
     subjectService: z.literal("transactional-email-service"),
     unitLinkParam: z.literal("dy_unit").openapi({
       description: "Every link to our sites in a release email carries dy_unit=newsletter_email_sent:transactional-email-service:<recipient id>: the Unit a click came from.",
@@ -713,6 +720,10 @@ export const CreateReleaseRequestSchema = z
         `${MAX_DAILY_LIMIT}` +
         ", which is the most the worker's own pace can deliver in a day; a larger number is refused rather than silently under-delivered. Pick it for the sending reputation you have, not the list you hold: a subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands.",
     }),
+    draftId: z.string().uuid().optional().openapi({
+      description:
+        "The newsletter draft this release sends (`POST /mailing-lists/{slug}/drafts`, same list and org). Naming it IS the owner's validation of that draft: a `newsletter_validated` Unit is declared (once per draft) consuming its `newsletter_drafted` Unit, and every email of the release consumes the validation. The body sent is the one stated here (edits after the draft are the validated version). Omit it for a test release (list `newsletter-test`): a test is not an approval.",
+    }),
   })
   .superRefine(bodyKindRefinement)
   .openapi("CreateReleaseRequest");
@@ -793,10 +804,50 @@ export const ReleaseSchema = z
       description:
         "The halted or cancelled release this one sends again, to the subscribers that release (and its own ancestors) never sent to. Null for a release created from scratch.",
     }),
+    draftId: z.string().nullable().openapi({
+      description: "The newsletter draft this release sends (its validation). Null for a release made from no draft.",
+    }),
     createdAt: z.string().openapi({ format: "date-time" }),
     completedAt: z.string().nullable().openapi({ format: "date-time" }),
   })
   .openapi("MailingListRelease");
+
+/** NEWSLETTER-OUTCOMES-1107: a drafter registers an issue here before anybody approves it. */
+export const CreateNewsletterDraftRequestSchema = z
+  .object({
+    subject: z.string().min(1),
+    body: z.string().min(1).optional().openapi({
+      description: "The draft as markdown, rendered exactly as a release renders it. Mutually exclusive with `htmlBody`; exactly one of the two is required.",
+    }),
+    htmlBody: z.string().min(1).optional().openapi({
+      description: "The draft as a complete HTML document, kept byte-for-byte. Mutually exclusive with `body`.",
+    }),
+    textBody: z.string().min(1).optional().openapi({ description: "The plain-text part beside `htmlBody`; derived when omitted." }),
+    draftedAt: z.string().datetime({ offset: true }).optional().openapi({
+      description: "When the draft was written (ISO). Absent = now. Never in the future. The `newsletter_drafted` Unit counts on that instant.",
+    }),
+  })
+  .superRefine(bodyKindRefinement)
+  .openapi("CreateNewsletterDraftRequest");
+
+export const NewsletterDraftSchema = z
+  .object({
+    draftId: z.string().openapi({ description: "Pass it as `draftId` when creating the release that sends this draft (the owner's go)." }),
+    slug: z.string(),
+    subject: z.string(),
+    bodyKind: z.enum(["markdown", "html"]),
+    draftedAt: z.string().openapi({ format: "date-time" }),
+    draftedRunId: z.string().openapi({ description: "The spend-free run its `newsletter_drafted` Unit is declared on." }),
+    draftedDeclared: z.boolean(),
+    validatedAt: z.string().nullable().openapi({ format: "date-time", description: "When a release first named this draft. Null = not validated yet." }),
+    validatedRunId: z.string().nullable().openapi({ description: "The spend-free run its `newsletter_validated` Unit is declared on." }),
+    validatedDeclared: z.boolean(),
+  })
+  .openapi("NewsletterDraft");
+
+export const CreateNewsletterDraftResponseSchema = NewsletterDraftSchema.extend({
+  created: z.boolean().openapi({ description: "False when the same subject and body were already registered for this list: that draft is returned." }),
+}).openapi("CreateNewsletterDraftResponse");
 
 export const CreateReleaseResponseSchema = ReleaseSchema.extend({
   created: z.boolean().openapi({
@@ -1242,7 +1293,9 @@ registry.registerPath({
     "`message_sent` (subject the subscriber), dated at the send. Per release, read from runs-service GET /internal/outcome-occurrences: the Units " +
     "and their cost (runIds=<unitsRunId>, outcomeKey=newsletter_email_sent), and what consumed them (subjectService=transactional-email-service, " +
     "outcomeKey=newsletter_email_sent, direction=consumed: a website visit through a `dy_unit` link, then the signups consuming that visit). " +
-    "Newest first.",
+    "Before the emails (NEWSLETTER-OUTCOMES-1107): a release made from a draft names `draftId`; its newsletter_drafted Unit is on `draftedRunId` " +
+    "and its newsletter_validated Unit (consuming the drafted one) on `validatedRunId`, both subject transactional-email-service / draftId, both " +
+    "spend-free ($0: drafting on a subscription, approval by a human). Newest first.",
   tags: ["Internal"],
   security: [{ apiKey: [] }],
   responses: {
@@ -1534,8 +1587,9 @@ registry.registerPath({
     200: { description: "This update is already being released to this list; the existing release is returned", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
     400: { description: "Validation error, an SVG image no mail client renders, or an empty list", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
-    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
-    502: { description: "The release could not be tracked, so it was not started", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list, or no draft `draftId`", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "`draftId` names a draft of another list or another org", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "The release could not be tracked (its run, or the draft's validation), so it was not started", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
@@ -1641,6 +1695,51 @@ registry.registerPath({
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such release", content: { "application/json": { schema: ErrorResponseSchema } } },
     409: { description: "The release has ended or stopped itself, and its decision stands", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mailing-lists/{slug}/drafts",
+  summary: "Register a newsletter draft (one newsletter_drafted Unit)",
+  description:
+    "NEWSLETTER-OUTCOMES-1107. A newsletter is drafted, then validated, then sent: three outcomes. The drafter calls this " +
+    "with the issue as written; the answer's `draftId` is what the release that sends it names (`draftId` on " +
+    "`POST /mailing-lists/{slug}/releases`), which declares the owner's validation. One `newsletter_drafted` Unit " +
+    "(subject = the draft) is declared on a spend-free run opened here, under the caller's org and user (`x-brand-id` " +
+    "charts it per brand). Nothing is sent. Registering the same subject and body again returns the first draft " +
+    "(`created: false`) and declares whatever was still missing. No cost is stated: drafting on a subscription and a " +
+    "human approval spend nothing metered.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: { required: true, content: { "application/json": { schema: CreateNewsletterDraftRequestSchema } } },
+  },
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  responses: {
+    201: { description: "The draft, registered and its drafted Unit declared", content: { "application/json": { schema: CreateNewsletterDraftResponseSchema } } },
+    200: { description: "The same draft was already registered for this list", content: { "application/json": { schema: CreateNewsletterDraftResponseSchema } } },
+    400: { description: "Validation error, missing headers, or an SVG image no mail client renders", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    502: { description: "runs-service refused or was unreachable: the drafted Unit is not declared yet; retry the same call", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/mailing-lists/drafts/{draftId}",
+  summary: "Read one newsletter draft and where it stands (drafted, validated)",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: { params: z.object({ draftId: z.string() }) },
+  parameters: [platformOrgIdHeader],
+  responses: {
+    200: { description: "The draft", content: { "application/json": { schema: NewsletterDraftSchema } } },
+    400: { description: "Invalid draft id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such draft", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

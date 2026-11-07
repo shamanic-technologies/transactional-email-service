@@ -186,6 +186,17 @@ beside `dy_sub` (the capture script strips only `dy_sub`, so the visit's entry U
 off runs-service. Catalogue step created in prod 2026-11-06 (features-service `declared_steps`). Every release send
 bills the release's org (checked 2026-11-06: all child runs on it); keep it so.
 
+## A newsletter is drafted, then validated, then sent: three outcomes (NEWSLETTER-OUTCOMES-1107)
+
+Owner 2026-11-07. `src/lib/newsletter-drafts.ts`: `POST /mailing-lists/:slug/drafts` registers the issue as written
+(`newsletter_drafted`, subject = the draft row, on its own spend-free run, `occurredAt` = `draftedAt`); a release naming
+`draftId` (same list + org) is the owner's go: `newsletter_validated` (same subject) consuming the drafted Unit, on a
+spend-free child run of the drafted one, ONCE per draft (a re-create or relaunch reuses it), declared BEFORE the release
+is written (cannot record = does not start). Every `newsletter_email_sent` call of that release consumes the validated
+Unit (so `MAX_UNITS_PER_CALL` = 499: 2 x 499 + 1 ≤ 1000). Key names follow the catalogue's `x_post_drafted` /
+`x_post_validated`; both steps created in prod 2026-11-07 (features `declared_steps`). No cost row on either run
+(drafting on Claude Max, approval by a human): never invent one. A test release (`newsletter-test`) names no draft.
+
 ## Commands
 
 - `npm test` — run tests (Vitest)

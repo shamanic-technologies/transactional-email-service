@@ -287,7 +287,11 @@ Every transactional email sent to a client, so it shows in that person's Unibox 
 
 ### `GET /internal/mailing-list-releases` and `POST /internal/newsletter-units/declare`
 
-**Internal endpoints** — `x-api-key` only (OUTCOME-FINEST-1106). Every email a release sends to one subscriber is one `newsletter_email_sent` Unit on runs-service: produced on the release's spend-free child run (`unitsRunId`, the release's org), subject `transactional-email-service` / the recipient row id, consuming the send's `message_sent` (subject the subscriber), dated at the send. An in-process pass (first ~60 s after boot, then every minute) declares every sent email not declared yet; the POST runs one pass now. Every link to our sites also carries `dy_unit=newsletter_email_sent:transactional-email-service:<recipient id>`, the Unit a click came from. The GET lists every release newest first with `releaseId, listSlug, subject, status, orgId, brandIds, campaignId, runId, unitsRunId, recipientCount, emailsSent, unitsDeclared, firstSentAt, lastSentAt`; cost and what consumed the Units (visits, then signups) are read off runs-service `GET /internal/outcome-occurrences` by `unitsRunId` / subject.
+**Internal endpoints** — `x-api-key` only (OUTCOME-FINEST-1106). Every email a release sends to one subscriber is one `newsletter_email_sent` Unit on runs-service: produced on the release's spend-free child run (`unitsRunId`, the release's org), subject `transactional-email-service` / the recipient row id, consuming the send's `message_sent` (subject the subscriber), dated at the send. An in-process pass (first ~60 s after boot, then every minute) declares every sent email not declared yet; the POST runs one pass now. Every link to our sites also carries `dy_unit=newsletter_email_sent:transactional-email-service:<recipient id>`, the Unit a click came from. The GET lists every release newest first with `releaseId, listSlug, subject, status, orgId, brandIds, campaignId, runId, unitsRunId, draftId, draftedRunId, validatedRunId, recipientCount, emailsSent, unitsDeclared, firstSentAt, lastSentAt`; cost and what consumed the Units (visits, then signups) are read off runs-service `GET /internal/outcome-occurrences` by `unitsRunId` / subject.
+
+### `POST /mailing-lists/{slug}/drafts`, `GET /mailing-lists/drafts/{draftId}` (NEWSLETTER-OUTCOMES-1107)
+
+`x-api-key` + `x-org-id` + `x-user-id` (+ optional `x-brand-id`). A newsletter is drafted, then validated, then sent: three outcomes. The drafter registers the issue (`subject` + `body` markdown or `htmlBody` [+ `textBody`], optional `draftedAt`); one `newsletter_drafted` Unit (subject = the draft) is declared on a spend-free run, nothing is sent, the same subject + body again returns the first draft (`created: false`). A release that names `draftId` on `POST /mailing-lists/{slug}/releases` (same list and org; else 409, unknown 404) IS the owner's validation: one `newsletter_validated` Unit (same subject) consuming the drafted one, on a spend-free child run, once per draft; every `newsletter_email_sent` Unit of the release consumes it. No cost is stated on either run. A test release names no draft.
 
 ### `POST /internal/transfer-brand`
 
@@ -706,6 +710,7 @@ src/
     trace-event.ts      # Fire-and-forget event tracing to runs-service
     subscriber-link.ts  # Pure: mint/check a subscriber's link id, stamp it (dy_sub, dy_unit) on distribute.you links
     newsletter-units.ts # Cost ledger: one newsletter_email_sent Unit per sent release email, declared every minute
+    newsletter-drafts.ts # newsletter_drafted / newsletter_validated Units of a draft (spend-free runs)
     run-outcomes.ts     # runs-service POST /v1/runs/:id/outcomes (org door)
     subscriber-link-store.ts # Mint each subscriber's link id once; resolve an id to valid/revoked/unknown/tampered
   middleware/
