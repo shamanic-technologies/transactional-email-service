@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { messageOf } from "../lib/db-error.js";
 import { declareNewsletterUnits, NEWSLETTER_EMAIL_SENT, UNIT_LINK_PARAM } from "../lib/newsletter-units.js";
 import { SUBJECT_SERVICE } from "../lib/outcome-subject.js";
+import { NEWSLETTER_DRAFTED, NEWSLETTER_VALIDATED } from "../lib/newsletter-drafts.js";
 
 /**
  * OUTCOME-FINEST-1106. The newsletter releases as factory output: each release with the ledger handles its Units
@@ -18,6 +19,7 @@ router.get("/internal/mailing-list-releases", requireApiKey, async (_req, res) =
     const rows = (await db.execute(raw`
       SELECT r.id::text AS release_id, l.slug, r.subject, r.status, r.org_id, r.user_id, r.brand_ids, r.campaign_id,
              r.run_id::text AS run_id, r.units_run_id::text AS units_run_id, r.recipient_count,
+             r.draft_id::text AS draft_id, d.drafted_run_id::text AS drafted_run_id, d.validated_run_id::text AS validated_run_id,
              r.created_at, r.completed_at,
              count(x.id) FILTER (WHERE x.status = 'sent')::int AS emails_sent,
              count(x.id) FILTER (WHERE x.status = 'sent' AND x.unit_declared_at IS NOT NULL)::int AS units_declared,
@@ -25,13 +27,16 @@ router.get("/internal/mailing-list-releases", requireApiKey, async (_req, res) =
              max(x.settled_at) FILTER (WHERE x.status = 'sent') AS last_sent_at
         FROM mailing_list_releases r
         JOIN mailing_lists l ON l.id = r.list_id
+        LEFT JOIN newsletter_drafts d ON d.id = r.draft_id
         LEFT JOIN mailing_list_release_recipients x ON x.release_id = r.id
-       GROUP BY r.id, l.slug
+       GROUP BY r.id, l.slug, d.id
        ORDER BY r.created_at DESC
     `)) as unknown as Array<Record<string, any>>;
     const iso = (v: unknown) => (v === null || v === undefined ? null : new Date(v as string).toISOString());
     res.json({
       outcomeKey: NEWSLETTER_EMAIL_SENT,
+      draftedOutcomeKey: NEWSLETTER_DRAFTED,
+      validatedOutcomeKey: NEWSLETTER_VALIDATED,
       subjectService: SUBJECT_SERVICE,
       unitLinkParam: UNIT_LINK_PARAM,
       count: rows.length,
@@ -46,6 +51,10 @@ router.get("/internal/mailing-list-releases", requireApiKey, async (_req, res) =
         campaignId: r.campaign_id,
         runId: r.run_id,
         unitsRunId: r.units_run_id,
+        // NEWSLETTER-OUTCOMES-1107: the chain before the emails. Null on a release made from no draft.
+        draftId: r.draft_id,
+        draftedRunId: r.drafted_run_id,
+        validatedRunId: r.validated_run_id,
         recipientCount: r.recipient_count,
         emailsSent: r.emails_sent,
         unitsDeclared: r.units_declared,

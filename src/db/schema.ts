@@ -290,6 +290,13 @@ export const mailingListReleases = pgTable(
       (): AnyPgColumn => mailingListReleases.id,
       { onDelete: "set null" }
     ),
+    /**
+     * The newsletter draft this release sends (NEWSLETTER-OUTCOMES-1107). Naming it is
+     * the owner's validation of that draft (`newsletter_validated`), and every email of
+     * the release consumes that validation. Null for a release made from no draft (a test
+     * send, every release before 2026-11-07). A relaunch keeps its source's draft.
+     */
+    draftId: uuid("draft_id").references((): AnyPgColumn => newsletterDrafts.id, { onDelete: "set null" }),
   },
   (table) => [
     index("idx_mailing_list_releases_list").on(table.listId, table.createdAt),
@@ -361,3 +368,45 @@ export const mailingListReleaseRecipients = pgTable(
 );
 
 export type MailingListReleaseRecipient = typeof mailingListReleaseRecipients.$inferSelect;
+
+/**
+ * A newsletter issue as its drafter wrote it, registered here before anybody approves it
+ * (NEWSLETTER-OUTCOMES-1107, owner 2026-11-07). Each row is ONE `newsletter_drafted` Unit
+ * (subject = this row) on its own spend-free run, and once a release names it, ONE
+ * `newsletter_validated` Unit (same subject) on a second spend-free run, consuming the
+ * drafted one. lib/newsletter-drafts.ts holds the doctrine.
+ */
+export const newsletterDrafts = pgTable(
+  "newsletter_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => mailingLists.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    bodyKind: text("body_kind").notNull(),
+    bodyMarkdown: text("body_markdown"),
+    htmlBody: text("html_body").notNull(),
+    textBody: text("text_body").notNull(),
+    /** sha256 over (subject, htmlBody, textBody): registering the same draft twice returns the first row. */
+    dedupKey: text("dedup_key").notNull(),
+    orgId: text("org_id").notNull(),
+    userId: text("user_id").notNull(),
+    brandIds: text("brand_ids").array(),
+    /** When the draft was written (the drafter's own instant, else registration). The drafted Unit's `occurredAt`. */
+    draftedAt: timestamp("drafted_at", { withTimezone: true }).notNull(),
+    /** The spend-free run the `newsletter_drafted` Unit is declared on. */
+    draftedRunId: uuid("drafted_run_id").notNull(),
+    draftedDeclaredAt: timestamp("drafted_declared_at", { withTimezone: true }),
+    /** The first release that named this draft: the owner's go. Null = not validated yet. */
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    validatedByUserId: text("validated_by_user_id"),
+    /** The spend-free run (child of `draftedRunId`) the `newsletter_validated` Unit is declared on. */
+    validatedRunId: uuid("validated_run_id"),
+    validatedDeclaredAt: timestamp("validated_declared_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("idx_newsletter_drafts_list_dedup").on(table.listId, table.dedupKey)]
+);
+
+export type NewsletterDraft = typeof newsletterDrafts.$inferSelect;
