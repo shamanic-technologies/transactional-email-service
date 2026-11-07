@@ -1428,7 +1428,9 @@ describe("a newsletter is drafted, then validated, then sent: three outcomes (NE
     expect(created.body.draftId).toBe(draft.draftId);
 
     const validated = runOf("newsletter-validated")!;
-    expect(validated.params).toMatchObject({ orgId: "org_test", userId: "user_staff", parentRunId: draft.draftedRunId });
+    expect(validated.params).toMatchObject({ orgId: "org_test", userId: "user_staff" });
+    // Never a child of the drafted run: it holds a back-dated fact, runs-service gives it no child (run_holds_dated_facts).
+    expect(validated.params.parentRunId).not.toBe(draft.draftedRunId);
     const validatedRunId = (await validated.result).id;
     expect(vi.mocked(declareRunOutcomes).mock.calls).toEqual([
       [

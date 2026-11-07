@@ -977,7 +977,7 @@
           "validatedRunId": {
             "type": "string",
             "nullable": true,
-            "description": "The spend-free run the draft's newsletter_validated Unit is on (child of draftedRunId)."
+            "description": "The spend-free run the draft's newsletter_validated Unit is on (its own run, not a child of draftedRunId)."
           },
           "recipientCount": {
             "type": "integer"

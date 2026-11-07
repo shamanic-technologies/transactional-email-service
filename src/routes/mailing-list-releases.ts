@@ -279,7 +279,7 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
         res.status(409).json({ error: `Draft '${draft.id}' belongs to another org.` });
         return;
       }
-      draft = await validateDraft(draft, { userId });
+      draft = await validateDraft(draft, { userId, runId: identity.runId });
     }
 
     // The run is created before anything is written, because it is the key the
