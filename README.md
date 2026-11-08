@@ -477,6 +477,8 @@ A release reads its own delivery outcomes back from email-gateway (`GET /public/
 }
 ```
 
+**Headers:** `x-campaign-id` is required (NEWSLETTER-CAMPAIGN-1108): the campaign of the `x-org-id` org this release runs under. Every address check and send the release makes is booked on that campaign and held by its budget. No campaign: **400** `reason: "campaign_required"`; a campaign that org does not hold (read from campaign-service): **400** `reason: "campaign_not_found"`; nothing is written either way. No `x-brand-id`: the campaign's brands are the release's. A relaunch keeps its source's campaign; a source with none (started before 2026-11-08) takes the relaunch request's `x-campaign-id`, else 400. distribute.you's newsletter runs under the Distribute.you brand's newsletter campaign (unit `23781977-f496-4a1e-b0a3-757b72ceddc5`, the « Newsletter email sent » part of sales funnel campaign `5f85405e-39a0-4ce7-91fb-5163be6fb399`).
+
 `dailyLimit` is required and has no default: the pace is the reason a release exists, and this service will not pick one on staff's behalf. Pick it for the sending reputation you have, not the list you hold — a sending subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands.
 
 **201** with `created: true` for a new release. **200** with `created: false` when this exact update is already being released to this list, carrying that release untouched. The response is the release's progress plus `estimatedDays`.
@@ -698,6 +700,7 @@ src/
     ledger-subjects.ts  # Cost ledger: names each subscriber of past release checks at apollo-service (LEDGER-HISTORY-1024)
     subscriber-leads.ts # Cost ledger: subscriber == lead equivalences at runs-service, on demand and every 6h (LEDGER-HISTORY-1024)
     release-operation.ts # The tag every message of one release carries, so its mail is findable on its own in the provider's archive
+    release-campaign.ts # The campaign a release runs under: refuses a release naming none, checks it at campaign-service (NEWSLETTER-CAMPAIGN-1108)
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker

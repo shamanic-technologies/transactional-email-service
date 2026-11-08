@@ -915,6 +915,18 @@ const campaignIdHeader = {
   description: "Campaign ID (injected automatically by workflow-service)",
 };
 
+/** NEWSLETTER-CAMPAIGN-1108: a release (and a relaunch of a campaign-less one) names the campaign it spends on. */
+const releaseCampaignIdHeader = {
+  name: "x-campaign-id",
+  in: "header" as const,
+  required: true,
+  schema: { type: "string" as const },
+  description:
+    "The campaign this release runs under, a campaign of the org in x-org-id. Every address check and send it makes is " +
+    "booked on that campaign and held by its budget. Missing: 400 `campaign_required`; a campaign the org does not hold: " +
+    "400 `campaign_not_found`. No x-brand-id: the campaign's brands are the release's.",
+};
+
 const brandIdHeader = {
   name: "x-brand-id",
   in: "header" as const,
@@ -1581,11 +1593,11 @@ registry.registerPath({
     params: z.object({ slug: z.string() }),
     body: { required: true, content: { "application/json": { schema: CreateReleaseRequestSchema } } },
   },
-  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader],
+  parameters: [mailingListSlugParam, platformOrgIdHeader, staffUserIdHeader, releaseCampaignIdHeader],
   responses: {
     201: { description: "The release, newly created", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
     200: { description: "This update is already being released to this list; the existing release is returned", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
-    400: { description: "Validation error, an SVG image no mail client renders, or an empty list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    400: { description: "Validation error, an SVG image no mail client renders, an empty list, or no campaign (`reason`: `campaign_required` / `campaign_not_found`)", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
     404: { description: "No such list, or no draft `draftId`", content: { "application/json": { schema: ErrorResponseSchema } } },
     409: { description: "`draftId` names a draft of another list or another org", content: { "application/json": { schema: ErrorResponseSchema } } },
@@ -1762,7 +1774,7 @@ registry.registerPath({
     params: z.object({ releaseId: z.string() }),
     body: { required: false, content: { "application/json": { schema: RelaunchReleaseRequestSchema } } },
   },
-  parameters: [releaseIdParam, platformOrgIdHeader, staffUserIdHeader],
+  parameters: [releaseIdParam, platformOrgIdHeader, staffUserIdHeader, { ...releaseCampaignIdHeader, required: false, description: "The campaign a relaunch of a release that has none runs under (a release keeps its own otherwise). Neither: 400 `campaign_required`." }],
   responses: {
     201: { description: "The relaunch, newly created and running", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
     200: { description: "This release was already relaunched; that relaunch is returned untouched", content: { "application/json": { schema: CreateReleaseResponseSchema } } },
