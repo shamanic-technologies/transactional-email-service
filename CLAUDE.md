@@ -197,6 +197,15 @@ Unit (so `MAX_UNITS_PER_CALL` = 499: 2 x 499 + 1 ≤ 1000). Key names follow the
 `x_post_validated`; both steps created in prod 2026-11-07 (features `declared_steps`). No cost row on either run
 (drafting on Claude Max, approval by a human): never invent one. A test release (`newsletter-test`) names no draft.
 
+## Every release runs under a campaign (NEWSLETTER-CAMPAIGN-1108)
+
+Owner 2026-11-08: every dollar a release spends lands on a campaign of its brand, visible on dashboard v2 and held by
+its budget. `POST /mailing-lists/:slug/releases` refuses a request with no `x-campaign-id` (400 `campaign_required`)
+and one its org does not hold (400 `campaign_not_found`, read from campaign-service), before anything is written
+(`src/lib/release-campaign.ts`, own module: the release tests mock it). No default campaign, no lookup by brand: which
+campaign pays is the caller's statement. A relaunch keeps its source's campaign, else takes the request's. Our
+newsletter's campaign: unit `23781977-f496-4a1e-b0a3-757b72ceddc5` (sales funnel campaign `5f85405e-…`, $140/week).
+
 ## Commands
 
 - `npm test` — run tests (Vitest)

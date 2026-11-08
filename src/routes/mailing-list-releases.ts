@@ -26,6 +26,7 @@ import {
   UpdateReleasePaceRequestSchema,
 } from "../schemas.js";
 import { DEFAULT_MAILING_LIST_FROM_ADDRESS } from "../lib/mailing-list-sender.js";
+import { ReleaseCampaignRefusal, resolveReleaseCampaign } from "../lib/release-campaign.js";
 
 /**
  * Releasing one written update to a list over several days.
@@ -218,9 +219,18 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
   const userId = requireActingUser(res);
   if (!userId) return;
 
-  const identity = identityOf(res);
+  const stated = identityOf(res);
 
   try {
+    // NEWSLETTER-CAMPAIGN-1108: no campaign, no release. Checked before
+    // anything is written, so a refused release leaves nothing behind.
+    const campaign = await resolveReleaseCampaign({
+      orgId: stated.orgId,
+      campaignId: stated.campaignId,
+      brandIds: stated.brandIds,
+    });
+    const identity = { ...stated, campaignId: campaign.campaignId, brandIds: campaign.brandIds };
+
     const list = await findList(slug);
     if (!list) {
       res.status(404).json({ error: `No mailing list '${slug}'` });
@@ -363,6 +373,10 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
       ...(await describe(release, slug)),
     });
   } catch (error: any) {
+    if (error instanceof ReleaseCampaignRefusal) {
+      res.status(400).json({ error: error.message, reason: error.reason });
+      return;
+    }
     console.error("[transactional-email-service] Create release error:", error);
     res.status(502).json({ error: messageOf(error) || "Failed to create release" });
   }
@@ -840,9 +854,17 @@ router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requir
     }
 
     const dailyLimit = parsed.data.dailyLimit ?? source.dailyLimit;
+    // NEWSLETTER-CAMPAIGN-1108: a relaunch spends too, so it runs under a
+    // campaign. The source's own, else the one this request names (a release
+    // started before campaigns were required has none).
+    const campaign = await resolveReleaseCampaign({
+      orgId: source.orgId,
+      campaignId: source.campaignId ?? identity.campaignId,
+      brandIds: source.brandIds ?? undefined,
+    });
     const workflowHeaders = {
-      campaignId: source.campaignId ?? undefined,
-      brandId: source.brandIds?.join(","),
+      campaignId: campaign.campaignId,
+      brandId: campaign.brandIds?.join(","),
       workflowSlug: source.workflowSlug ?? undefined,
       featureSlug: source.featureSlug ?? undefined,
       audienceId: source.audienceId ?? undefined,
@@ -856,8 +878,8 @@ router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requir
       serviceName: "transactional-email-service",
       taskName: `mailing-list-release-${found.slug}`,
       parentRunId: identity.runId,
-      brandIds: source.brandIds ?? undefined,
-      campaignId: source.campaignId ?? undefined,
+      brandIds: campaign.brandIds,
+      campaignId: campaign.campaignId,
       workflowHeaders,
     });
 
@@ -881,8 +903,8 @@ router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requir
             orgId: source.orgId,
             userId: source.userId,
             runId: run.id,
-            campaignId: source.campaignId,
-            brandIds: source.brandIds,
+            campaignId: campaign.campaignId,
+            brandIds: campaign.brandIds ?? null,
             workflowSlug: source.workflowSlug,
             featureSlug: source.featureSlug,
             audienceId: source.audienceId,
@@ -939,7 +961,7 @@ router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requir
       {
         "x-org-id": source.orgId,
         "x-user-id": source.userId,
-        "x-campaign-id": source.campaignId ?? undefined,
+        "x-campaign-id": campaign.campaignId,
         "x-workflow-slug": source.workflowSlug ?? undefined,
         "x-feature-slug": source.featureSlug ?? undefined,
         "x-audience-id": source.audienceId ?? undefined,
@@ -952,6 +974,10 @@ router.post("/mailing-lists/releases/:releaseId/relaunch", requireApiKey, requir
       ...(await describe(relaunch, found.slug)),
     });
   } catch (error: any) {
+    if (error instanceof ReleaseCampaignRefusal) {
+      res.status(400).json({ error: error.message, reason: error.reason });
+      return;
+    }
     console.error("[transactional-email-service] Relaunch release error:", error);
     res.status(502).json({ error: messageOf(error) || "Failed to relaunch release" });
   }
