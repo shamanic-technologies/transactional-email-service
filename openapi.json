@@ -3839,6 +3839,15 @@
             "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
           },
           {
+            "name": "x-campaign-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The campaign this release runs under, a campaign of the org in x-org-id. Every address check and send it makes is booked on that campaign and held by its budget. Missing: 400 `campaign_required`; a campaign the org does not hold: 400 `campaign_not_found`. No x-brand-id: the campaign's brands are the release's."
+          },
+          {
             "schema": {
               "type": "string"
             },
@@ -3879,7 +3888,7 @@
             }
           },
           "400": {
-            "description": "Validation error, an SVG image no mail client renders, or an empty list",
+            "description": "Validation error, an SVG image no mail client renders, an empty list, or no campaign (`reason`: `campaign_required` / `campaign_not_found`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4648,6 +4657,15 @@
               "type": "string"
             },
             "description": "Internal user UUID of the acting staff member. Required: key-service resolves the Postmark token and stream against a user, and a send is billed to this user's organisation."
+          },
+          {
+            "name": "x-campaign-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The campaign a relaunch of a release that has none runs under (a release keeps its own otherwise). Neither: 400 `campaign_required`."
           },
           {
             "schema": {

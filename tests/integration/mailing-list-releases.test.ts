@@ -34,6 +34,19 @@ vi.mock("../../src/lib/run-outcomes.js", () => ({
   declareRunOutcomes: vi.fn(),
 }));
 
+// campaign-service is not running here: the campaign a release names is taken
+// as held by its org, and a release naming none is refused by the real rule.
+vi.mock("../../src/lib/release-campaign.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof import("../../src/lib/release-campaign.js");
+  return {
+    ...actual,
+    resolveReleaseCampaign: vi.fn(async (input: { campaignId?: string; brandIds?: string[] }) => {
+      if (!input.campaignId) throw new actual.ReleaseCampaignRefusal("campaign_required", "A release must name the campaign it runs under");
+      return { campaignId: input.campaignId, brandIds: input.brandIds?.length ? input.brandIds : ["brand_of_campaign"] };
+    }),
+  };
+});
+
 import app from "../../src/index.js";
 import { db, sql } from "../../src/db/index.js";
 import { sendEmail } from "../../src/lib/email-gateway.js";
@@ -48,7 +61,7 @@ import { seedStaffTemplates } from "../../src/templates/staff-alerts.js";
 import { MAX_DAILY_LIMIT, MAX_TICK_BATCH } from "../../src/lib/release-pacing.js";
 
 const API_KEY = process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY!;
-const AUTH = { "x-api-key": API_KEY, "x-org-id": "org_test", "x-user-id": "user_staff" };
+const AUTH = { "x-api-key": API_KEY, "x-org-id": "org_test", "x-user-id": "user_staff", "x-campaign-id": "campaign_newsletter" };
 
 /** A fixture list of a few hundred addresses, which is the size the acceptance asks for. */
 const LIST_SIZE = 250;
@@ -1655,5 +1668,64 @@ describe("relaunching a halted release to the subscribers it never sent to (NEWS
     const tooFast = await relaunch(releaseId, { dailyLimit: MAX_DAILY_LIMIT + 1 });
     expect(tooFast.status).toBe(400);
     await request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).send({}).expect(401);
+  });
+});
+
+describe("every release runs under a campaign (NEWSLETTER-CAMPAIGN-1108)", () => {
+  const NO_CAMPAIGN = { "x-api-key": API_KEY, "x-org-id": "org_test", "x-user-id": "user_staff" };
+
+  it("refuses a release that names no campaign, and writes nothing", async () => {
+    await seedList(5);
+    vi.mocked(createRun).mockClear();
+
+    const res = await request(app)
+      .post(`/mailing-lists/${SLUG}/releases`)
+      .set(NO_CAMPAIGN)
+      .send({ subject: "No campaign", body: "# Hello", dailyLimit: 10 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.reason).toBe("campaign_required");
+    expect(vi.mocked(createRun)).not.toHaveBeenCalled();
+    const rows = await sql`SELECT id FROM mailing_list_releases`;
+    expect(rows).toHaveLength(0);
+  });
+
+  it("books the release, its run and every downstream call on the campaign it names", async () => {
+    await seedList(5);
+    vi.mocked(createRun).mockClear();
+
+    const res = await createRelease({ subject: "With campaign", body: "# Hello", dailyLimit: 10 });
+    expect(res.status).toBe(201);
+
+    const [row] = await sql<Array<{ campaign_id: string; brand_ids: string[] }>>`
+      SELECT campaign_id, brand_ids FROM mailing_list_releases WHERE id = ${res.body.releaseId}::uuid`;
+    expect(row.campaign_id).toBe("campaign_newsletter");
+    // No x-brand-id on the request: the campaign's brands are the release's.
+    expect(row.brand_ids).toEqual(["brand_of_campaign"]);
+    expect(vi.mocked(createRun).mock.calls[0][0]).toMatchObject({ campaignId: "campaign_newsletter", brandIds: ["brand_of_campaign"] });
+
+    vi.mocked(fetchVerdicts).mockClear();
+    await drain();
+    const verifiedFor = vi.mocked(fetchVerdicts).mock.calls[0][0] as { campaignId: string };
+    expect(verifiedFor.campaignId).toBe("campaign_newsletter");
+  });
+
+  it("relaunches a campaign-less halted release under the campaign the relaunch names, and refuses one that names none", async () => {
+    await seedList(20);
+    const created = await createRelease({ subject: "Old issue", body: "# Old", dailyLimit: 5 });
+    expect(created.status).toBe(201);
+    const releaseId = created.body.releaseId as string;
+    // A release started before campaigns were required.
+    await sql`UPDATE mailing_list_releases SET campaign_id = NULL, status = 'halted', halted_reason = 'bounced' WHERE id = ${releaseId}::uuid`;
+
+    const refused = await request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).set(NO_CAMPAIGN).send({});
+    expect(refused.status).toBe(400);
+    expect(refused.body.reason).toBe("campaign_required");
+
+    const res = await request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).set(AUTH).send({});
+    expect(res.status).toBe(201);
+    const [row] = await sql<Array<{ campaign_id: string }>>`
+      SELECT campaign_id FROM mailing_list_releases WHERE id = ${res.body.releaseId}::uuid`;
+    expect(row.campaign_id).toBe("campaign_newsletter");
   });
 });
