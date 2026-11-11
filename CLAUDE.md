@@ -167,7 +167,7 @@ before 2026-10-24 has no ids. Pure stamping in `src/lib/subscriber-link.ts`, DB 
 `POST /mailing-lists/releases/:id/relaunch {dailyLimit?}` (halted or cancelled source only) creates a NEW release with the
 source's exact content, sender and identity (same org pays), its own run (its own halt check, same thresholds), and
 `relaunched_from_release_id` = the source (unique: asking again returns that relaunch, `created: false`). Recipients = the
-list NOW minus every address the source's LINEAGE sent to (`sent`, `sending`, `failed` with `INTERRUPTED_REASON`); skipped,
+list NOW minus every address the source's LINEAGE sent to (`sent`, `sending`, `failed` with `INTERRUPTED_REASON` or `OUTCOME_UNKNOWN_REASON`, the gateway's 504 `send_outcome_unknown`); skipped,
 pending, cancelled, gateway-failed and newly joined addresses go back through suppression + verification. A relaunch that
 halts is relaunched from ITSELF. Never resume a halted release in place, never raise the bounce threshold to push one through.
 
@@ -218,7 +218,9 @@ path for a name in that list; a new alert goes in the list, not in `ADMIN_NOTIFI
 
 A `failed` row with `postmark-service POST /orgs/send: ... aborted due to timeout` is NOT proof the person got
 nothing: on 2026-11-11 the welcome to info@zenotris.com was delivered and opened twice while our row said failed
-(email-gateway retried a send that had gone out). Check `postmark_messages` before resending anything.
+(email-gateway retried a send that had gone out; fixed there, it now answers 504 `send_outcome_unknown` and never
+re-sends). `src/lib/send-outcome.ts` turns that answer into `SendOutcomeUnknownError`; a release settles such a row
+`failed` with `OUTCOME_UNKNOWN_REASON` and a relaunch never re-sends it. Check `postmark_messages` before resending anything.
 
 ## Commands
 

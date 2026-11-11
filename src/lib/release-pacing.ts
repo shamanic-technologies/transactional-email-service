@@ -60,6 +60,15 @@ export const CLAIM_STALE_MS = 10 * 60_000;
 export const INTERRUPTED_REASON =
   "The worker was stopped between claiming this address and learning the outcome. Not re-sent: this service cannot ask the provider whether that one message left, and mailing somebody twice is worse than naming them here.";
 
+/**
+ * email-gateway could not tell whether this one message left (504
+ * send_outcome_unknown, SIGNUP-EMAILS-1111). Settled failed with this reason and,
+ * like an interrupted send, never re-sent by a relaunch: mailing somebody twice
+ * is worse than naming them here.
+ */
+export const OUTCOME_UNKNOWN_REASON =
+  "The provider took this message but did not confirm in time whether it left. Not re-sent: it may have been delivered, and mailing somebody twice is worse than naming them here.";
+
 /** Below this many settled sends a release's outcome rates are too thin to act on. */
 export const HEALTH_MIN_SAMPLE = 500;
 

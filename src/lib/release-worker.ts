@@ -19,6 +19,7 @@ import { releaseOperationId } from "../lib/release-operation.js";
 import { RELEASE_SEND_CONSUMES, subscriberSubject } from "../lib/outcome-subject.js";
 import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
 import { ALERT_RECORDED } from "../lib/monitoring-alerts.js";
+import { isSendOutcomeUnknown } from "../lib/send-outcome.js";
 import { updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import {
@@ -27,6 +28,7 @@ import {
   HEALTH_CHECK_INTERVAL_MS,
   HEALTH_MIN_SAMPLE,
   INTERRUPTED_REASON,
+  OUTCOME_UNKNOWN_REASON,
   shouldAlertStall,
   startOfUtcDay,
   tickAllowance,
@@ -563,6 +565,7 @@ async function releaseSlice(
           });
           return { id: row.id, reason: null as string | null };
         } catch (err: any) {
+          if (isSendOutcomeUnknown(err)) return { id: row.id, reason: OUTCOME_UNKNOWN_REASON };
           return { id: row.id, reason: messageOf(err) || "Unknown send error" };
         }
       })
