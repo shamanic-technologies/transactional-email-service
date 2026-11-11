@@ -5,6 +5,7 @@ import { messageOf } from "./db-error.js";
 import { and, eq, inArray, sql as raw } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
+  emailEvents,
   mailingListReleaseRecipients,
   mailingListReleases,
   mailingLists,
@@ -16,8 +17,8 @@ import { fetchVerdicts, SENDABLE_VERDICT } from "../lib/email-verification.js";
 import { fetchDeliveryOutcomes } from "../lib/release-health.js";
 import { releaseOperationId } from "../lib/release-operation.js";
 import { RELEASE_SEND_CONSUMES, subscriberSubject } from "../lib/outcome-subject.js";
-import { getTemplate } from "../templates/index.js";
 import { ADMIN_EMAILS } from "../lib/staff-recipients.js";
+import { ALERT_RECORDED } from "../lib/monitoring-alerts.js";
 import { updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import {
@@ -298,42 +299,37 @@ async function settle(ids: string[], status: string, reason: string | null, now:
 }
 
 /**
- * Tell staff a release stopped itself.
+ * Record that a release stopped itself, for dashboard v2 Monitoring.
  *
- * Sent to the same hardcoded staff list `/send` routes its alerts to, from the
- * template this repo owns and upserts at boot. It fails loud — a halt nobody is
- * told about is most of the problem — but it is raised after the release has
- * already been marked halted, so a failure to send the alert cannot leave the
- * release running.
+ * A monitoring alert, never an email (lib/monitoring-alerts.ts, owner
+ * 2026-10-22). One `recorded` row on the staff list, carrying the release and
+ * the facts the old email carried. It fails loud, but it is raised after the
+ * release has already been marked halted, so a failure to record it cannot
+ * leave the release running.
  */
 async function alertStaff(
   release: MailingListRelease,
-  templateName: string,
-  tag: string,
+  eventType: string,
   vars: Record<string, string | number>
 ): Promise<void> {
-  const template = await getTemplate(templateName);
-  const rendered = template({
+  const metadata = {
     subject: release.subject,
     recipientCount: release.recipientCount,
     releaseId: release.id,
     ...vars,
-  });
-
-  for (const email of ADMIN_EMAILS) {
-    await sendEmail({
-      to: email,
-      subject: rendered.subject,
-      htmlBody: rendered.htmlBody,
-      textBody: rendered.textBody,
-      tag,
-      orgId: release.orgId,
+  };
+  await db.insert(emailEvents).values(
+    ADMIN_EMAILS.map((email) => ({
+      eventType,
+      recipientEmail: email,
+      dedupKey: null,
       userId: release.userId,
-      runId: release.runId,
-      from: rendered.from,
-      workflowHeaders: workflowHeadersOf(release),
-    });
-  }
+      orgId: release.orgId,
+      status: ALERT_RECORDED,
+      metadata,
+      campaignId: release.campaignId ?? null,
+    }))
+  );
 }
 
 /**
@@ -382,7 +378,7 @@ async function recordStall(release: MailingListRelease, slug: string, reason: st
 
   try {
     const progress = await readProgress(release.id, now);
-    await alertStaff(release, "mailing_list_release_stalled", "mailing-list-release-stalled", {
+    await alertStaff(release, "mailing_list_release_stalled", {
       slug,
       reason,
       stalledSince: stall.stalledSince!.toISOString(),
@@ -478,7 +474,7 @@ async function checkHealth(release: MailingListRelease, slug: string, now: Date)
     headersOf(release)
   );
 
-  await alertStaff(release, "mailing_list_release_halted", "mailing-list-release-halted", {
+  await alertStaff(release, "mailing_list_release_halted", {
     slug,
     reason: verdict.reason!,
     reached: progress.reached,

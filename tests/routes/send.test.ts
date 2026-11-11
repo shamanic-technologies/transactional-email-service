@@ -1378,72 +1378,6 @@ describe("provider_credits_exhausted — a paid provider has run out of credits"
     },
   };
 
-  it("is raised with an org and an API key and no acting user, and reaches the staff list", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-
-    const [, options] = fetchSpy.mock.calls[0];
-    expect(JSON.parse(options.body).to).toBe("kevin.lourd@gmail.com");
-    // No acting user was invented to make the send possible
-    expect(options.headers["x-user-id"]).toBeUndefined();
-    expect(mockValues.mock.calls[0][0].userId).toBeNull();
-  });
-
-  it("carries the caller's context through to the rendered email", async () => {
-    mockSelectLimit.mockResolvedValueOnce([{
-      name: "provider_credits_exhausted",
-      subject: "{{provider}} is out of credits",
-      htmlBody: "<p>{{provider}} — {{reason}} — {{orgId}} — {{detail}}</p>",
-      textBody: "{{provider}} {{reason}} {{orgId}} {{detail}}",
-      fromAddress: null,
-    }]);
-
-    await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
-
-    expect(body.subject).toBe("Apollo.io is out of credits");
-    expect(body.htmlBody).toContain("people/search returned 402");
-    expect(body.htmlBody).toContain("insufficient_credits");
-    // The affected org comes off the request, not off the caller's metadata
-    expect(body.htmlBody).toContain("org_456");
-  });
-
-  it("mails once per org per calendar day, and reports the repeat as a duplicate", async () => {
-    const first = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    expect(first.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`org_456:provider_credits_exhausted:${today}`);
-    expect(mockOnConflictDoNothing).toHaveBeenCalled();
-
-    // A second call the same day loses the race on the unique dedup index
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
-    // Exactly one email left the building
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
   it("keys on the org, so a different org still gets its own alert the same day", async () => {
     await request(app)
       .post("/platform-send")
@@ -1481,21 +1415,6 @@ describe("provider_credits_exhausted — a paid provider has run out of credits"
       .send(ALERT);
 
     expect(mockValues.mock.calls[0][0].dedupKey).toBe(`org_456:provider_credits_exhausted:${today}`);
-  });
-
-  it("goes to staff on /send too, never to the customer resolved from x-user-id", async () => {
-    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
-    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
-
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send(ALERT);
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).to).toBe("kevin.lourd@gmail.com");
   });
 
   it("cannot be aimed at a customer address on either route", async () => {
@@ -1562,17 +1481,6 @@ describe("provider_credits_exhausted — a paid provider has run out of credits"
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("accepts an alert with no upstream detail — detail is optional", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send({ eventType: "provider_credits_exhausted", metadata: { provider: "Apollo.io", reason: "402" } });
-
-    expect(res.status).toBe(200);
-    expect(res.body.results[0].sent).toBe(true);
-  });
-
   it("still needs an org, and an API key", async () => {
     const noOrg = await request(app)
       .post("/platform-send")
@@ -1603,40 +1511,6 @@ describe("campaign_failing — a campaign has failed every run for a sustained s
       retryInterval: "30 min",
     },
   };
-
-  it("is raised with an org and an API key and reaches the staff list only", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).to).toBe("kevin.lourd@gmail.com");
-  });
-
-  it("mails once per campaign per calendar day", async () => {
-    await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    expect(mockValues.mock.calls[0][0].dedupKey).toBe(
-      `org_456:campaign_failing:3922c8e1-3405-46af-8a56-1eef3f221b19:${today}`,
-    );
-
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
 
   it("keys on the campaign, so a second failing campaign of the same org still alerts", async () => {
     await request(app)
@@ -1698,43 +1572,6 @@ describe("audience_refill_failed — out of people and the automatic refill gave
     },
   };
 
-  it("is accepted on the platform send route and reaches the staff list, never the campaign owner", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send(ALERT);
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.to).toBe("kevin.lourd@gmail.com");
-    expect(body).not.toHaveProperty("bcc");
-  });
-
-  it("mails once per campaign per calendar day, on a key distinct from campaign_failing", async () => {
-    await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send(ALERT);
-
-    expect(mockValues.mock.calls[0][0].dedupKey).toBe(
-      `org_456:audience_refill_failed:3922c8e1-3405-46af-8a56-1eef3f221b19:${today}`,
-    );
-
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send(ALERT);
-
-    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
   it("cannot be aimed at a customer address", async () => {
     const res = await request(app)
       .post("/send")
@@ -1758,16 +1595,6 @@ describe("audience_refill_failed — out of people and the automatic refill gave
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("accepts an empty brand name and refill detail", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send({ ...ALERT, metadata: { ...ALERT.metadata, brandName: "", refillDetail: "" } });
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-  });
 });
 
 describe("staff_daily_digest", () => {
@@ -1787,23 +1614,6 @@ describe("staff_daily_digest", () => {
     const body = JSON.parse(options.body);
     expect(body.to).toBe("kevin.lourd@gmail.com");
     expect(body).not.toHaveProperty("bcc");
-  });
-
-  it("goes to staff on /send too, never to the customer resolved from x-user-id", async () => {
-    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
-    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
-
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send({ eventType: "staff_daily_digest", recipientEmail: "customer@example.com" });
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-
-    const [, options] = fetchSpy.mock.calls[0];
-    expect(JSON.parse(options.body).to).toBe("kevin.lourd@gmail.com");
   });
 
   it("cannot carry a customer blind copy in on the platform route", async () => {
@@ -1886,23 +1696,6 @@ describe("unpaid_debt_uncollectable", () => {
     const body = JSON.parse(options.body);
     expect(body.to).toBe("kevin.lourd@gmail.com");
     expect(body).not.toHaveProperty("bcc");
-  });
-
-  it("goes to staff on /send too, never to the customer resolved from x-user-id", async () => {
-    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
-    vi.mocked(resolveUserEmail).mockResolvedValue("customer@example.com");
-
-    const res = await request(app)
-      .post("/send")
-      .set("X-API-Key", "test-service-key")
-      .set(HEADERS)
-      .send({ eventType: "unpaid_debt_uncollectable" });
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-
-    const [, options] = fetchSpy.mock.calls[0];
-    expect(JSON.parse(options.body).to).toBe("kevin.lourd@gmail.com");
   });
 
   it("applies no dedup — every uncollectable debt billing-service reports is news", async () => {
@@ -2206,55 +1999,6 @@ describe("trigger_silent — a reactive trigger produced no event for days while
     },
   };
 
-  it("is accepted on the platform send route and reaches the staff list only", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send(ALERT);
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.to).toBe("kevin.lourd@gmail.com");
-    expect(body).not.toHaveProperty("bcc");
-  });
-
-  it("is never suppressed as the recipient's own action: the user on the request is billing context, not an actor", async () => {
-    const { resolveUserEmail } = await import("../../src/lib/client-service.js");
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send({ ...ALERT, metadata: { ...ALERT.metadata, email: "kevin@distribute.you" } });
-
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(resolveUserEmail).not.toHaveBeenCalled();
-  });
-
-  it("mails once per trigger per calendar day, fleet-wide: the org is not in the key", async () => {
-    await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send(ALERT);
-
-    expect(mockValues.mock.calls[0][0].dedupKey).toBe(`trigger_silent:positive_reply_received:${today}`);
-
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set({ ...STAFF_HEADERS, "x-org-id": "org_other" })
-      .send(ALERT);
-
-    expect(mockValues.mock.calls[1][0].dedupKey).toBe(`trigger_silent:positive_reply_received:${today}`);
-    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
   it("keys on the trigger, so a second silent trigger the same day still alerts", async () => {
     await request(app)
       .post("/platform-send")
@@ -2289,17 +2033,6 @@ describe("trigger_silent — a reactive trigger produced no event for days while
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("accepts an alert without firedBy or whereToLook", async () => {
-    const { firedBy: _f, whereToLook: _w, ...rest } = ALERT.metadata;
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send({ eventType: "trigger_silent", metadata: rest });
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-  });
 });
 
 describe("trigger_occurrence_stuck — a prospect's event has waited undelivered behind a campaign that cannot run", () => {
@@ -2323,61 +2056,6 @@ describe("trigger_occurrence_stuck — a prospect's event has waited undelivered
       prospect: "jane@example.com",
     },
   };
-
-  it("is accepted on the platform send route and delivers one email to the staff list only", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send(ALERT);
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.to).toBe("kevin.lourd@gmail.com");
-    expect(body).not.toHaveProperty("bcc");
-    expect(mockValues.mock.calls[0][0].metadata.orgId).toBe("org_456");
-  });
-
-  it("mails once per occurrence: a second send for the same occurrence is a duplicate, whatever the org or day", async () => {
-    await request(app).post("/platform-send").set("X-API-Key", "test-service-key").set(STAFF_HEADERS).send(ALERT);
-    expect(mockValues.mock.calls[0][0].dedupKey).toBe("trigger_occurrence_stuck:occ_1");
-
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set({ ...STAFF_HEADERS, "x-org-id": "org_other" })
-      .send({ ...ALERT, metadata: { ...ALERT.metadata, attempts: 140 } });
-
-    expect(mockValues.mock.calls[1][0].dedupKey).toBe("trigger_occurrence_stuck:occ_1");
-    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("a different occurrence sends again", async () => {
-    await request(app).post("/platform-send").set("X-API-Key", "test-service-key").set(STAFF_HEADERS).send(ALERT);
-    const second = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send({ ...ALERT, metadata: { ...ALERT.metadata, occurrenceId: "occ_2" } });
-
-    expect(mockValues.mock.calls[1][0].dedupKey).toBe("trigger_occurrence_stuck:occ_2");
-    expect(second.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("is never suppressed as the recipient's own action", async () => {
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send({ ...ALERT, metadata: { ...ALERT.metadata, email: "kevin@distribute.you" } });
-
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-  });
 
   it("cannot be aimed at a customer address", async () => {
     const res = await request(app)
@@ -2426,17 +2104,6 @@ describe("trigger_occurrence_stuck — a prospect's event has waited undelivered
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("accepts an alert without the optional campaignName, triggerLabel, prospect or whereToLook", async () => {
-    const { campaignName: _c, triggerLabel: _t, prospect: _p, ...rest } = ALERT.metadata;
-    const res = await request(app)
-      .post("/platform-send")
-      .set("X-API-Key", "test-service-key")
-      .set(STAFF_HEADERS)
-      .send({ eventType: "trigger_occurrence_stuck", metadata: rest });
-
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-  });
 });
 
 describe("POST /send — a message only staff read is platform-paid", () => {
@@ -2572,5 +2239,81 @@ describe("a stored template with syntax the renderer does not support is never d
 
     expect(res.status).toBe(200);
     expect(res.body.results).toEqual([{ email: "kevin@distribute.you", sent: true }]);
+  });
+});
+
+// SIGNUP-EMAILS-1111: a monitoring alert is red on dashboard v2 Monitoring, never
+// an email in the owner's inbox (owner 2026-10-22). Every alert event is recorded
+// and nothing reaches the gateway; business notifications keep their email.
+describe("monitoring alerts are recorded for Monitoring, never emailed to staff", () => {
+  const ORG_ONLY = { "x-org-id": "org_456", "x-user-id": "user_123" };
+  const ALERTS: Array<{ eventType: string; metadata: Record<string, string> }> = [
+    { eventType: "provider_credits_exhausted", metadata: { provider: "Apollo.io", reason: "402 credits_remaining: 0" } },
+    { eventType: "campaign_failing", metadata: { campaignId: "camp_1", consecutiveFailures: "12", failingSince: "2026-11-11T05:00:00Z", retryInterval: "1 h" } },
+    { eventType: "audience_refill_failed", metadata: { campaignId: "camp_1", brandId: "brand_1", refillOutcome: "nobody new" } },
+    { eventType: "trigger_silent", metadata: { triggerId: "t1", triggerLabel: "Positive reply", silentSince: "2026-11-08", silentDays: "3", liveCampaignCount: "2" } },
+    { eventType: "trigger_occurrence_stuck", metadata: { occurrenceId: "o1", triggerId: "t1", campaignId: "camp_1", brandId: "brand_1", waitingSince: "2026-11-10", attempts: "4", lastError: "402" } },
+  ];
+
+  for (const alert of ALERTS) {
+    it(`${alert.eventType}: recorded once, no email, no run`, async () => {
+      const res = await request(app)
+        .post("/platform-send")
+        .set("X-API-Key", "test-service-key")
+        .set(ORG_ONLY)
+        .send({ ...alert, campaignId: "camp_1" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "monitoring_alert" }]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(createRun).not.toHaveBeenCalled();
+      expect(mockValues).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: alert.eventType, status: "recorded", orgId: "org_456", metadata: expect.objectContaining({ ...alert.metadata, orgId: "org_456" }) })
+      );
+    });
+  }
+
+  it("a repeat inside the dedup bound is reported as a duplicate and still emails nobody", async () => {
+    mockReturning.mockResolvedValueOnce([]);
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send(ALERTS[1]);
+
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
+    expect(mockOnConflictDoNothing).toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("an alert raised on /send is recorded the same way", async () => {
+    const res = await request(app).post("/send").set("X-API-Key", "test-service-key").set(HEADERS).send(ALERTS[0]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].reason).toBe("monitoring_alert");
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).includes("/send"))).toHaveLength(0);
+  });
+
+  it("still refuses an alert with missing facts", async () => {
+    const res = await request(app)
+      .post("/platform-send")
+      .set("X-API-Key", "test-service-key")
+      .set(ORG_ONLY)
+      .send({ eventType: "campaign_failing", metadata: { campaignId: "camp_1" } });
+
+    expect(res.status).toBe(400);
+    expect(mockValues).not.toHaveBeenCalled();
+  });
+
+  it("a signup notification is business news, not an alert: it is still emailed", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "signup_notification", metadata: { email: "new@client.com" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
