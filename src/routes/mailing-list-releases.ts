@@ -18,7 +18,7 @@ import { resolveBody } from "../lib/update-body.js";
 import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import { readProgress, runReleaseTick } from "../lib/release-worker.js";
-import { INTERRUPTED_REASON, estimateDaysRemaining, tickAllowance } from "../lib/release-pacing.js";
+import { INTERRUPTED_REASON, OUTCOME_UNKNOWN_REASON, estimateDaysRemaining, tickAllowance } from "../lib/release-pacing.js";
 import {
   CreateNewsletterDraftRequestSchema,
   CreateReleaseRequestSchema,
@@ -781,7 +781,7 @@ function relaunchAudience(sourceReleaseId: string, listId: string) {
             SELECT id FROM lineage
           )
           AND h.email = s.email
-          AND (h.status IN ('sent', 'sending') OR (h.status = 'failed' AND h.reason = ${INTERRUPTED_REASON}))
+          AND (h.status IN ('sent', 'sending') OR (h.status = 'failed' AND h.reason IN (${INTERRUPTED_REASON}, ${OUTCOME_UNKNOWN_REASON})))
       )
   `;
 }
