@@ -19,6 +19,7 @@ import { signRendered } from "../lib/sign-rendered.js";
 import { sentMessageColumns } from "../lib/sent-emails.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
 import { ADMIN_EMAILS, isStaffRecipientActor, payerFor } from "../lib/staff-recipients.js";
+import { ALERT_RECORDED, isMonitoringAlert } from "../lib/monitoring-alerts.js";
 
 const router = Router();
 
@@ -297,6 +298,43 @@ async function handleSend(req: Request, res: Response) {
     // the caller never has to repeat it, and cannot contradict it.
     if (STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType)) {
       metadata.orgId = orgId;
+    }
+
+    // A monitoring alert is recorded for dashboard v2 Monitoring and never
+    // emailed (lib/monitoring-alerts.ts): same validation and dedup bound as
+    // before, no run, no template, nothing sent.
+    if (isMonitoringAlert(body.eventType)) {
+      const alertDedupKey = buildDedupKey(orgId, body.eventType, { userId, ...body, brandIds: effectiveBrandIds });
+      const results: Array<{ email: string; sent: boolean; reason?: string }> = [];
+      for (const email of recipientEmails) {
+        if (!NO_ACTOR_EVENTS.has(body.eventType) && isStaffRecipientActor(email, metadata.email)) {
+          results.push({ email, sent: false, reason: "self_action" });
+          continue;
+        }
+        const recipientDedupKey = alertDedupKey && recipientEmails.length > 1 ? `${alertDedupKey}:${email}` : alertDedupKey;
+        const recorded = await db
+          .insert(emailEvents)
+          .values({
+            eventType: body.eventType,
+            recipientEmail: email,
+            dedupKey: recipientDedupKey,
+            userId: userId ?? null,
+            orgId,
+            status: ALERT_RECORDED,
+            metadata,
+            campaignId: effectiveCampaignId || null,
+            brandIds: effectiveBrandIds?.length ? effectiveBrandIds : null,
+            workflowSlug: workflowSlug || null,
+            featureSlug: featureSlug || null,
+            audienceId: audienceId || null,
+          })
+          .onConflictDoNothing({ target: emailEvents.dedupKey })
+          .returning({ id: emailEvents.id });
+        results.push({ email, sent: false, reason: recorded.length > 0 ? "monitoring_alert" : "duplicate" });
+      }
+      console.log(`[send] recorded ${body.eventType} for Monitoring (no email): ${results.map((r) => r.reason).join(",")}`);
+      res.json({ results });
+      return;
     }
 
     // Get template
@@ -681,6 +719,24 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
   });
   if (missing.length > 0) {
     res.status(400).json({ error: `'${eventType}' requires non-empty string metadata: ${missing.join(", ")}`, code: "missing_metadata", missing });
+    return;
+  }
+
+  // Recorded for dashboard v2 Monitoring, never emailed (lib/monitoring-alerts.ts).
+  // Same once-per-event-id bound: a row already holding the occurrence answers duplicate.
+  if (isMonitoringAlert(eventType)) {
+    let recordedCount = 0;
+    for (const email of ADMIN_EMAILS) {
+      const dedupKey = platformStaffAlertDedupKey(eventType, eventId, email, ADMIN_EMAILS.length);
+      const recorded = await db
+        .insert(emailEvents)
+        .values({ eventType, recipientEmail: email, dedupKey, userId: null, orgId: null, status: ALERT_RECORDED, metadata: { ...metadata, eventId } })
+        .onConflictDoNothing({ target: emailEvents.dedupKey })
+        .returning({ id: emailEvents.id });
+      recordedCount += recorded.length;
+    }
+    console.log(`[platform-staff-alert] recorded ${eventType} ${eventId} for Monitoring (no email)`);
+    res.json({ sent: false, duplicate: recordedCount === 0, eventId, runId: null });
     return;
   }
 

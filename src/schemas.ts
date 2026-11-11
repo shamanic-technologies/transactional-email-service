@@ -323,6 +323,42 @@ export const SentEmailsResponseSchema = z
   })
   .openapi("SentEmailsResponse");
 
+// --- GET /internal/monitoring-alerts (SIGNUP-EMAILS-1111) ---
+
+export const MonitoringAlertsQuerySchema = z
+  .object({
+    days: z.coerce.number().int().min(1).max(90).optional().openapi({ description: "UTC days in the series, today included. Default 30." }),
+  })
+  .strict()
+  .openapi("MonitoringAlertsQuery");
+
+export const MonitoringAlertsResponseSchema = z
+  .object({
+    days: z.number().int(),
+    generatedAt: z.string().openapi({ format: "date-time" }),
+    alerts: z.array(
+      z.object({
+        eventType: z.string().openapi({ description: "The alert, as callers raise it (e.g. campaign_failing)." }),
+        label: z.string().openapi({ description: "What is broken, in plain words." }),
+        verdict: z.enum(["broken", "ok"]).openapi({ description: "broken = raised in the last 24 h (show red). ok = not raised in the last 24 h." }),
+        reason: z.string().openapi({ description: "The verdict in one sentence." }),
+        lastRaisedAt: z.string().nullable().openapi({ format: "date-time" }),
+        daily: z.array(z.object({ day: z.string().openapi({ description: "UTC day, YYYY-MM-DD" }), count: z.number().int() })).openapi({ description: "Times raised per UTC day, oldest first, zero-filled." }),
+        recent: z
+          .array(
+            z.object({
+              raisedAt: z.string().openapi({ format: "date-time" }),
+              orgId: z.string().nullable(),
+              campaignId: z.string().nullable(),
+              metadata: z.record(z.string(), z.unknown()).nullable().openapi({ description: "The facts the caller raised it with." }),
+            })
+          )
+          .openapi({ description: "Latest occurrences in the window, newest first, at most 20." }),
+      })
+    ),
+  })
+  .openapi("MonitoringAlertsResponse");
+
 // --- GET /internal/subscriber-links/:linkId (NEWSLETTER-WHO-CLICKED-1024) ---
 
 export const SubscriberLinkResolutionSchema = z
@@ -1229,6 +1265,24 @@ registry.registerPath({
   responses: {
     200: { description: "One page of sent emails", content: { "application/json": { schema: SentEmailsResponseSchema } } },
     400: { description: "Invalid query or cursor", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/monitoring-alerts",
+  summary: "Monitoring alerts raised, for dashboard v2 Monitoring (SIGNUP-EMAILS-1111)",
+  description:
+    "Every monitoring alert type (a provider out of credits, a campaign failing, a trigger silent, a sending domain blocklisted, a " +
+    "newsletter release halted or stalled...) with its verdict, its daily series and its latest occurrences. These alerts are " +
+    "recorded, never emailed (owner 2026-10-22): this read is the only place staff see them. Broken first.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { query: MonitoringAlertsQuerySchema },
+  responses: {
+    200: { description: "Every alert type, broken first", content: { "application/json": { schema: MonitoringAlertsResponseSchema } } },
+    400: { description: "Invalid query", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });

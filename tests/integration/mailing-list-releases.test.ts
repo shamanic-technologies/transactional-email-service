@@ -154,6 +154,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await sql`TRUNCATE TABLE mailing_lists CASCADE`;
+  await sql`DELETE FROM email_events WHERE event_type LIKE 'mailing_list_release_%'`;
   resetReleaseWorkerState();
 
   vi.mocked(sendEmail).mockReset();
@@ -709,8 +710,9 @@ describe("every address is verified before its slice is sent", () => {
     const BALANCE_502 =
       'apollo-service POST /email-verifications 502: {"error":"billing-service: insufficient balance for org"}';
 
-    function stallAlerts() {
-      return vi.mocked(sendEmail).mock.calls.filter(([p]) => p.tag === "mailing-list-release-stalled");
+    // A stall is a monitoring alert: recorded for dashboard v2 Monitoring, never emailed (SIGNUP-EMAILS-1111).
+    async function stallAlerts() {
+      return sql`SELECT recipient_email, status, metadata FROM email_events WHERE event_type = 'mailing_list_release_stalled'`;
     }
 
     it("tells staff exactly once, with the upstream reason, after half an hour of nothing sent", async () => {
@@ -720,25 +722,25 @@ describe("every address is verified before its slice is sent", () => {
 
       // 29 minutes of failing ticks: not yet.
       for (let minute = 0; minute < 30; minute++) await runReleaseTick(at(minute));
-      expect(stallAlerts()).toHaveLength(0);
+      expect(await stallAlerts()).toHaveLength(0);
 
       // The 31st consecutive failure, 30 minutes after the first: now.
       await runReleaseTick(at(30));
-      expect(stallAlerts()).toHaveLength(1);
+      expect(await stallAlerts()).toHaveLength(1);
 
       // And never again for the same stall, however long it lasts.
       for (let minute = 31; minute < 180; minute++) await runReleaseTick(at(minute));
-      expect(stallAlerts()).toHaveLength(1);
+      expect(await stallAlerts()).toHaveLength(1);
 
-      const [[alert]] = stallAlerts();
-      expect(alert.to).toBe("kevin.lourd@gmail.com");
-      expect(alert.subject).toContain("Stuck newsletter");
-      expect(alert.htmlBody).toContain("insufficient balance");
-      expect(alert.textBody).toContain("insufficient balance");
-      expect(alert.textBody).toContain("2026-10-01T08:00:00.000Z");
-      expect(alert.textBody).toContain("0 of 50, 50 waiting");
-      expect(alert.textBody).not.toContain("{{");
-      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [alert] = await stallAlerts();
+      expect(alert.recipient_email).toBe("kevin.lourd@gmail.com");
+      expect(alert.status).toBe("recorded");
+      expect(alert.metadata.subject).toBe("Stuck newsletter");
+      expect(alert.metadata.reason).toContain("insufficient balance");
+      expect(alert.metadata.stalledSince).toBe("2026-10-01T08:00:00.000Z");
+      expect(alert.metadata.reached).toBe(0);
+      expect(alert.metadata.remaining).toBe(50);
+      expect(sendEmail).not.toHaveBeenCalled();
 
       const [row] = await sql`
         SELECT stall_ticks, stall_reason, stall_alerted_at FROM mailing_list_releases WHERE id = ${created.body.releaseId}
@@ -766,7 +768,7 @@ describe("every address is verified before its slice is sent", () => {
       vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
       for (let minute = 21; minute < 41; minute++) await runReleaseTick(at(minute));
 
-      expect(stallAlerts()).toHaveLength(0);
+      expect(await stallAlerts()).toHaveLength(0);
     });
 
     it("raises nothing on normal ticks", async () => {
@@ -775,7 +777,7 @@ describe("every address is verified before its slice is sent", () => {
 
       for (let minute = 0; minute < 60; minute++) await runReleaseTick(at(minute));
 
-      expect(stallAlerts()).toHaveLength(0);
+      expect(await stallAlerts()).toHaveLength(0);
       expect(mailed()).toHaveLength(50);
     });
 
@@ -785,28 +787,14 @@ describe("every address is verified before its slice is sent", () => {
 
       vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
       for (let minute = 0; minute <= 30; minute++) await runReleaseTick(at(minute));
-      expect(stallAlerts()).toHaveLength(1);
+      expect(await stallAlerts()).toHaveLength(1);
 
       vi.mocked(fetchVerdicts).mockImplementation(verdicts());
       await runReleaseTick(at(31));
 
       vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
       for (let minute = 32; minute <= 62; minute++) await runReleaseTick(at(minute));
-      expect(stallAlerts()).toHaveLength(2);
-    });
-
-    it("retries the alert on the next tick when sending it failed", async () => {
-      await seedList(50);
-      await createRelease({ subject: "Alert lost", body: "hi", dailyLimit: 1000 });
-      vi.mocked(fetchVerdicts).mockRejectedValue(new VerificationUnavailableError(BALANCE_502));
-      vi.mocked(sendEmail).mockRejectedValueOnce(new Error("email-gateway 503"));
-
-      for (let minute = 0; minute <= 31; minute++) await runReleaseTick(at(minute));
-
-      // First attempt (minute 30) threw, second (minute 31) went out; nothing after.
-      expect(stallAlerts()).toHaveLength(2);
-      for (let minute = 32; minute < 40; minute++) await runReleaseTick(at(minute));
-      expect(stallAlerts()).toHaveLength(2);
+      expect(await stallAlerts()).toHaveLength(2);
     });
   });
 
@@ -848,10 +836,13 @@ describe("a release stops itself when the provider's outcomes go bad", () => {
     expect(progress.status).toBe("halted");
     expect(progress.haltedReason).toContain("bounced");
 
-    const alerts = vi.mocked(sendEmail).mock.calls.filter(([p]) => p.tag === "mailing-list-release-halted");
+    // A halt is a monitoring alert: recorded for Monitoring, never emailed (SIGNUP-EMAILS-1111).
+    expect(vi.mocked(sendEmail).mock.calls.filter(([p]) => p.tag === "mailing-list-release-halted")).toHaveLength(0);
+    const alerts = await sql`SELECT recipient_email, status, metadata FROM email_events WHERE event_type = 'mailing_list_release_halted'`;
     expect(alerts).toHaveLength(1);
-    expect(alerts[0][0].to).toBe("kevin.lourd@gmail.com");
-    expect(alerts[0][0].htmlBody).toContain("Going badly");
+    expect(alerts[0].status).toBe("recorded");
+    expect(alerts[0].metadata.subject).toBe("Going badly");
+    expect(alerts[0].metadata.releaseId).toBe(releaseId);
 
     // And it sends nothing further.
     const sentAfter = mailed().length;

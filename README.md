@@ -77,6 +77,8 @@ Same body, dedup, template resolution, run tracking and response shape as `POST 
 
 Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails` and `ccEmails` are rejected for the same reason.
 
+**Monitoring alerts are recorded, never emailed** (SIGNUP-EMAILS-1111, owner 2026-10-22: a monitoring alert is red on dashboard v2 Monitoring, never an email): `provider_credits_exhausted`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck` (and `sending_domain_blocklisted` on `/platform-staff-alert`, the newsletter release halt/stall raised by the worker) keep their validation and dedup bound, but write one `email_events` row with status `recorded` and reach no gateway, no run, no template. Response: `{ results: [{ email, sent: false, reason: "monitoring_alert" | "duplicate" }] }`. Read them with `GET /internal/monitoring-alerts`. Business news (signups, payment method removed, daily digest, uncollectable debt) is still emailed. The alert sections below describe each alert's facts and dedup; where they say "mails staff", read "records for Monitoring".
+
 With no acting user, the `email_events` row stores `user_id = NULL`, the runs-service run is created org-only, no `x-user-id` is forwarded downstream, and no actor email is added to metadata.
 
 ```bash
@@ -280,6 +282,10 @@ LEDGER-HISTORY-1024: a subscriber who is also a lead is ONE ledger subject. Reso
 **Internal endpoint** — requires `x-api-key` only. Query: `after` (the previous page's `nextCursor`), `limit` (1-500, default 200).
 
 Every transactional email sent to a client, so it shows in that person's Unibox thread (TX-EMAIL-IN-UNIBOX-1024, read by crm-service). Sending is unchanged; the message put on the wire (subject, HTML, text, from) is stored on the `email_events` row in the same write that marks it `sent`, with `sent_at`. Served: `sent` rows only (a failed send never appears), oldest first by `sentAt` then `id`, staff-routed alerts excluded. Returns `{ emails: [{ id, eventType, recipientEmail, orgId (internal org UUID; null for an org-less send or a Feb 2026 row predating internal ids), brandIds, from, subject, textBody, htmlBody, sentAt, messageSource }], nextCursor }`. `messageSource`: `stored` (exact), `replayed` (sent before 2026-10-24, re-rendered from the current template with the stored variables), `unavailable` (that template is gone; subject and bodies null). Re-reading from a slightly older cursor is safe; dedupe on `id`.
+
+### `GET /internal/monitoring-alerts`
+
+**Internal endpoint** — requires `x-api-key` only. Query: `days` (1-90, default 30). Read by dashboard v2 Monitoring (SIGNUP-EMAILS-1111). Every monitoring alert type with `{ eventType, label, verdict: "broken" | "ok", reason, lastRaisedAt, daily: [{ day, count }], recent: [{ raisedAt, orgId, campaignId, metadata }] }`, broken first. `broken` = raised in the last 24 h. History includes alerts that were still emailed before this change.
 
 ### `GET /internal/subscriber-links/{linkId}`
 
