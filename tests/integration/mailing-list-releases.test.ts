@@ -1606,6 +1606,31 @@ describe("relaunching a halted release to the subscribers it never sent to (NEWS
     expect(recipients).toHaveLength(11 - 3);
   });
 
+  it("a send the gateway could not confirm (504 send_outcome_unknown) is settled as unknown and never re-sent by a relaunch (SIGNUP-EMAILS-1111)", async () => {
+    const { SendOutcomeUnknownError } = await import("../../src/lib/send-outcome.js");
+    const { OUTCOME_UNKNOWN_REASON } = await import("../../src/lib/release-pacing.js");
+    await seedList(10);
+    const created = await createRelease({ subject: "unsure", body: "hi", dailyLimit: 5 });
+    const releaseId = created.body.releaseId as string;
+    let first: string | undefined;
+    vi.mocked(sendEmail).mockImplementation(async (p: { to: string }) => {
+      first ??= p.to;
+      if (p.to === first) throw new SendOutcomeUnknownError('Email sending failed (504): {"code":"send_outcome_unknown"}');
+    });
+
+    await drain();
+
+    const [row] = await sql<Array<{ status: string; reason: string }>>`
+      SELECT status, reason FROM mailing_list_release_recipients WHERE release_id = ${releaseId}::uuid AND email = ${first!}`;
+    expect(row).toEqual({ status: "failed", reason: OUTCOME_UNKNOWN_REASON });
+
+    await halt(releaseId);
+    const res = await relaunch(releaseId);
+    expect(res.status).toBe(201);
+    expect(await recipientsOf(res.body.releaseId)).not.toContain(first);
+    expect(await recipientsOf(res.body.releaseId)).toHaveLength(5);
+  });
+
   it("a relaunch of a relaunch excludes what every ancestor sent", async () => {
     const { releaseId, sent: firstDay } = await haltedAfterADay();
     const second = await relaunch(releaseId);

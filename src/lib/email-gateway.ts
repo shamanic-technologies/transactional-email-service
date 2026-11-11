@@ -1,4 +1,5 @@
 import type { WorkflowHeaders } from "./runs-client.js";
+import { gatewaySendError } from "./send-outcome.js";
 import { FOUNDER_EMAIL } from "./founder.js";
 import type { DeliveryStream } from "./delivery-stream.js";
 import type { OutcomeSubject } from "./outcome-subject.js";
@@ -107,7 +108,7 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(`Email sending failed (${response.status}): ${JSON.stringify(errorBody)}`);
+    throw gatewaySendError(response.status, errorBody);
   }
 }
 
@@ -155,6 +156,6 @@ export async function sendOrglessPlatformEmail(params: SendOrglessPlatformEmailP
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(`Email sending failed (${response.status}): ${JSON.stringify(errorBody)}`);
+    throw gatewaySendError(response.status, errorBody);
   }
 }

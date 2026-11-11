@@ -483,7 +483,7 @@ A release reads its own delivery outcomes back from email-gateway (`GET /public/
 }
 ```
 
-**Headers:** `x-campaign-id` is required (NEWSLETTER-CAMPAIGN-1108): the campaign of the `x-org-id` org this release runs under. Every address check and send the release makes is booked on that campaign and held by its budget. No campaign: **400** `reason: "campaign_required"`; a campaign that org does not hold (read from campaign-service): **400** `reason: "campaign_not_found"`; nothing is written either way. No `x-brand-id`: the campaign's brands are the release's. A relaunch keeps its source's campaign; a source with none (started before 2026-11-08) takes the relaunch request's `x-campaign-id`, else 400. distribute.you's newsletter runs under the Distribute.you brand's newsletter campaign (unit `23781977-f496-4a1e-b0a3-757b72ceddc5`, the « Newsletter email sent » part of sales funnel campaign `5f85405e-39a0-4ce7-91fb-5163be6fb399`).
+**Headers:** `x-campaign-id` is required (NEWSLETTER-CAMPAIGN-1108): the campaign of the `x-org-id` org this release runs under. Every address check and send the release makes is booked on that campaign and held by its budget. No campaign: **400** `reason: "campaign_required"`; a campaign that org does not hold (read from campaign-service): **400** `reason: "campaign_not_found"`; nothing is written either way. No `x-brand-id`: the campaign's brands are the release's. A relaunch never re-sends an address the gateway answered 504 `send_outcome_unknown` for (settled `failed` with the unknown-outcome reason: it may have been delivered). A relaunch keeps its source's campaign; a source with none (started before 2026-11-08) takes the relaunch request's `x-campaign-id`, else 400. distribute.you's newsletter runs under the Distribute.you brand's newsletter campaign (unit `23781977-f496-4a1e-b0a3-757b72ceddc5`, the « Newsletter email sent » part of sales funnel campaign `5f85405e-39a0-4ce7-91fb-5163be6fb399`).
 
 `dailyLimit` is required and has no default: the pace is the reason a release exists, and this service will not pick one on staff's behalf. Pick it for the sending reputation you have, not the list you hold — a sending subdomain two weeks old with a few hundred messages of lifetime volume is throttled or foldered by Gmail and Outlook if it jumps to tens of thousands.
 
@@ -566,7 +566,7 @@ Templates are deployed by calling services at startup via `PUT /templates`. The 
 
 Monthly per-brand dedup caps a send to at most once per org per brand per calendar month. Brand and month derive entirely from the existing request (`x-brand-id` header, or `brandIds` body field). A send in a new calendar month, or for a different brand, goes through; a repeat within the same brand and month returns `{ sent: false, reason: "duplicate" }`. If no brand identity is present the event falls through to no-dedup (repeatable).
 
-Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`) regardless of the caller's identity. That list is hardcoded in `src/lib/staff-recipients.ts` (event set in `src/lib/staff-events.ts`), never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
+Admin notification events (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`) are always routed to the staff recipient list (`kevin.lourd@gmail.com`; the monitoring alerts among them are only recorded, never emailed, see `POST /platform-send`) regardless of the caller's identity. That list is hardcoded in `src/lib/staff-recipients.ts` (event set in `src/lib/staff-events.ts`), never read from the environment, so it cannot drift or be disabled by a missing variable. Their metadata is enriched with the acting user's email under `email` when the caller did not supply one and there is an acting user; a machine caller with no acting user sends no actor metadata at all.
 
 `campaign_failing` is raised by campaign-service when a campaign has failed every run for a sustained stretch (once per failing episode, latched on the campaign). Staff only: no `recipientEmail`/`bccEmails`/`ccEmails` on either route. Required non-empty metadata: `campaignId`, `consecutiveFailures`, `failingSince`, `retryInterval`; optional `campaignName`, `featureSlug`, `brandId`, `whereToLook`. The campaign is never stopped by this; the customer is never told by it.
 
@@ -710,6 +710,8 @@ src/
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
+    monitoring-alerts.ts # Alerts recorded for dashboard v2 Monitoring, never emailed; GET /internal/monitoring-alerts reader
+    send-outcome.ts     # Gateway 504 send_outcome_unknown -> SendOutcomeUnknownError: maybe delivered, never re-sent
     staff-events.ts     # Event types routed to the staff list instead of a client (ADMIN_NOTIFICATION_EVENTS)
     sign-rendered.ts    # Dresses a rendered customer template as distribute.you (layout / why); shared by send, preview, Unibox replay
     sent-emails.ts      # Stores the message a send put on the wire; serves sent client emails for the Unibox
@@ -736,6 +738,7 @@ src/
     outcome-backfill.ts # POST /internal/outcome-backfill (declare past release sends' outcomes)
     ledger-subjects.ts  # POST /internal/ledger-subjects/checks + /leads (ledger subjects: past checks, subscriber == lead)
     sent-emails.ts      # GET /internal/sent-emails (sent client emails, for the Unibox thread)
+    monitoring-alerts.ts # GET /internal/monitoring-alerts (alerts recorded for dashboard v2 Monitoring)
     subscriber-links.ts # GET /internal/subscriber-links/:linkId (who clicked a newsletter link)
     newsletter-units.ts # GET /internal/mailing-list-releases, POST /internal/newsletter-units/declare
   templates/
