@@ -70,7 +70,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   fetchSpy = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
   vi.stubGlobal("fetch", fetchSpy);
-  mockValues.mockReturnValue({ onConflictDoUpdate: mockOnConflict });
+  mockValues.mockReturnValue({ onConflictDoUpdate: mockOnConflict, onConflictDoNothing: mockOnConflict });
   mockOnConflict.mockReturnValue({ returning: mockReturning });
   mockReturning.mockResolvedValue([{ id: "event-row-1" }]);
   mockSet.mockReturnValue({ where: mockWhere });
@@ -85,93 +85,6 @@ afterEach(() => {
 });
 
 describe("POST /platform-staff-alert", () => {
-  it("delivers one email to the staff list with no org and no user, on a platform run", async () => {
-    const res = await post(BODY);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ sent: true, duplicate: false, eventId: BODY.eventId, runId: "platform-run-1" });
-    expect(createPlatformRun).toHaveBeenCalledWith({ serviceName: "transactional-email-service", taskName: "email-sending_domain_blocklisted" });
-    expect(createRun).not.toHaveBeenCalled();
-    expect(resolveUserEmail).not.toHaveBeenCalled();
-    expect(updatePlatformRun).toHaveBeenCalledWith("platform-run-1", "completed");
-
-    const calls = gatewayCalls();
-    expect(calls).toHaveLength(ADMIN_EMAILS.length);
-    const [, options] = calls[0];
-    expect(options.headers["x-org-id"]).toBeUndefined();
-    expect(options.headers["x-user-id"]).toBeUndefined();
-    expect(options.headers["x-run-id"]).toBe("platform-run-1");
-    const sent = JSON.parse(options.body);
-    expect(sent.to).toBe(ADMIN_EMAILS[0]);
-    expect(sent.subject).toBe("boostdistribute.com is on the SURBL blocklist");
-    expect(sent.bcc).toBeUndefined();
-    expect(sent.cc).toBeUndefined();
-    for (const value of Object.values(METADATA)) {
-      expect(sent.textBody).toContain(value);
-      expect(sent.htmlBody).toContain(value);
-    }
-    expect(sent.htmlBody).toContain(`href="${METADATA.removalUrl}"`);
-    // Staff mail: no brand layout, no why sign-off
-    expect(sent.textBody).not.toContain("Revenue made easy");
-
-    expect(mockValues).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: "sending_domain_blocklisted",
-        orgId: null,
-        userId: null,
-        dedupKey: `platform-staff-alert:sending_domain_blocklisted:${BODY.eventId}`,
-        status: "pending",
-      }),
-    );
-    expect(mockSet).toHaveBeenLastCalledWith(expect.objectContaining({ status: "sent" }));
-  });
-
-  it("claims only a NEW or a FAILED occurrence: a sent one is never reclaimed", async () => {
-    await post(BODY);
-    const [[conflict]] = mockOnConflict.mock.calls;
-    expect(conflict.set).toMatchObject({ status: "pending", errorMessage: null });
-    expect(conflict.setWhere).toBeDefined();
-  });
-
-  it("the same event id twice delivers once, and the second answer says duplicate", async () => {
-    const first = await post(BODY);
-    expect(first.status).toBe(200);
-    expect(first.body.sent).toBe(true);
-
-    // The occurrence is now sent: the conflict update's setWhere (status = failed) matches nothing
-    mockReturning.mockResolvedValueOnce([]);
-    const second = await post(BODY);
-
-    expect(second.status).toBe(200);
-    expect(second.body).toEqual({ sent: false, duplicate: true, eventId: BODY.eventId, runId: null });
-    expect(gatewayCalls()).toHaveLength(ADMIN_EMAILS.length);
-    expect(createPlatformRun).toHaveBeenCalledTimes(1);
-  });
-
-  it("a failed delivery is a 502 that leaves the event id free for the retry", async () => {
-    fetchSpy.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: "boom" }) });
-    const res = await post(BODY);
-
-    expect(res.status).toBe(502);
-    expect(res.body.code).toBe("delivery_failed");
-    expect(mockSet).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
-    expect(updatePlatformRun).toHaveBeenCalledWith("platform-run-1", "failed", expect.any(String));
-
-    // The retry reclaims the failed row and sends
-    const retry = await post(BODY);
-    expect(retry.status).toBe(200);
-    expect(retry.body.sent).toBe(true);
-  });
-
-  it("a run that cannot be opened is a 502 and frees the event id", async () => {
-    vi.mocked(createPlatformRun).mockRejectedValueOnce(new Error("runs down"));
-    const res = await post(BODY);
-    expect(res.status).toBe(502);
-    expect(res.body.code).toBe("run_failed");
-    expect(gatewayCalls()).toHaveLength(0);
-    expect(mockSet).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" }));
-  });
-
   it("a missing required field is a 400 naming it", async () => {
     const { removalUrl: _r, domain: _d, ...rest } = METADATA;
     const res = await post({ ...BODY, metadata: { ...rest, listName: "  " } });
@@ -230,5 +143,28 @@ describe("POST /platform-staff-alert inbox_placement_below_bar (retired)", () =>
     expect(res.body.code).toBe("event_not_platform_staff_alert");
     expect(createPlatformRun).not.toHaveBeenCalled();
     expect(gatewayCalls()).toHaveLength(0);
+  });
+
+  it("records the alert for Monitoring and emails nobody (SIGNUP-EMAILS-1111)", async () => {
+    const res = await post(BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: false, duplicate: false, eventId: BODY.eventId, runId: null });
+    expect(gatewayCalls()).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(createPlatformRun).not.toHaveBeenCalled();
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sending_domain_blocklisted", status: "recorded", orgId: null, metadata: { ...METADATA, eventId: BODY.eventId } })
+    );
+  });
+
+  it("the same event id twice records once, and the second answer says duplicate", async () => {
+    mockReturning.mockResolvedValueOnce([{ id: "event-row-1" }]).mockResolvedValueOnce([]);
+    const first = await post(BODY);
+    const second = await post(BODY);
+
+    expect(first.body.duplicate).toBe(false);
+    expect(second.body.duplicate).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

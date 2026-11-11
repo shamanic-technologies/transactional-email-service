@@ -57,48 +57,30 @@ afterAll(async () => {
 });
 
 describe("POST /platform-staff-alert (database-backed)", () => {
-  it("delivers once per event id; the repeat answers duplicate and sends nothing", async () => {
+  // A monitoring alert: recorded for dashboard v2 Monitoring, never emailed (SIGNUP-EMAILS-1111).
+  it("records once per event id and emails nobody; the repeat answers duplicate", async () => {
     const first = await post(BODY);
     expect(first.status).toBe(200);
-    expect(first.body).toMatchObject({ sent: true, duplicate: false, eventId: BODY.eventId });
+    expect(first.body).toEqual({ sent: false, duplicate: false, eventId: BODY.eventId, runId: null });
 
     const second = await post(BODY);
     expect(second.status).toBe(200);
     expect(second.body).toEqual({ sent: false, duplicate: true, eventId: BODY.eventId, runId: null });
 
-    expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(ADMIN_EMAILS.length);
+    expect(sendOrglessPlatformEmail).not.toHaveBeenCalled();
     const rows = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "sending_domain_blocklisted"));
     expect(rows).toHaveLength(ADMIN_EMAILS.length);
-    expect(rows[0]).toMatchObject({ status: "sent", orgId: null, userId: null, recipientEmail: ADMIN_EMAILS[0] });
-  });
-
-  it("a failed delivery is retried by the same event id and sends exactly once", async () => {
-    vi.mocked(sendOrglessPlatformEmail).mockRejectedValueOnce(new Error("Email sending failed (500)"));
-    const failed = await post(BODY);
-    expect(failed.status).toBe(502);
-    let [row] = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "sending_domain_blocklisted"));
-    expect(row.status).toBe("failed");
-
-    const retry = await post(BODY);
-    expect(retry.status).toBe(200);
-    expect(retry.body.sent).toBe(true);
-
-    const again = await post(BODY);
-    expect(again.body.duplicate).toBe(true);
-
-    expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(2);
-    const rows = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "sending_domain_blocklisted"));
-    expect(rows).toHaveLength(1);
-    [row] = rows;
-    expect(row.status).toBe("sent");
-    expect(row.errorMessage).toBeNull();
+    expect(rows[0]).toMatchObject({ status: "recorded", orgId: null, userId: null, recipientEmail: ADMIN_EMAILS[0] });
+    expect(rows[0].metadata).toMatchObject({ domain: "boostdistribute.com", eventId: BODY.eventId });
   });
 
   it("a different event id is a new alert", async () => {
     await post(BODY);
     const other = await post({ ...BODY, eventId: "boostdistribute.com:Spamhaus DBL:2026-10-16" });
-    expect(other.body.sent).toBe(true);
-    expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(2 * ADMIN_EMAILS.length);
+    expect(other.body.duplicate).toBe(false);
+    const rows = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "sending_domain_blocklisted"));
+    expect(rows).toHaveLength(2 * ADMIN_EMAILS.length);
+    expect(sendOrglessPlatformEmail).not.toHaveBeenCalled();
   });
 });
 

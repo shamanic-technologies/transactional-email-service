@@ -687,6 +687,120 @@
           "messageSource"
         ]
       },
+      "MonitoringAlertsResponse": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "eventType": {
+                  "type": "string",
+                  "description": "The alert, as callers raise it (e.g. campaign_failing)."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "What is broken, in plain words."
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "broken",
+                    "ok"
+                  ],
+                  "description": "broken = raised in the last 24 h (show red). ok = not raised in the last 24 h."
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "The verdict in one sentence."
+                },
+                "lastRaisedAt": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "date-time"
+                },
+                "daily": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "day": {
+                        "type": "string",
+                        "description": "UTC day, YYYY-MM-DD"
+                      },
+                      "count": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "day",
+                      "count"
+                    ]
+                  },
+                  "description": "Times raised per UTC day, oldest first, zero-filled."
+                },
+                "recent": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "raisedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "orgId": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "campaignId": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": {
+                          "nullable": true
+                        },
+                        "description": "The facts the caller raised it with."
+                      }
+                    },
+                    "required": [
+                      "raisedAt",
+                      "orgId",
+                      "campaignId",
+                      "metadata"
+                    ]
+                  },
+                  "description": "Latest occurrences in the window, newest first, at most 20."
+                }
+              },
+              "required": [
+                "eventType",
+                "label",
+                "verdict",
+                "reason",
+                "lastRaisedAt",
+                "daily",
+                "recent"
+              ]
+            }
+          }
+        },
+        "required": [
+          "days",
+          "generatedAt",
+          "alerts"
+        ]
+      },
       "SubscriberLinkResolution": {
         "type": "object",
         "properties": {
@@ -2801,6 +2915,66 @@
           },
           "400": {
             "description": "Invalid query or cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/monitoring-alerts": {
+      "get": {
+        "summary": "Monitoring alerts raised, for dashboard v2 Monitoring (SIGNUP-EMAILS-1111)",
+        "description": "Every monitoring alert type (a provider out of credits, a campaign failing, a trigger silent, a sending domain blocklisted, a newsletter release halted or stalled...) with its verdict, its daily series and its latest occurrences. These alerts are recorded, never emailed (owner 2026-10-22): this read is the only place staff see them. Broken first.",
+        "tags": [
+          "Internal"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "description": "UTC days in the series, today included. Default 30."
+            },
+            "required": false,
+            "description": "UTC days in the series, today included. Default 30.",
+            "name": "days",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every alert type, broken first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringAlertsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query",
             "content": {
               "application/json": {
                 "schema": {

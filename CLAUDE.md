@@ -206,6 +206,20 @@ and one its org does not hold (400 `campaign_not_found`, read from campaign-serv
 campaign pays is the caller's statement. A relaunch keeps its source's campaign, else takes the request's. Our
 newsletter's campaign: unit `23781977-f496-4a1e-b0a3-757b72ceddc5` (sales funnel campaign `5f85405e-…`, $140/week).
 
+## A monitoring alert is RECORDED, never emailed (SIGNUP-EMAILS-1111)
+
+Owner 2026-10-22: « no email in my inbox please »; a monitoring alert is red on dashboard v2 Monitoring.
+`src/lib/monitoring-alerts.ts` (`MONITORING_ALERTS`) names every alert: callers keep raising them on `/send`,
+`/platform-send`, `/platform-staff-alert` (same validation, same dedup bound) and the release worker raises its
+halt/stall the same way; each writes an `email_events` row with status `recorded` and reaches no gateway, no run, no
+template. `GET /internal/monitoring-alerts` serves them for Monitoring. Business news staff asked for (signups,
+payment method removed, digest, uncollectable debt) is not an alert and keeps its email. Never re-add an email
+path for a name in that list; a new alert goes in the list, not in `ADMIN_NOTIFICATION_EVENTS` alone.
+
+A `failed` row with `postmark-service POST /orgs/send: ... aborted due to timeout` is NOT proof the person got
+nothing: on 2026-11-11 the welcome to info@zenotris.com was delivered and opened twice while our row said failed
+(email-gateway retried a send that had gone out). Check `postmark_messages` before resending anything.
+
 ## Commands
 
 - `npm test` — run tests (Vitest)

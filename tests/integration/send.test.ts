@@ -370,9 +370,9 @@ describe("database records", () => {
   });
 });
 
-// --- provider_credits_exhausted, against the real unique dedup index ---
+// --- monitoring alerts, against the real unique dedup index (SIGNUP-EMAILS-1111) ---
 
-describe("provider_credits_exhausted", () => {
+describe("provider_credits_exhausted: recorded for Monitoring, never emailed", () => {
   const ORG_ONLY = { "x-org-id": "org_test" };
   const ALERT = {
     eventType: "provider_credits_exhausted",
@@ -387,83 +387,45 @@ describe("provider_credits_exhausted", () => {
     await seedStaffTemplates();
   });
 
-  it("mails staff once a day per org, however many times the wall is hit", async () => {
-    const first = await request(app)
-      .post("/platform-send")
-      .set("x-api-key", API_KEY)
-      .set(ORG_ONLY)
-      .send(ALERT);
-
+  it("records one row per org per day however many times the wall is hit, and emails nobody", async () => {
+    const first = await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
     expect(first.status).toBe(200);
-    expect(first.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
+    expect(first.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "monitoring_alert" }]);
 
-    for (let i = 0; i < 5; i++) {
-      const repeat = await request(app)
-        .post("/platform-send")
-        .set("x-api-key", API_KEY)
-        .set(ORG_ONLY)
-        .send(ALERT);
-
+    for (let i = 0; i < 3; i++) {
+      const repeat = await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
       expect(repeat.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: false, reason: "duplicate" }]);
     }
 
-    // One row, one delivery, whatever the caller did
     const rows = await db.select().from(emailEvents).where(eq(emailEvents.eventType, "provider_credits_exhausted"));
     expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe("sent");
-    expect(rows[0].userId).toBeNull();
+    expect(rows[0].status).toBe("recorded");
     expect(rows[0].metadata).toMatchObject({ provider: "Apollo.io", orgId: "org_test" });
-    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendEmail)).not.toHaveBeenCalled();
   });
 
-  it("alerts again the next calendar day", async () => {
+  it("is served by GET /internal/monitoring-alerts as broken, with today's count", async () => {
     await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
+    await request(app).post("/platform-send").set("x-api-key", API_KEY).set({ "x-org-id": "org_other" }).send(ALERT);
 
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    const res = await request(app).get("/internal/monitoring-alerts?days=7").set("x-api-key", API_KEY);
+    expect(res.status).toBe(200);
+    expect(res.body.days).toBe(7);
+    expect(res.body.alerts[0].eventType).toBe("provider_credits_exhausted");
+    expect(res.body.alerts[0].verdict).toBe("broken");
+    expect(res.body.alerts[0].daily).toHaveLength(7);
+    expect(res.body.alerts[0].daily[6].count).toBe(2);
+    expect(res.body.alerts[0].recent).toHaveLength(2);
+    expect(res.body.alerts[0].recent[0].metadata.provider).toBe("Apollo.io");
 
-    const tomorrow = await request(app)
-      .post("/platform-send")
-      .set("x-api-key", API_KEY)
-      .set(ORG_ONLY)
-      .send(ALERT);
-
-    vi.useRealTimers();
-
-    expect(tomorrow.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not silence another org's alert on the same day", async () => {
-    await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
-
-    const other = await request(app)
-      .post("/platform-send")
-      .set("x-api-key", API_KEY)
-      .set({ "x-org-id": "org_other" })
-      .send(ALERT);
-
-    expect(other.body.results).toEqual([{ email: "kevin.lourd@gmail.com", sent: true }]);
-    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(2);
-  });
-
-  it("renders the alert from the template this service registers on boot", async () => {
-    await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send(ALERT);
-
-    const [sent] = vi.mocked(sendEmail).mock.calls[0];
-    expect(sent.subject).toBe("Apollo.io is out of credits");
-    expect(sent.htmlBody).toContain("credits_remaining");
-    expect(sent.htmlBody).toContain("org_test");
-    expect(sent.htmlBody).not.toContain("{{");
+    const quiet = res.body.alerts.find((a: { eventType: string }) => a.eventType === "campaign_failing");
+    expect(quiet.verdict).toBe("ok");
+    expect(quiet.lastRaisedAt).toBeNull();
+    expect(quiet.daily.every((d: { count: number }) => d.count === 0)).toBe(true);
   });
 
   it("refuses an alert aimed at a customer address, and one with no facts", async () => {
-    const aimed = await request(app)
-      .post("/platform-send")
-      .set("x-api-key", API_KEY)
-      .set(ORG_ONLY)
-      .send({ ...ALERT, recipientEmail: "customer@test.com" });
-
+    const aimed = await request(app).post("/platform-send").set("x-api-key", API_KEY).set(ORG_ONLY).send({ ...ALERT, recipientEmail: "customer@test.com" });
     const factless = await request(app)
       .post("/platform-send")
       .set("x-api-key", API_KEY)
