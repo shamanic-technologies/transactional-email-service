@@ -79,6 +79,27 @@ describe("GET /internal/sent-newsletters", () => {
     expect(p3.nextCursor).toBe(p2.nextCursor);
   });
 
+  it("UNIBOX-NEWSLETTER-1113: a release naming no brand is its list's stated brand; no brand anywhere = null", async () => {
+    const [list] = await db.insert(mailingLists).values({ slug: "newsletter" }).returning();
+    const plain = await release(list.id, "Plain", "5e5e5e5e-1111-4000-a000-000000000011");
+    const own = await release(list.id, "Own brand", "5e5e5e5e-1111-4000-a000-000000000012", [BRAND]);
+    await db.insert(mailingListReleaseRecipients).values([
+      { releaseId: plain.id, email: "a@x.com", status: "sent", settledAt: new Date("2026-10-26T22:07:25Z") },
+      { releaseId: own.id, email: "a@x.com", status: "sent", settledAt: new Date("2026-10-27T22:07:25Z") },
+    ]);
+    expect((await feed()).emails.map((e) => e.brandIds)).toEqual([null, [BRAND]]);
+
+    const LIST_BRAND = "7c2d4e6f-8a1b-4c3d-9e5f-1a2b3c4d5e6f";
+    const put = await request(app).put("/mailing-lists/newsletter/brand").set("x-api-key", API_KEY).set("x-org-id", ORG).send({ brandId: LIST_BRAND });
+    expect(put.status).toBe(200);
+    expect(put.body).toEqual({ slug: "newsletter", brandId: LIST_BRAND });
+    // The past brandless release is now the list's brand; a release's own brands win.
+    expect((await feed()).emails.map((e) => e.brandIds)).toEqual([[LIST_BRAND], [BRAND]]);
+
+    expect((await request(app).put("/mailing-lists/nope/brand").set("x-api-key", API_KEY).set("x-org-id", ORG).send({ brandId: LIST_BRAND })).status).toBe(404);
+    expect((await request(app).put("/mailing-lists/newsletter/brand").set("x-api-key", API_KEY).set("x-org-id", ORG).send({ brandId: "x" })).status).toBe(400);
+  });
+
   it("refuses a cursor it never returned", async () => {
     const res = await request(app).get("/internal/sent-newsletters").query({ after: "garbage" }).set("x-api-key", API_KEY);
     expect(res.status).toBe(400);
