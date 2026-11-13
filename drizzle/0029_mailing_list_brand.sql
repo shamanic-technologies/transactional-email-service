@@ -1,0 +1,1 @@
+ALTER TABLE "mailing_lists" ADD COLUMN IF NOT EXISTS "brand_id" uuid;

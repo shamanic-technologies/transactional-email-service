@@ -148,6 +148,8 @@ a microsecond value would re-serve the same row forever.
 `GET /internal/sent-newsletters` serves every `mailing_list_release_recipients` row `sent` (one per release x subscriber,
 `sentAt` = `settled_at`, release subject / from / org / brandIds, list slug; no body), same cursor contract, index
 `idx_mailing_list_release_recipients_sent_feed`. crm-service files each on the subscriber's thread + states it `message_out`.
+`brandIds` = the release's own, else the list's stated brand (`mailing_lists.brand_id`, `PUT /mailing-lists/:slug/brand`);
+null = no brand known, crm files it NOWHERE (never on every brand of the org: our newsletter landed on the Loom demo brand).
 
 ## A newsletter link says WHO clicked: `dy_sub`, an opaque id (NEWSLETTER-WHO-CLICKED-1024)
 

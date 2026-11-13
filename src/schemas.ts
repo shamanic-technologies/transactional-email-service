@@ -332,7 +332,7 @@ export const SentNewsletterSchema = z
     listSlug: z.string().openapi({ description: "The mailing list the release went to." }),
     recipientEmail: z.string(),
     orgId: z.string().nullable().openapi({ description: "Internal org UUID that sent the release (its list's owner). Null when the release names no internal org id." }),
-    brandIds: z.array(z.string()).nullable().openapi({ description: "Brands the release was sent for. Null when it names none (the org's newsletter)." }),
+    brandIds: z.array(z.string()).nullable().openapi({ description: "Brands the email was sent for: the release's own, else its list's stated brand (PUT /mailing-lists/{slug}/brand). Null = no brand known: file it on no thread." }),
     from: z.string().nullable(),
     subject: z.string(),
     sentAt: z.string().openapi({ format: "date-time", description: "When this email was sent to this subscriber (settled_at)." }),
@@ -427,6 +427,12 @@ export const MailingListSubscribersResponseSchema = z
     subscribers: z.array(MailingListSubscriberSchema),
   })
   .openapi("MailingListSubscribersResponse");
+
+// UNIBOX-NEWSLETTER-1113: the brand a list writes for.
+export const SetListBrandRequestSchema = z
+  .object({ brandId: z.string().uuid().openapi({ description: "The brand this list writes for: every release naming no brand of its own is that brand's." }) })
+  .strict()
+  .openapi("SetListBrandRequest");
 
 export const AddSubscribersRequestSchema = z
   .object({
@@ -1572,6 +1578,28 @@ registry.registerPath({
     200: { description: "Add results", content: { "application/json": { schema: AddSubscribersResponseSchema } } },
     400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "put",
+  path: "/mailing-lists/{slug}/brand",
+  summary: "State the brand a mailing list writes for (UNIBOX-NEWSLETTER-1113)",
+  description:
+    "Every release of the list naming no brand of its own, past and future, is served as this brand's on GET /internal/sent-newsletters, " +
+    "so crm-service files each send on that brand's Unibox thread only. A list with no brand stated: its brandless releases are filed nowhere.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: { required: true, content: { "application/json": { schema: SetListBrandRequestSchema } } },
+  },
+  parameters: [mailingListSlugParam, platformOrgIdHeader],
+  responses: {
+    200: { description: "The list and its brand", content: { "application/json": { schema: z.object({ slug: z.string(), brandId: z.string() }) } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 

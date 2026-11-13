@@ -204,6 +204,13 @@
       "when": 1794577955771,
       "tag": "0028_sent_newsletters_feed",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794578788202,
+      "tag": "0029_mailing_list_brand",
+      "breakpoints": true
     }
   ]
 }

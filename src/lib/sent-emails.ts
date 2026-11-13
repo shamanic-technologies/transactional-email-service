@@ -138,7 +138,9 @@ export async function listSentEmails(opts: { after: { sentAt: Date; id: string }
  * newsletter email a release SENT one subscriber (`mailing_list_release_recipients` row, status `sent`, dated
  * `settled_at`), served for crm-service to file on the subscriber's Unibox thread as a message from the list's org.
  * One sent row = one item; a pending / failed / skipped / cancelled row is never served. The body stays here (one
- * per release, stamped per subscriber at send): the reader shows the subject.
+ * per release, stamped per subscriber at send): the reader shows the subject. `brandIds` = the brands the email was
+ * sent for: the release's own, else its list's stated brand (`mailing_lists.brand_id`); null = no brand known, and the
+ * reader files it on no thread.
  */
 export interface SentNewsletter {
   id: string;
@@ -157,7 +159,10 @@ export async function listSentNewsletters(opts: { after: { sentAt: Date; id: str
     ? sql`AND (x.settled_at > ${opts.after.sentAt.toISOString()}::timestamptz OR (x.settled_at = ${opts.after.sentAt.toISOString()}::timestamptz AND x.id > ${opts.after.id}::uuid))`
     : sql``;
   const rows = (await db.execute(sql`
-    SELECT x.id::text AS id, x.release_id::text AS release_id, l.slug, x.email, r.org_id, r.brand_ids, r.from_address, r.subject, x.settled_at
+    SELECT x.id::text AS id, x.release_id::text AS release_id, l.slug, x.email, r.org_id,
+           -- The release's own brands, else its list's (UNIBOX-NEWSLETTER-1113); none = null, filed nowhere.
+           COALESCE(NULLIF(r.brand_ids, '{}'::text[]), CASE WHEN l.brand_id IS NOT NULL THEN ARRAY[l.brand_id::text] END) AS brand_ids,
+           r.from_address, r.subject, x.settled_at
       FROM mailing_list_release_recipients x
       JOIN mailing_list_releases r ON r.id = x.release_id
       JOIN mailing_lists l ON l.id = r.list_id

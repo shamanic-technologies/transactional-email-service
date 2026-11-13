@@ -735,7 +735,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Brands the release was sent for. Null when it names none (the org's newsletter)."
+            "description": "Brands the email was sent for: the release's own, else its list's stated brand (PUT /mailing-lists/{slug}/brand). Null = no brand known: file it on no thread."
           },
           "from": {
             "type": "string",
@@ -1467,6 +1467,20 @@
         "required": [
           "raw"
         ]
+      },
+      "SetListBrandRequest": {
+        "type": "object",
+        "properties": {
+          "brandId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The brand this list writes for: every release naming no brand of its own is that brand's."
+          }
+        },
+        "required": [
+          "brandId"
+        ],
+        "additionalProperties": false
       },
       "RemoveSubscriberResponse": {
         "type": "object",
@@ -3836,6 +3850,112 @@
           },
           "404": {
             "description": "No such list, or the address is not on it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/brand": {
+      "put": {
+        "summary": "State the brand a mailing list writes for (UNIBOX-NEWSLETTER-1113)",
+        "description": "Every release of the list naming no brand of its own, past and future, is served as this brand's on GET /internal/sent-newsletters, so crm-service files each send on that brand's Unibox thread only. A list with no brand stated: its brandless releases are filed nowhere.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetListBrandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The list and its brand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": {
+                      "type": "string"
+                    },
+                    "brandId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "slug",
+                    "brandId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
             "content": {
               "application/json": {
                 "schema": {
