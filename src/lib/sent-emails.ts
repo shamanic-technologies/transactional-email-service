@@ -132,3 +132,51 @@ export async function listSentEmails(opts: { after: { sentAt: Date; id: string }
   const nextCursor = last ? encodeCursor(last.sentAt!, last.id) : opts.after ? encodeCursor(opts.after.sentAt, opts.after.id) : null;
   return { emails, nextCursor };
 }
+
+/**
+ * UNIBOX-NEWSLETTER-1113 (owner 2026-11-13: « une newsletter envoyée doit apparaître dans l'Unibox »): every
+ * newsletter email a release SENT one subscriber (`mailing_list_release_recipients` row, status `sent`, dated
+ * `settled_at`), served for crm-service to file on the subscriber's Unibox thread as a message from the list's org.
+ * One sent row = one item; a pending / failed / skipped / cancelled row is never served. The body stays here (one
+ * per release, stamped per subscriber at send): the reader shows the subject.
+ */
+export interface SentNewsletter {
+  id: string;
+  releaseId: string;
+  listSlug: string;
+  recipientEmail: string;
+  orgId: string | null;
+  brandIds: string[] | null;
+  from: string | null;
+  subject: string;
+  sentAt: string;
+}
+
+export async function listSentNewsletters(opts: { after: { sentAt: Date; id: string } | null; limit: number }): Promise<{ emails: SentNewsletter[]; nextCursor: string | null }> {
+  const after = opts.after
+    ? sql`AND (x.settled_at > ${opts.after.sentAt.toISOString()}::timestamptz OR (x.settled_at = ${opts.after.sentAt.toISOString()}::timestamptz AND x.id > ${opts.after.id}::uuid))`
+    : sql``;
+  const rows = (await db.execute(sql`
+    SELECT x.id::text AS id, x.release_id::text AS release_id, l.slug, x.email, r.org_id, r.brand_ids, r.from_address, r.subject, x.settled_at
+      FROM mailing_list_release_recipients x
+      JOIN mailing_list_releases r ON r.id = x.release_id
+      JOIN mailing_lists l ON l.id = r.list_id
+     WHERE x.status = 'sent' AND x.settled_at IS NOT NULL ${after}
+     ORDER BY x.settled_at ASC, x.id ASC
+     LIMIT ${opts.limit}
+  `)) as unknown as Array<{ id: string; release_id: string; slug: string; email: string; org_id: string; brand_ids: string[] | null; from_address: string | null; subject: string; settled_at: string | Date }>;
+  const emails = rows.map((r) => ({
+    id: r.id,
+    releaseId: r.release_id,
+    listSlug: r.slug,
+    recipientEmail: r.email,
+    orgId: internalOrgId(r.org_id),
+    brandIds: r.brand_ids && r.brand_ids.length > 0 ? r.brand_ids : null,
+    from: r.from_address,
+    subject: r.subject,
+    sentAt: new Date(r.settled_at).toISOString(),
+  }));
+  const last = emails[emails.length - 1];
+  const nextCursor = last ? encodeCursor(new Date(last.sentAt), last.id) : opts.after ? encodeCursor(opts.after.sentAt, opts.after.id) : null;
+  return { emails, nextCursor };
+}

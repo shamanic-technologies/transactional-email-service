@@ -323,6 +323,29 @@ export const SentEmailsResponseSchema = z
   })
   .openapi("SentEmailsResponse");
 
+// --- GET /internal/sent-newsletters (UNIBOX-NEWSLETTER-1113) ---
+
+export const SentNewsletterSchema = z
+  .object({
+    id: z.string().openapi({ description: "The release recipient row: one per (release, subscriber). Idempotency key for a mirror." }),
+    releaseId: z.string(),
+    listSlug: z.string().openapi({ description: "The mailing list the release went to." }),
+    recipientEmail: z.string(),
+    orgId: z.string().nullable().openapi({ description: "Internal org UUID that sent the release (its list's owner). Null when the release names no internal org id." }),
+    brandIds: z.array(z.string()).nullable().openapi({ description: "Brands the release was sent for. Null when it names none (the org's newsletter)." }),
+    from: z.string().nullable(),
+    subject: z.string(),
+    sentAt: z.string().openapi({ format: "date-time", description: "When this email was sent to this subscriber (settled_at)." }),
+  })
+  .openapi("SentNewsletter");
+
+export const SentNewslettersResponseSchema = z
+  .object({
+    emails: z.array(SentNewsletterSchema),
+    nextCursor: z.string().nullable().openapi({ description: "Pass as `after` to continue. An empty page returns the cursor sent; null only when nothing was ever sent." }),
+  })
+  .openapi("SentNewslettersResponse");
+
 // --- GET /internal/monitoring-alerts (SIGNUP-EMAILS-1111) ---
 
 export const MonitoringAlertsQuerySchema = z
@@ -1264,6 +1287,24 @@ registry.registerPath({
   request: { query: SentEmailsQuerySchema },
   responses: {
     200: { description: "One page of sent emails", content: { "application/json": { schema: SentEmailsResponseSchema } } },
+    400: { description: "Invalid query or cursor", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/sent-newsletters",
+  summary: "Every newsletter email sent to a subscriber, for their Unibox thread (UNIBOX-NEWSLETTER-1113)",
+  description:
+    "One item per release recipient row whose send succeeded (status sent), oldest first by sentAt then id, the whole history. " +
+    "Pending, failed, skipped and cancelled rows are never served. Rows can commit slightly out of sentAt order, so re-reading from " +
+    "a cursor a few minutes back is safe (dedupe on id). Read by crm-service to show each newsletter on the subscriber's Unibox thread.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { query: SentEmailsQuerySchema },
+  responses: {
+    200: { description: "One page of sent newsletter emails", content: { "application/json": { schema: SentNewslettersResponseSchema } } },
     400: { description: "Invalid query or cursor", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
   },

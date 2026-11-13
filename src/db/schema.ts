@@ -364,6 +364,10 @@ export const mailingListReleaseRecipients = pgTable(
       .where(sql`${table.status} = 'sent' AND ${table.unitDeclaredAt} IS NULL`),
     index("idx_mailing_list_release_recipients_claim").on(table.releaseId, table.status),
     index("idx_mailing_list_release_recipients_settled").on(table.releaseId, table.settledAt),
+    // UNIBOX-NEWSLETTER-1113: the sent-newsletters feed reads every sent row in (settled_at, id) order.
+    index("idx_mailing_list_release_recipients_sent_feed")
+      .on(table.settledAt, table.id)
+      .where(sql`${table.status} = 'sent'`),
   ]
 );
 

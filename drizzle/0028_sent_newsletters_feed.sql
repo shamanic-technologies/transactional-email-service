@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "idx_mailing_list_release_recipients_sent_feed" ON "mailing_list_release_recipients" USING btree ("settled_at","id") WHERE "mailing_list_release_recipients"."status" = 'sent';

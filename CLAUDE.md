@@ -144,6 +144,11 @@ No per-template rule: every template takes this path. Rows sent before 0024 are 
 (`messageSource: "replayed"`), never written back. `sent_at` is millisecond-precision on purpose: the cursor is ISO ms,
 a microsecond value would re-serve the same row forever.
 
+**Newsletters too (UNIBOX-NEWSLETTER-1113, owner 2026-11-13 « une newsletter envoyée doit apparaître dans l'Unibox »)**:
+`GET /internal/sent-newsletters` serves every `mailing_list_release_recipients` row `sent` (one per release x subscriber,
+`sentAt` = `settled_at`, release subject / from / org / brandIds, list slug; no body), same cursor contract, index
+`idx_mailing_list_release_recipients_sent_feed`. crm-service files each on the subscriber's thread + states it `message_out`.
+
 ## A newsletter link says WHO clicked: `dy_sub`, an opaque id (NEWSLETTER-WHO-CLICKED-1024)
 
 Every mailing-list send (sync update and paced release) stamps each subscriber's
