@@ -374,6 +374,14 @@ The blob may be comma-, semicolon-, tab- or newline-separated, and may mix bare 
 
 Returns `{ "slug": "investors", "email": "ada@fund.com", "removed": true }`, or 404 if the address is not on the list.
 
+#### `POST /mailing-lists/{slug}/subscribers/archive` and `/unarchive` (NEWSLETTER-ENGAGED-LIST-1119)
+
+Sets members aside without deleting them. Body `{ "emails": [...] (1-5000), "reason": "not_engaged_1119" }`; answers `{ slug, archived, alreadyArchived, notOnList }`. An archived member keeps its row, its id (ledger subject) and its `dy_sub` link id, and shows on `GET …/subscribers` with `archivedAt` / `archivedReason`. No new release (nor a relaunch, nor a direct update) reaches them, and a release created before the archive settles their waiting row `skipped_archived` (reason = the archive reason; `skippedArchived` on the release) before any slice is claimed. `/unarchive` takes exactly one of `{ "emails": [...] }` or `{ "reason": "..." }` (every member archived with that reason) and answers `{ slug, unarchived }`; they are in the next release.
+
+Why it exists (owner 2026-11-19): every issue From `news.distribute.you` landed in Gmail spam (seed tests 2026-11-19: 30/30 spam on Postmark AND SES; the same issue From `distribute.you` 10/10 Primary; a signup-code email From `news.distribute.you` 10/10 spam: the subdomain's reputation, not the content). The list was 30,013 addresses imported 2026-09-18, ~94 % prospects we had cold-emailed, real mail-client opens 0.1-0.2 % per issue since the first one. The `newsletter` list was cut to people who engaged (signups, paying clients, investors, a HUMAN click on our emails as instantly-service and crm-service judge it, a reply that was not a no); the rest archived with reason `not_engaged_1119`.
+
+**Pace from a damaged domain.** Re-warming = small daily volume to the most engaged recipients first, raised only while placement holds (Gmail sender guidelines; Postmark, SendGrid and Mailgun warm-up guides: start around 50-100 a day to engaged people, then step up by about 1.5-2x every few days while bounces stay under 2 % and complaints under 0.1 %). Next issues: `dailyLimit` 100, then 200 once a seed test of the live issue reads at least half of Gmail seeds in the inbox, then 400; archived members come back (by reason, in slices) only after two issues in a row inbox on seeds.
+
 #### `POST /mailing-lists/{slug}/updates`
 
 Sends a written update to every member Postmark is not suppressing.

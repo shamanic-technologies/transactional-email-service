@@ -1451,13 +1451,25 @@
           "addedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When the member was set aside (NEWSLETTER-ENGAGED-LIST-1119): no release reaches an archived member. Null = active."
+          },
+          "archivedReason": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
           "email",
           "optedOut",
           "optedOutReason",
-          "addedAt"
+          "addedAt",
+          "archivedAt",
+          "archivedReason"
         ]
       },
       "AddSubscribersResponse": {
@@ -1552,6 +1564,94 @@
           "email",
           "removed"
         ]
+      },
+      "ArchiveSubscribersResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "number",
+            "description": "Members archived by this call"
+          },
+          "alreadyArchived": {
+            "type": "number",
+            "description": "Members already archived (date and reason kept)"
+          },
+          "notOnList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "slug",
+          "archived",
+          "alreadyArchived",
+          "notOnList"
+        ]
+      },
+      "ArchiveSubscribersRequest": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3
+            },
+            "minItems": 1,
+            "maxItems": 5000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Why these members are set aside; /unarchive can restore every member of one reason."
+          }
+        },
+        "required": [
+          "emails",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "UnarchiveSubscribersResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "unarchived": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "slug",
+          "unarchived"
+        ]
+      },
+      "UnarchiveSubscribersRequest": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3
+            },
+            "minItems": 1,
+            "maxItems": 5000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
       },
       "PreviewUpdateResponse": {
         "type": "object",
@@ -1904,6 +2004,10 @@
             "type": "number",
             "description": "Addresses verified (apollo-service BounceVerify) just before their slice was sent and NOT sent because the verdict was anything but `valid` (catch_all, unknown, risky, invalid). The verdict is stored per recipient. They do not consume the daily allowance."
           },
+          "skippedArchived": {
+            "type": "number",
+            "description": "Addresses whose list member was archived after the release was created (NEWSLETTER-ENGAGED-LIST-1119): settled without a send, never mailed."
+          },
           "inFlight": {
             "type": "number",
             "description": "Addresses a worker is holding right now"
@@ -1959,6 +2063,7 @@
           "failed",
           "skippedOptedOut",
           "skippedUndeliverable",
+          "skippedArchived",
           "inFlight",
           "todayAllowance",
           "todayUsed",
@@ -2189,6 +2294,9 @@
           "skippedUndeliverable": {
             "type": "number"
           },
+          "skippedArchived": {
+            "type": "number"
+          },
           "verificationUnavailable": {
             "type": "number",
             "description": "Slices whose verdicts could not be obtained; nothing in them was sent and they return to pending."
@@ -2216,6 +2324,7 @@
           "failed",
           "skippedOptedOut",
           "skippedUndeliverable",
+          "skippedArchived",
           "verificationUnavailable",
           "completed",
           "halted",
@@ -3982,6 +4091,194 @@
                     "slug",
                     "brandId"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/subscribers/archive": {
+      "post": {
+        "summary": "Set members aside without deleting them (no release reaches them)",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. NEWSLETTER-ENGAGED-LIST-1119: an archived member stays on the list (row, ledger subject and link id kept) but no new release reaches them, and a release created before the archive settles them `skipped_archived`.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveSubscribersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveSubscribersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailing-lists/{slug}/subscribers/unarchive": {
+      "post": {
+        "summary": "Put archived members back, by address or by archive reason",
+        "description": "Staff-only. Mailing lists are platform-level (org-less) lists of bare email addresses. Opt-out state is never stored here: Postmark's broadcast stream owns the suppression list, and every read reconciles against it — asking Postmark only about the addresses on the list, and reusing an answer for at most a minute. A send reconciles with no reuse at all. NEWSLETTER-ENGAGED-LIST-1119: an archived member stays on the list (row, ledger subject and link id kept) but no new release reaches them, and a release created before the archive settles them `skipped_archived`.",
+        "tags": [
+          "Mailing lists"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "List slug, e.g. \"investors\". Lower-case letters, digits and hyphens."
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Internal org UUID used as the SENDING identity only (Postmark key + from-address resolution). Mailing lists are platform-level and are never filtered by organisation."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnarchiveSubscribersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnarchiveSubscribersResponse"
                 }
               }
             }
