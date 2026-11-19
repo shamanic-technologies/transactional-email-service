@@ -103,6 +103,8 @@ export interface TickReport {
   skippedOptedOut: number;
   /** Verified before sending with any verdict other than `valid`, and not sent. */
   skippedUndeliverable: number;
+  /** Waiting addresses whose member was archived since the release was created. */
+  skippedArchived: number;
   /** Slices whose verdicts could not be had, so nothing in them was sent this tick. */
   verificationUnavailable: number;
   completed: string[];
@@ -117,6 +119,7 @@ const EMPTY_REPORT = (): TickReport => ({
   failed: 0,
   skippedOptedOut: 0,
   skippedUndeliverable: 0,
+  skippedArchived: 0,
   verificationUnavailable: 0,
   completed: [],
   halted: [],
@@ -150,6 +153,7 @@ export interface ReleaseProgress {
   failed: number;
   skippedOptedOut: number;
   skippedUndeliverable: number;
+  skippedArchived: number;
   inFlight: number;
   remaining: number;
   todayUsed: number;
@@ -168,6 +172,7 @@ export async function readProgress(releaseId: string, now = new Date()): Promise
       count(*) FILTER (WHERE status = 'failed') AS failed,
       count(*) FILTER (WHERE status = 'skipped_opted_out') AS skipped,
       count(*) FILTER (WHERE status = 'skipped_undeliverable') AS skipped_undeliverable,
+      count(*) FILTER (WHERE status = 'skipped_archived') AS skipped_archived,
       count(*) FILTER (WHERE status = 'sending') AS in_flight,
       count(*) FILTER (WHERE status = 'pending') AS remaining,
       count(*) FILTER (WHERE status IN ('sent', 'failed') AND settled_at >= ${dayStart.toISOString()}::timestamptz) AS today_used
@@ -188,6 +193,7 @@ export async function readProgress(releaseId: string, now = new Date()): Promise
     failed: num("failed"),
     skippedOptedOut: num("skipped"),
     skippedUndeliverable: num("skipped_undeliverable"),
+    skippedArchived: num("skipped_archived"),
     inFlight,
     remaining: num("remaining"),
     todayUsed: num("today_used") + inFlight,
@@ -290,6 +296,27 @@ async function claimSlice(releaseId: string, limit: number): Promise<ClaimedReci
     email: r.email,
     subscriberId: r.subscriber_id,
   }));
+}
+
+/**
+ * NEWSLETTER-ENGAGED-LIST-1119: a release froze its recipients at creation, so a
+ * member archived since then is still `pending` on it. Settle those rows
+ * `skipped_archived` (reason = the archive reason) before any slice is claimed:
+ * an archived member is never mailed, whichever release they wait on.
+ */
+export async function settleArchived(releaseId: string, now: Date): Promise<number> {
+  const rows = await db.execute(raw`
+    UPDATE mailing_list_release_recipients r
+    SET status = 'skipped_archived', reason = coalesce(s.archived_reason, 'archived'), settled_at = ${now.toISOString()}::timestamptz
+    FROM mailing_list_subscribers s
+    WHERE r.release_id = ${releaseId}
+      AND r.status = 'pending'
+      AND s.list_id = (SELECT list_id FROM mailing_list_releases WHERE id = ${releaseId})
+      AND s.email = r.email
+      AND s.archived_at IS NOT NULL
+    RETURNING r.id
+  `);
+  return (rows as unknown as unknown[]).length;
 }
 
 async function settle(ids: string[], status: string, reason: string | null, now: Date): Promise<void> {
@@ -732,6 +759,7 @@ export async function runReleaseTick(now = new Date()): Promise<TickReport> {
 
       try {
         await settleStaleClaims(release.id, now);
+        report.skippedArchived += await settleArchived(release.id, now);
 
         if (await checkHealth(release, slug, now)) {
           report.halted.push(release.id);

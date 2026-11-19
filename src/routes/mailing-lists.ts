@@ -2,7 +2,7 @@ import { ensureLinkIds } from "../lib/subscriber-link-store.js";
 import { stampSubscriberLinks } from "../lib/subscriber-link.js";
 import { messageOf } from "../lib/db-error.js";
 import { Router, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { mailingLists, mailingListSubscribers, mailingListUpdates } from "../db/schema.js";
@@ -15,6 +15,8 @@ import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import {
   AddSubscribersRequestSchema,
+  ArchiveSubscribersRequestSchema,
+  UnarchiveSubscribersRequestSchema,
   SetListBrandRequestSchema,
   PreviewUpdateRequestSchema,
   SendUpdateRequestSchema,
@@ -168,6 +170,8 @@ router.get("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnly, 
         optedOut: suppression.isSuppressed(r.email),
         optedOutReason: suppression.reasonFor(r.email),
         addedAt: r.createdAt.toISOString(),
+        archivedAt: r.archivedAt ? r.archivedAt.toISOString() : null,
+        archivedReason: r.archivedReason ?? null,
       })),
     });
   } catch (error: any) {
@@ -257,6 +261,88 @@ router.delete("/mailing-lists/:slug/subscribers", requireApiKey, requireOrgIdOnl
   } catch (error: any) {
     console.error("Remove subscriber error:", error);
     res.status(500).json({ error: messageOf(error) || "Failed to remove subscriber" });
+  }
+});
+
+/**
+ * POST /mailing-lists/:slug/subscribers/archive (NEWSLETTER-ENGAGED-LIST-1119)
+ * Sets members aside without deleting them: no new release reaches them, and a
+ * release already created skips them. Reversible with /unarchive. A member
+ * already archived keeps its first date and reason.
+ */
+router.post("/mailing-lists/:slug/subscribers/archive", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  try {
+    const slug = readSlug(req, res);
+    if (!slug) return;
+    const parsed = ArchiveSubscribersRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+    const list = await findList(slug);
+    if (!list) {
+      res.status(404).json({ error: `No mailing list '${slug}'` });
+      return;
+    }
+    const emails = [...new Set(parsed.data.emails.map((e) => e.trim().toLowerCase()))];
+    const onList = await db
+      .select({ email: mailingListSubscribers.email, archivedAt: mailingListSubscribers.archivedAt })
+      .from(mailingListSubscribers)
+      .where(and(eq(mailingListSubscribers.listId, list.id), inArray(mailingListSubscribers.email, emails)));
+    const known = new Set(onList.map((r) => r.email));
+    const archived = await db
+      .update(mailingListSubscribers)
+      .set({ archivedAt: new Date(), archivedReason: parsed.data.reason })
+      .where(
+        and(
+          eq(mailingListSubscribers.listId, list.id),
+          inArray(mailingListSubscribers.email, emails),
+          isNull(mailingListSubscribers.archivedAt)
+        )
+      )
+      .returning({ email: mailingListSubscribers.email });
+    res.json({
+      slug,
+      archived: archived.length,
+      alreadyArchived: onList.filter((r) => r.archivedAt).length,
+      notOnList: emails.filter((e) => !known.has(e)),
+    });
+  } catch (error: any) {
+    console.error("Archive subscribers error:", error);
+    res.status(500).json({ error: messageOf(error) || "Failed to archive subscribers" });
+  }
+});
+
+/**
+ * POST /mailing-lists/:slug/subscribers/unarchive (NEWSLETTER-ENGAGED-LIST-1119)
+ * Puts archived members back: by address, or every member archived with one reason.
+ */
+router.post("/mailing-lists/:slug/subscribers/unarchive", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  try {
+    const slug = readSlug(req, res);
+    if (!slug) return;
+    const parsed = UnarchiveSubscribersRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+    const list = await findList(slug);
+    if (!list) {
+      res.status(404).json({ error: `No mailing list '${slug}'` });
+      return;
+    }
+    const scope = parsed.data.emails
+      ? inArray(mailingListSubscribers.email, [...new Set(parsed.data.emails.map((e) => e.trim().toLowerCase()))])
+      : eq(mailingListSubscribers.archivedReason, parsed.data.reason!);
+    const restored = await db
+      .update(mailingListSubscribers)
+      .set({ archivedAt: null, archivedReason: null })
+      .where(and(eq(mailingListSubscribers.listId, list.id), isNotNull(mailingListSubscribers.archivedAt), scope))
+      .returning({ email: mailingListSubscribers.email });
+    res.json({ slug, unarchived: restored.length });
+  } catch (error: any) {
+    console.error("Unarchive subscribers error:", error);
+    res.status(500).json({ error: messageOf(error) || "Failed to unarchive subscribers" });
   }
 });
 
@@ -379,7 +465,7 @@ router.post("/mailing-lists/:slug/updates", requireApiKey, requireOrgIdOnly, asy
     const members = await db
       .select()
       .from(mailingListSubscribers)
-      .where(eq(mailingListSubscribers.listId, list.id))
+      .where(and(eq(mailingListSubscribers.listId, list.id), isNull(mailingListSubscribers.archivedAt)))
       .orderBy(mailingListSubscribers.createdAt);
 
     if (members.length === 0) {

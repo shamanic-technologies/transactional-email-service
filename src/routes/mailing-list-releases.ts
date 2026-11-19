@@ -1,7 +1,7 @@
 import { messageOf } from "../lib/db-error.js";
 import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray, sql as raw } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql as raw } from "drizzle-orm";
 import { requireApiKey, requireOrgIdOnly, type PlatformIdentityLocals } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import {
@@ -141,6 +141,7 @@ async function describe(release: MailingListRelease, slug: string, now = new Dat
     failed: progress.failed,
     skippedOptedOut: progress.skippedOptedOut,
     skippedUndeliverable: progress.skippedUndeliverable,
+    skippedArchived: progress.skippedArchived,
     inFlight: progress.inFlight,
     todayAllowance: release.dailyLimit,
     todayUsed: progress.todayUsed,
@@ -240,7 +241,7 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
     const [counted] = await db
       .select({ count: raw<number>`count(*)::int` })
       .from(mailingListSubscribers)
-      .where(eq(mailingListSubscribers.listId, list.id));
+      .where(and(eq(mailingListSubscribers.listId, list.id), isNull(mailingListSubscribers.archivedAt)));
     const memberCount = Number(counted?.count ?? 0);
 
     if (memberCount === 0) {
@@ -347,6 +348,7 @@ router.post("/mailing-lists/:slug/releases", requireApiKey, requireOrgIdOnly, as
       SELECT gen_random_uuid(), ${release.id}::uuid, email, 'pending'
       FROM mailing_list_subscribers
       WHERE list_id = ${list.id}::uuid
+        AND archived_at IS NULL
       ON CONFLICT DO NOTHING
     `);
 
@@ -769,6 +771,7 @@ function relaunchAudience(sourceReleaseId: string, listId: string) {
   return raw`
     FROM mailing_list_subscribers s
     WHERE s.list_id = ${listId}::uuid
+      AND s.archived_at IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM mailing_list_release_recipients h
         WHERE h.release_id IN (

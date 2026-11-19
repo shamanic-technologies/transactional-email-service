@@ -215,8 +215,8 @@ describe("GET /mailing-lists/:slug/subscribers", () => {
     expect(res.status).toBe(200);
     expect(res.body.count).toBe(2);
     expect(res.body.subscribers).toEqual([
-      { email: "a@example.com", optedOut: false, optedOutReason: null, addedAt: "2026-01-01T00:00:00.000Z" },
-      { email: "gone@example.com", optedOut: true, optedOutReason: "ManualSuppression", addedAt: "2026-01-01T00:00:00.000Z" },
+      { email: "a@example.com", optedOut: false, optedOutReason: null, addedAt: "2026-01-01T00:00:00.000Z", archivedAt: null, archivedReason: null },
+      { email: "gone@example.com", optedOut: true, optedOutReason: "ManualSuppression", addedAt: "2026-01-01T00:00:00.000Z", archivedAt: null, archivedReason: null },
     ]);
   });
 
