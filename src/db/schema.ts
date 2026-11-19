@@ -87,6 +87,11 @@ export const mailingLists = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     slug: text("slug").notNull(),
+    /**
+     * UNIBOX-NEWSLETTER-1113: the brand this list writes for, stated by its owner (`PUT /mailing-lists/:slug/brand`).
+     * A release naming no brand of its own is that brand's; null = no brand known (the send is filed on no thread).
+     */
+    brandId: uuid("brand_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("idx_mailing_lists_slug").on(table.slug)]
@@ -364,6 +369,10 @@ export const mailingListReleaseRecipients = pgTable(
       .where(sql`${table.status} = 'sent' AND ${table.unitDeclaredAt} IS NULL`),
     index("idx_mailing_list_release_recipients_claim").on(table.releaseId, table.status),
     index("idx_mailing_list_release_recipients_settled").on(table.releaseId, table.settledAt),
+    // UNIBOX-NEWSLETTER-1113: the sent-newsletters feed reads every sent row in (settled_at, id) order.
+    index("idx_mailing_list_release_recipients_sent_feed")
+      .on(table.settledAt, table.id)
+      .where(sql`${table.status} = 'sent'`),
   ]
 );
 

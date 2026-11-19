@@ -404,6 +404,48 @@ export const SENDING_DOMAIN_BLOCKLISTED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * Distry (the Copilot) spent the UTC day's budget of OUR money on non-clients.
+ * Raised by chat-service through POST /platform-staff-alert, once per UTC day.
+ * Emailed, never recorded-only: owner 2026-11-19 asked for this one alert by
+ * email (DISTRY-GUEST-CAPS-1119). Amounts arrive as plain numbers, no $ sign.
+ */
+export const DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE: StaffTemplate = {
+  name: "distry_nonclient_day_budget_reached",
+  subject: "Distry hit its ${{budgetUsd}} day budget for non-clients ({{day}})",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#111827;">Distry hit its \${{budgetUsd}} day budget for non-clients</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:14px;line-height:20px;color:#6b7280;">Distry spent \${{spentUsd}} of our money today answering people who do not pay us. Until midnight UTC, each of them gets a limit notice instead of an answer. Paying clients still get answers. You get this once per day.</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Day (UTC)</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{day}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Spent today</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">\${{spentUsd}} of \${{budgetUsd}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Visitors stopped at their own $5 limit today</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{visitorsCapped}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Messages refused by the day budget so far</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{messagesRefused}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">To change the budget</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:24px;">Set {{budgetEnvVar}} in the chat-service env on the box.</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "Distry hit its ${{budgetUsd}} day budget for non-clients.",
+    "",
+    "Distry spent ${{spentUsd}} of our money today answering people who do not pay us. Until midnight UTC, each of them gets a limit notice instead of an answer. Paying clients still get answers. You get this once per day.",
+    "",
+    "Day (UTC): {{day}}",
+    "Spent today: ${{spentUsd}} of ${{budgetUsd}}",
+    "Visitors stopped at their own $5 limit today: {{visitorsCapped}}",
+    "Messages refused by the day budget so far: {{messagesRefused}}",
+    "To change the budget: set {{budgetEnvVar}} in the chat-service env on the box.",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
@@ -413,6 +455,7 @@ export const STAFF_TEMPLATES: StaffTemplate[] = [
   TRIGGER_SILENT_TEMPLATE,
   TRIGGER_OCCURRENCE_STUCK_TEMPLATE,
   SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
+  DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE,
 ];
 
 /**

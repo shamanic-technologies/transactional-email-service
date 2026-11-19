@@ -15,6 +15,7 @@ import { createRun, updateRun } from "../lib/runs-client.js";
 import { traceEvent } from "../lib/trace-event.js";
 import {
   AddSubscribersRequestSchema,
+  SetListBrandRequestSchema,
   PreviewUpdateRequestSchema,
   SendUpdateRequestSchema,
 } from "../schemas.js";
@@ -99,6 +100,33 @@ async function findList(slug: string) {
   const [list] = await db.select().from(mailingLists).where(eq(mailingLists.slug, slug)).limit(1);
   return list ?? null;
 }
+
+/**
+ * PUT /mailing-lists/:slug/brand {brandId}
+ * UNIBOX-NEWSLETTER-1113: the list's owner states which brand it writes for. Every release naming no brand of its own,
+ * past and future, is then that brand's on the sent-newsletters feed (crm-service files each send on that brand's
+ * thread only). Idempotent.
+ */
+router.put("/mailing-lists/:slug/brand", requireApiKey, requireOrgIdOnly, async (req, res) => {
+  try {
+    const slug = readSlug(req, res);
+    if (!slug) return;
+    const parsed = SetListBrandRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+    const [list] = await db.update(mailingLists).set({ brandId: parsed.data.brandId }).where(eq(mailingLists.slug, slug)).returning();
+    if (!list) {
+      res.status(404).json({ error: `No mailing list '${slug}'` });
+      return;
+    }
+    res.json({ slug: list.slug, brandId: list.brandId });
+  } catch (error: any) {
+    console.error("Set list brand error:", error);
+    res.status(500).json({ error: messageOf(error) || "Failed to set the list's brand" });
+  }
+});
 
 /**
  * GET /mailing-lists/:slug/subscribers

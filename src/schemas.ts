@@ -323,6 +323,29 @@ export const SentEmailsResponseSchema = z
   })
   .openapi("SentEmailsResponse");
 
+// --- GET /internal/sent-newsletters (UNIBOX-NEWSLETTER-1113) ---
+
+export const SentNewsletterSchema = z
+  .object({
+    id: z.string().openapi({ description: "The release recipient row: one per (release, subscriber). Idempotency key for a mirror." }),
+    releaseId: z.string(),
+    listSlug: z.string().openapi({ description: "The mailing list the release went to." }),
+    recipientEmail: z.string(),
+    orgId: z.string().nullable().openapi({ description: "Internal org UUID that sent the release (its list's owner). Null when the release names no internal org id." }),
+    brandIds: z.array(z.string()).nullable().openapi({ description: "Brands the email was sent for: the release's own, else its list's stated brand (PUT /mailing-lists/{slug}/brand). Null = no brand known: file it on no thread." }),
+    from: z.string().nullable(),
+    subject: z.string(),
+    sentAt: z.string().openapi({ format: "date-time", description: "When this email was sent to this subscriber (settled_at)." }),
+  })
+  .openapi("SentNewsletter");
+
+export const SentNewslettersResponseSchema = z
+  .object({
+    emails: z.array(SentNewsletterSchema),
+    nextCursor: z.string().nullable().openapi({ description: "Pass as `after` to continue. An empty page returns the cursor sent; null only when nothing was ever sent." }),
+  })
+  .openapi("SentNewslettersResponse");
+
 // --- GET /internal/monitoring-alerts (SIGNUP-EMAILS-1111) ---
 
 export const MonitoringAlertsQuerySchema = z
@@ -404,6 +427,12 @@ export const MailingListSubscribersResponseSchema = z
     subscribers: z.array(MailingListSubscriberSchema),
   })
   .openapi("MailingListSubscribersResponse");
+
+// UNIBOX-NEWSLETTER-1113: the brand a list writes for.
+export const SetListBrandRequestSchema = z
+  .object({ brandId: z.string().uuid().openapi({ description: "The brand this list writes for: every release naming no brand of its own is that brand's." }) })
+  .strict()
+  .openapi("SetListBrandRequest");
 
 export const AddSubscribersRequestSchema = z
   .object({
@@ -576,6 +605,17 @@ export const SendingDomainBlocklistedMetadataSchema = z
   })
   .openapi("SendingDomainBlocklistedMetadata");
 
+export const DistryNonclientDayBudgetReachedMetadataSchema = z
+  .object({
+    day: z.string().min(1).openapi({ description: "The UTC day the budget was reached, YYYY-MM-DD. Use it in the eventId too: one alert per UTC day.", example: "2026-11-19" }),
+    spentUsd: z.string().min(1).openapi({ description: "Dollars Distry spent on non-clients so far this UTC day. A number, no $ sign.", example: "30.12" }),
+    budgetUsd: z.string().min(1).openapi({ description: "The non-client daily budget in dollars. A number, no $ sign.", example: "30" }),
+    visitorsCapped: z.string().min(1).openapi({ description: "How many non-clients were stopped at their own $5 limit this UTC day.", example: "4" }),
+    messagesRefused: z.string().min(1).openapi({ description: "How many messages the day budget has refused so far this UTC day.", example: "1" }),
+    budgetEnvVar: z.string().min(1).openapi({ description: "The chat-service env var that tunes the budget.", example: "DISTRY_NONCLIENT_DAILY_USD" }),
+  })
+  .openapi("DistryNonclientDayBudgetReachedMetadata");
+
 export const InboxPlacementBelowBarMetadataSchema = z
   .object({
     provider: z.string().min(1).openapi({ description: "The inbox provider, human label.", example: "Google" }),
@@ -599,8 +639,8 @@ export const PlatformStaffAlertRequestSchema = z
         "Caller-chosen id of ONE occurrence of the fact (e.g. `<domain>:<list>:<listedSince>`). The same id delivers once, ever: a second call answers 200 `duplicate: true`. A call whose delivery failed (502) can be retried with the same id and sends.",
       example: "boostdistribute.com:SURBL:2026-10-16",
     }),
-    metadata: z.union([SendingDomainBlocklistedMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
-      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`.",
+    metadata: z.union([SendingDomainBlocklistedMetadataSchema, DistryNonclientDayBudgetReachedMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
+      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`. `sending_domain_blocklisted` is RECORDED for dashboard v2 Monitoring and emails nobody (`sent: false`); `distry_nonclient_day_budget_reached` is EMAILED to the staff list (owner exception 2026-11-19), once per eventId.",
     }),
   })
   .strict()
@@ -608,7 +648,7 @@ export const PlatformStaffAlertRequestSchema = z
 
 export const PlatformStaffAlertResponseSchema = z
   .object({
-    sent: z.boolean().openapi({ description: "True when this call delivered the alert. False only on a duplicate." }),
+    sent: z.boolean().openapi({ description: "True when this call emailed the alert. False on a duplicate, and always false for an alert recorded for Monitoring only (sending_domain_blocklisted)." }),
     duplicate: z.boolean().openapi({ description: "True when this event id was already delivered: nothing was sent again. Not an error." }),
     eventId: z.string().openapi({ description: "The caller's event id, echoed." }),
     runId: z.string().nullable().openapi({ description: "The org-less platform run the send is declared under. Null on a duplicate." }),
@@ -1271,6 +1311,24 @@ registry.registerPath({
 
 registry.registerPath({
   method: "get",
+  path: "/internal/sent-newsletters",
+  summary: "Every newsletter email sent to a subscriber, for their Unibox thread (UNIBOX-NEWSLETTER-1113)",
+  description:
+    "One item per release recipient row whose send succeeded (status sent), oldest first by sentAt then id, the whole history. " +
+    "Pending, failed, skipped and cancelled rows are never served. Rows can commit slightly out of sentAt order, so re-reading from " +
+    "a cursor a few minutes back is safe (dedupe on id). Read by crm-service to show each newsletter on the subscriber's Unibox thread.",
+  tags: ["Internal"],
+  security: [{ apiKey: [] }],
+  request: { query: SentEmailsQuerySchema },
+  responses: {
+    200: { description: "One page of sent newsletter emails", content: { "application/json": { schema: SentNewslettersResponseSchema } } },
+    400: { description: "Invalid query or cursor", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Missing or invalid API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
   path: "/internal/monitoring-alerts",
   summary: "Monitoring alerts raised, for dashboard v2 Monitoring (SIGNUP-EMAILS-1111)",
   description:
@@ -1531,6 +1589,28 @@ registry.registerPath({
     200: { description: "Add results", content: { "application/json": { schema: AddSubscribersResponseSchema } } },
     400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
     401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "put",
+  path: "/mailing-lists/{slug}/brand",
+  summary: "State the brand a mailing list writes for (UNIBOX-NEWSLETTER-1113)",
+  description:
+    "Every release of the list naming no brand of its own, past and future, is served as this brand's on GET /internal/sent-newsletters, " +
+    "so crm-service files each send on that brand's Unibox thread only. A list with no brand stated: its brandless releases are filed nowhere.",
+  tags: ["Mailing lists"],
+  security: [{ apiKey: [] }],
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: { required: true, content: { "application/json": { schema: SetListBrandRequestSchema } } },
+  },
+  parameters: [mailingListSlugParam, platformOrgIdHeader],
+  responses: {
+    200: { description: "The list and its brand", content: { "application/json": { schema: z.object({ slug: z.string(), brandId: z.string() }) } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
 
