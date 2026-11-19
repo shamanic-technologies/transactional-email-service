@@ -116,6 +116,14 @@ export const mailingListSubscribers = pgTable(
     // Always stored lower-cased; the parser normalises before insert.
     email: text("email").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * NEWSLETTER-ENGAGED-LIST-1119: a member set aside, never deleted. An archived
+     * member gets no new release, and a release created before the archive skips
+     * them (`skipped_archived`). Unarchiving puts them back for the next release.
+     * The row (and its id: ledger subject, `dy_sub` link) is kept either way.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedReason: text("archived_reason"),
   },
   (table) => [
     uniqueIndex("idx_mailing_list_subscribers_list_email").on(table.listId, table.email),
@@ -329,6 +337,7 @@ export type MailingListRelease = typeof mailingListReleases.$inferSelect;
  * the reason. "skipped_opted_out" was suppressed by the provider at the moment
  * its slice was sent, which is why the check belongs here and not once at the
  * start: somebody who unsubscribes on day 1 is skipped on day 5.
+ * "skipped_archived" waited on a member archived after the release was created (NEWSLETTER-ENGAGED-LIST-1119).
  * "skipped_undeliverable" was verified for its slice before sending and came
  * back with any verdict other than `valid` (the verdict is on the row).
  */

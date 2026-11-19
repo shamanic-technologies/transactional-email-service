@@ -417,6 +417,11 @@ export const MailingListSubscriberSchema = z
       description: "Postmark's own reason: \"ManualSuppression\" (unsubscribed), \"SpamComplaint\" or \"HardBounce\". Null when not suppressed.",
     }),
     addedAt: z.string().openapi({ format: "date-time" }),
+    archivedAt: z.string().nullable().openapi({
+      format: "date-time",
+      description: "When the member was set aside (NEWSLETTER-ENGAGED-LIST-1119): no release reaches an archived member. Null = active.",
+    }),
+    archivedReason: z.string().nullable(),
   })
   .openapi("MailingListSubscriber");
 
@@ -453,6 +458,36 @@ export const AddSubscribersResponseSchema = z
       .openapi({ description: "Fragments that could not be read as an email address" }),
   })
   .openapi("AddSubscribersResponse");
+
+export const ArchiveSubscribersRequestSchema = z
+  .object({
+    emails: z.array(z.string().min(3)).min(1).max(5000),
+    reason: z.string().min(1).max(200).openapi({ description: "Why these members are set aside; /unarchive can restore every member of one reason." }),
+  })
+  .strict()
+  .openapi("ArchiveSubscribersRequest");
+
+export const ArchiveSubscribersResponseSchema = z
+  .object({
+    slug: z.string(),
+    archived: z.number().openapi({ description: "Members archived by this call" }),
+    alreadyArchived: z.number().openapi({ description: "Members already archived (date and reason kept)" }),
+    notOnList: z.array(z.string()),
+  })
+  .openapi("ArchiveSubscribersResponse");
+
+export const UnarchiveSubscribersRequestSchema = z
+  .object({
+    emails: z.array(z.string().min(3)).min(1).max(5000).optional(),
+    reason: z.string().min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((b) => (b.emails ? 1 : 0) + (b.reason ? 1 : 0) === 1, { message: "State exactly one of emails or reason" })
+  .openapi("UnarchiveSubscribersRequest");
+
+export const UnarchiveSubscribersResponseSchema = z
+  .object({ slug: z.string(), unarchived: z.number() })
+  .openapi("UnarchiveSubscribersResponse");
 
 export const RemoveSubscriberResponseSchema = z
   .object({
@@ -855,6 +890,9 @@ export const ReleaseSchema = z
     skippedUndeliverable: z.number().openapi({
       description: "Addresses verified (apollo-service BounceVerify) just before their slice was sent and NOT sent because the verdict was anything but `valid` (catch_all, unknown, risky, invalid). The verdict is stored per recipient. They do not consume the daily allowance.",
     }),
+    skippedArchived: z.number().openapi({
+      description: "Addresses whose list member was archived after the release was created (NEWSLETTER-ENGAGED-LIST-1119): settled without a send, never mailed.",
+    }),
     inFlight: z.number().openapi({ description: "Addresses a worker is holding right now" }),
     todayAllowance: z.number().openapi({ description: "Messages this release may send today: its daily limit" }),
     todayUsed: z.number().openapi({ description: "How much of today's allowance is spent, in-flight addresses included" }),
@@ -937,6 +975,7 @@ export const ReleaseTickResponseSchema = z
     failed: z.number(),
     skippedOptedOut: z.number(),
     skippedUndeliverable: z.number(),
+    skippedArchived: z.number(),
     verificationUnavailable: z.number().openapi({ description: "Slices whose verdicts could not be obtained; nothing in them was sent and they return to pending." }),
     completed: z.array(z.string()),
     halted: z.array(z.string()),
@@ -1619,6 +1658,33 @@ registry.registerPath({
     404: { description: "No such list, or the address is not on it", content: { "application/json": { schema: ErrorResponseSchema } } },
   },
 });
+
+for (const [verb, req, resp, summary] of [
+  ["archive", ArchiveSubscribersRequestSchema, ArchiveSubscribersResponseSchema, "Set members aside without deleting them (no release reaches them)"],
+  ["unarchive", UnarchiveSubscribersRequestSchema, UnarchiveSubscribersResponseSchema, "Put archived members back, by address or by archive reason"],
+] as const) {
+  registry.registerPath({
+    method: "post",
+    path: `/mailing-lists/{slug}/subscribers/${verb}`,
+    summary,
+    description:
+      `${mailingListsDescription} NEWSLETTER-ENGAGED-LIST-1119: an archived member stays on the list (row, ledger subject and link id kept) ` +
+      "but no new release reaches them, and a release created before the archive settles them `skipped_archived`.",
+    tags: ["Mailing lists"],
+    security: [{ apiKey: [] }],
+    request: {
+      params: z.object({ slug: z.string() }),
+      body: { required: true, content: { "application/json": { schema: req } } },
+    },
+    parameters: [mailingListSlugParam, platformOrgIdHeader],
+    responses: {
+      200: { description: "Done", content: { "application/json": { schema: resp } } },
+      400: { description: "Validation error", content: { "application/json": { schema: ErrorResponseSchema } } },
+      401: { description: "Unauthorized - invalid or missing API key", content: { "application/json": { schema: ErrorResponseSchema } } },
+      404: { description: "No such list", content: { "application/json": { schema: ErrorResponseSchema } } },
+    },
+  });
+}
 
 registry.registerPath({
   method: "post",

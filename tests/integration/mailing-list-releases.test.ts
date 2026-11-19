@@ -1745,3 +1745,66 @@ describe("every release runs under a campaign (NEWSLETTER-CAMPAIGN-1108)", () =>
     expect(row.campaign_id).toBe("campaign_newsletter");
   });
 });
+
+describe("archived members (NEWSLETTER-ENGAGED-LIST-1119)", () => {
+  async function archive(emails: string[], reason = "not_engaged_1119") {
+    return request(app).post(`/mailing-lists/${SLUG}/subscribers/archive`).set(AUTH).send({ emails, reason });
+  }
+
+  it("a new release never includes an archived member, and the member stays on the list", async () => {
+    await seedList(10);
+    const all = addresses(10);
+    const res = await archive([all[0], all[1], "stranger@example.com"]);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ archived: 2, alreadyArchived: 0, notOnList: ["stranger@example.com"] });
+
+    const created = await createRelease({ subject: "Engaged only", body: "hi", dailyLimit: 100 });
+    expect(created.body.recipientCount).toBe(8);
+    await drain();
+    expect(mailed().sort()).toEqual(all.slice(2).sort());
+
+    const list = await request(app).get(`/mailing-lists/${SLUG}/subscribers`).set(AUTH).expect(200);
+    expect(list.body.count).toBe(10);
+    const first = list.body.subscribers.find((s: { email: string }) => s.email === all[0]);
+    expect(first.archivedReason).toBe("not_engaged_1119");
+    expect(first.archivedAt).toBeTruthy();
+  });
+
+  it("a release created BEFORE the archive skips the member instead of mailing them", async () => {
+    await seedList(6);
+    const all = addresses(6);
+    const created = await createRelease({ subject: "Frozen list", body: "hi", dailyLimit: 100 });
+    expect(created.body.recipientCount).toBe(6);
+
+    await archive([all[3]]);
+    await drain();
+
+    expect(mailed()).not.toContain(all[3]);
+    expect(mailed()).toHaveLength(5);
+    const release = await readRelease(created.body.releaseId);
+    expect(release.skippedArchived).toBe(1);
+    expect(release.status).toBe("completed");
+    const [row] = await sql<Array<{ status: string; reason: string }>>`
+      SELECT status, reason FROM mailing_list_release_recipients
+      WHERE release_id = ${created.body.releaseId}::uuid AND email = ${all[3]}`;
+    expect(row).toEqual({ status: "skipped_archived", reason: "not_engaged_1119" });
+  });
+
+  it("unarchive by reason puts every member of that reason back for the next release", async () => {
+    await seedList(5);
+    const all = addresses(5);
+    await archive([all[0], all[1]], "batch_a");
+    await archive([all[2]], "batch_b");
+    const res = await request(app).post(`/mailing-lists/${SLUG}/subscribers/unarchive`).set(AUTH).send({ reason: "batch_a" });
+    expect(res.body).toEqual({ slug: SLUG, unarchived: 2 });
+
+    const created = await createRelease({ subject: "Back", body: "hi", dailyLimit: 100 });
+    expect(created.body.recipientCount).toBe(4);
+
+    const both = await request(app)
+      .post(`/mailing-lists/${SLUG}/subscribers/unarchive`)
+      .set(AUTH)
+      .send({ reason: "batch_b", emails: [all[2]] });
+    expect(both.status).toBe(400);
+  });
+});

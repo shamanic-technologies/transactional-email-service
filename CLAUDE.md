@@ -213,6 +213,16 @@ and one its org does not hold (400 `campaign_not_found`, read from campaign-serv
 campaign pays is the caller's statement. A relaunch keeps its source's campaign, else takes the request's. Our
 newsletter's campaign: unit `23781977-f496-4a1e-b0a3-757b72ceddc5` (sales funnel campaign `5f85405e-…`, $140/week).
 
+## An archived member is never mailed, and never deleted (NEWSLETTER-ENGAGED-LIST-1119)
+
+`mailing_list_subscribers.archived_at/_reason` (migration `0030`). Every reader that picks WHO a send reaches filters
+`archived_at IS NULL`: release create (count + insert), `relaunchAudience`, the direct `/updates` send; the worker's
+`settleArchived` (each tick, before claiming) settles a frozen release's waiting row of an archived member
+`skipped_archived`. A NEW audience reader must filter too. Never delete to cut a list: the row id is the ledger subject
+and the `dy_sub` link. Gmail placement is judged per sending DOMAIN: `news.distribute.you` went 100 % spam on a cold
+list (2026-11-19 seeds); never widen its list again without a seed test (README "Pace from a damaged domain").
+Guard: "archived members" block in `tests/integration/mailing-list-releases.test.ts`.
+
 ## A monitoring alert is RECORDED, never emailed (SIGNUP-EMAILS-1111)
 
 Owner 2026-10-22: « no email in my inbox please »; a monitoring alert is red on dashboard v2 Monitoring.
