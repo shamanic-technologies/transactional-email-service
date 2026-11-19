@@ -38,7 +38,7 @@ import sendRoutes from "../../src/routes/send.js";
 import { createRun, createPlatformRun, updatePlatformRun } from "../../src/lib/runs-client.js";
 import { resolveUserEmail } from "../../src/lib/client-service.js";
 import { ADMIN_EMAILS } from "../../src/lib/staff-recipients.js";
-import { SENDING_DOMAIN_BLOCKLISTED_TEMPLATE as TPL } from "../../src/templates/staff-alerts.js";
+import { SENDING_DOMAIN_BLOCKLISTED_TEMPLATE as TPL, DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE as DISTRY_TPL } from "../../src/templates/staff-alerts.js";
 
 const app = express();
 app.use(express.json());
@@ -166,5 +166,70 @@ describe("POST /platform-staff-alert inbox_placement_below_bar (retired)", () =>
     expect(first.body.duplicate).toBe(false);
     expect(second.body.duplicate).toBe(true);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /platform-staff-alert distry_nonclient_day_budget_reached (emailed, DISTRY-GUEST-CAPS-1119)", () => {
+  const DISTRY_METADATA = {
+    day: "2026-11-19",
+    spentUsd: "30.12",
+    budgetUsd: "30",
+    visitorsCapped: "4",
+    messagesRefused: "1",
+    budgetEnvVar: "DISTRY_NONCLIENT_DAILY_USD",
+  };
+  const DISTRY_BODY = { eventType: "distry_nonclient_day_budget_reached", eventId: "distry-nonclient-day:2026-11-19", metadata: DISTRY_METADATA };
+
+  beforeEach(() => {
+    mockSelectLimit.mockResolvedValue([{ ...DISTRY_TPL, fromAddress: null, layout: "none", stream: "broadcast" }]);
+  });
+
+  it("emails the staff list once, on a platform run, with every fact", async () => {
+    const res = await post(DISTRY_BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: true, duplicate: false, eventId: DISTRY_BODY.eventId, runId: "platform-run-1" });
+    expect(createPlatformRun).toHaveBeenCalledWith(expect.objectContaining({ taskName: "email-distry_nonclient_day_budget_reached" }));
+    const calls = gatewayCalls();
+    expect(calls).toHaveLength(ADMIN_EMAILS.length);
+    const sent = JSON.parse(String(calls[0][1].body));
+    expect(sent.to).toBe(ADMIN_EMAILS[0]);
+    expect(sent.subject).toBe("Distry hit its $30 day budget for non-clients (2026-11-19)");
+    for (const value of Object.values(DISTRY_METADATA)) {
+      expect(sent.textBody).toContain(value);
+      expect(sent.htmlBody).toContain(value);
+    }
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "distry_nonclient_day_budget_reached", status: "pending", orgId: null, userId: null })
+    );
+    expect(resolveUserEmail).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+  });
+
+  it("the same occurrence id again answers duplicate and sends nothing", async () => {
+    mockReturning.mockResolvedValueOnce([]);
+    const res = await post(DISTRY_BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: false, duplicate: true, eventId: DISTRY_BODY.eventId, runId: null });
+    expect(gatewayCalls()).toHaveLength(0);
+    expect(createPlatformRun).not.toHaveBeenCalled();
+  });
+
+  it("a missing or blank metadata key is a 400 naming it, nothing sent", async () => {
+    const { budgetEnvVar: _b, ...rest } = DISTRY_METADATA;
+    const res = await post({ ...DISTRY_BODY, metadata: { ...rest, spentUsd: " " } });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("missing_metadata");
+    expect(res.body.missing).toEqual(["spentUsd", "budgetEnvVar"]);
+    expect(gatewayCalls()).toHaveLength(0);
+    expect(mockValues).not.toHaveBeenCalled();
+  });
+
+  it("refuses a caller-chosen recipient", async () => {
+    const res = await post({ ...DISTRY_BODY, recipientEmail: "someone@example.com" });
+    expect(res.status).toBe(400);
+    expect(gatewayCalls()).toHaveLength(0);
   });
 });

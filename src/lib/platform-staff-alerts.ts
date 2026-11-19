@@ -19,6 +19,14 @@
 // URIBL). Every client shares those domains, so no org owns the fact
 // (DOMAIN-BLOCKLIST-1016).
 //
+// distry_nonclient_day_budget_reached: chat-service, Distry (the Copilot) spent
+// the UTC day's budget of OUR money on non-clients (visitors with no account,
+// WhatsApp/email people with no account, accounts that never paid); every
+// non-client gets a limit notice instead of an answer until the next UTC day.
+// EMAILED on purpose: it is not in MONITORING_ALERTS. Owner 2026-11-19, the one
+// explicit exception to "no monitoring email" (DISTRY-GUEST-CAPS-1119). One
+// occurrence per UTC day (the caller's eventId).
+//
 // Its own module: tests `vi.mock` route dependencies whole, and src/schemas.ts
 // reads this list at import time.
 export const PLATFORM_STAFF_ALERTS: Record<string, readonly string[]> = {
@@ -30,6 +38,14 @@ export const PLATFORM_STAFF_ALERTS: Record<string, readonly string[]> = {
     "mailboxesAffected",
     "actionTaken",
     "removalUrl",
+  ],
+  distry_nonclient_day_budget_reached: [
+    "day",
+    "spentUsd",
+    "budgetUsd",
+    "visitorsCapped",
+    "messagesRefused",
+    "budgetEnvVar",
   ],
 };
 
