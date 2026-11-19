@@ -605,6 +605,17 @@ export const SendingDomainBlocklistedMetadataSchema = z
   })
   .openapi("SendingDomainBlocklistedMetadata");
 
+export const DistryNonclientDayBudgetReachedMetadataSchema = z
+  .object({
+    day: z.string().min(1).openapi({ description: "The UTC day the budget was reached, YYYY-MM-DD. Use it in the eventId too: one alert per UTC day.", example: "2026-11-19" }),
+    spentUsd: z.string().min(1).openapi({ description: "Dollars Distry spent on non-clients so far this UTC day. A number, no $ sign.", example: "30.12" }),
+    budgetUsd: z.string().min(1).openapi({ description: "The non-client daily budget in dollars. A number, no $ sign.", example: "30" }),
+    visitorsCapped: z.string().min(1).openapi({ description: "How many non-clients were stopped at their own $5 limit this UTC day.", example: "4" }),
+    messagesRefused: z.string().min(1).openapi({ description: "How many messages the day budget has refused so far this UTC day.", example: "1" }),
+    budgetEnvVar: z.string().min(1).openapi({ description: "The chat-service env var that tunes the budget.", example: "DISTRY_NONCLIENT_DAILY_USD" }),
+  })
+  .openapi("DistryNonclientDayBudgetReachedMetadata");
+
 export const InboxPlacementBelowBarMetadataSchema = z
   .object({
     provider: z.string().min(1).openapi({ description: "The inbox provider, human label.", example: "Google" }),
@@ -628,8 +639,8 @@ export const PlatformStaffAlertRequestSchema = z
         "Caller-chosen id of ONE occurrence of the fact (e.g. `<domain>:<list>:<listedSince>`). The same id delivers once, ever: a second call answers 200 `duplicate: true`. A call whose delivery failed (502) can be retried with the same id and sends.",
       example: "boostdistribute.com:SURBL:2026-10-16",
     }),
-    metadata: z.union([SendingDomainBlocklistedMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
-      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`.",
+    metadata: z.union([SendingDomainBlocklistedMetadataSchema, DistryNonclientDayBudgetReachedMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
+      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`. `sending_domain_blocklisted` is RECORDED for dashboard v2 Monitoring and emails nobody (`sent: false`); `distry_nonclient_day_budget_reached` is EMAILED to the staff list (owner exception 2026-11-19), once per eventId.",
     }),
   })
   .strict()
@@ -637,7 +648,7 @@ export const PlatformStaffAlertRequestSchema = z
 
 export const PlatformStaffAlertResponseSchema = z
   .object({
-    sent: z.boolean().openapi({ description: "True when this call delivered the alert. False only on a duplicate." }),
+    sent: z.boolean().openapi({ description: "True when this call emailed the alert. False on a duplicate, and always false for an alert recorded for Monitoring only (sending_domain_blocklisted)." }),
     duplicate: z.boolean().openapi({ description: "True when this event id was already delivered: nothing was sent again. Not an error." }),
     eventId: z.string().openapi({ description: "The caller's event id, echoed." }),
     runId: z.string().nullable().openapi({ description: "The org-less platform run the send is declared under. Null on a duplicate." }),

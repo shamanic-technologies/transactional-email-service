@@ -17,6 +17,7 @@ import {
   MAILING_LIST_RELEASE_STALLED_TEMPLATE,
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
+  DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE,
   STAFF_TEMPLATES,
   seedStaffTemplates,
 } from "../../src/templates/staff-alerts.js";
@@ -278,5 +279,35 @@ describe("sending_domain_blocklisted template", () => {
     }
     expect(T.htmlBody).not.toContain("<style");
     expect(T.htmlBody).not.toContain("class=");
+  });
+});
+
+describe("distry_nonclient_day_budget_reached template", () => {
+  const T = DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE;
+
+  it("is registered and renders every fact, with no placeholder or dash left", () => {
+    expect(STAFF_TEMPLATES).toContain(T);
+    const vars = {
+      day: "2026-11-19",
+      spentUsd: "30.12",
+      budgetUsd: "30",
+      visitorsCapped: "4",
+      messagesRefused: "1",
+      budgetEnvVar: "DISTRY_NONCLIENT_DAILY_USD",
+    };
+    expect(interpolate(T.subject, vars)).toBe("Distry hit its $30 day budget for non-clients (2026-11-19)");
+    for (const body of [T.subject, T.htmlBody, T.textBody]) {
+      const out = interpolate(body, vars);
+      expect(out).not.toContain("{{");
+      expect(out).not.toMatch(/[\u2013\u2014]/);
+    }
+    for (const value of Object.values(vars)) {
+      expect(interpolate(T.textBody, vars)).toContain(value);
+      expect(interpolate(T.htmlBody, vars)).toContain(value);
+    }
+    expect(interpolate(T.textBody, vars)).toContain("$30.12 of $30");
+    expect(T.htmlBody).not.toContain("<style");
+    expect(T.htmlBody).not.toContain("class=");
+    expect(T.htmlBody).toContain("table-layout:fixed");
   });
 });
