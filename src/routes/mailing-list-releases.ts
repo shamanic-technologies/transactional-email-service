@@ -584,6 +584,21 @@ async function transition(
       return;
     }
 
+    // NEWSLETTER-0MARKUP-1121: a release started before campaigns were required
+    // (NEWSLETTER-CAMPAIGN-1108) has no campaign. Resuming it in place sent
+    // 12,773 newsletter emails that no campaign ever booked (the 0% markup issue,
+    // paused 2026-11-19): its campaign read 0 sends and $0. Nothing sends again
+    // outside a campaign: it is cancelled and relaunched under one (a relaunch
+    // takes the request's campaign and never re-mails its lineage).
+    if (to === "running" && !found.release.campaignId) {
+      res.status(409).json({
+        error:
+          "This release has no campaign (it started before campaigns were required), so it is not resumed. Cancel it, then relaunch it with x-campaign-id: the relaunch runs under that campaign and never re-mails anyone it already reached.",
+        code: "campaign_required",
+      });
+      return;
+    }
+
     const now = new Date();
     const [updated] = await db
       .update(mailingListReleases)

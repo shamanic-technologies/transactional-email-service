@@ -212,6 +212,8 @@ and one its org does not hold (400 `campaign_not_found`, read from campaign-serv
 (`src/lib/release-campaign.ts`, own module: the release tests mock it). No default campaign, no lookup by brand: which
 campaign pays is the caller's statement. A relaunch keeps its source's campaign, else takes the request's. Our
 newsletter's campaign: unit `23781977-f496-4a1e-b0a3-757b72ceddc5` (sales funnel campaign `5f85405e-…`, $140/week).
+`/resume` of a campaign-less release (started before 11-08) is refused 409 `campaign_required` (NEWSLETTER-0MARKUP-1121:
+the 0% markup issue resumed in place sent 12,773 emails its campaign never booked): cancel it, relaunch it with `x-campaign-id`.
 
 ## An archived member is never mailed, and never deleted (NEWSLETTER-ENGAGED-LIST-1119)
 
