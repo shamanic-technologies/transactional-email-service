@@ -25,11 +25,25 @@ export const MONITORING_ALERTS: Record<string, string> = {
   mailing_list_release_stalled: "A newsletter release stopped moving",
 };
 
+// Alerts that are EMAILED to staff AND served on Monitoring: the owner's explicit
+// exceptions to "never emailed". Their rows are the sent/failed email rows.
+// security_alert: owner 2026-11-28 « alertes massives notamment à moi par email »
+// (SECURITY-ALERTS-1128, lib/security-alert.ts).
+export const EMAILED_MONITORING_ALERTS: Record<string, string> = {
+  security_alert: "Someone may be breaking in",
+};
+
+const FEED_LABELS: Record<string, string> = { ...MONITORING_ALERTS, ...EMAILED_MONITORING_ALERTS };
+
 export const ALERT_RECORDED = "recorded";
 
 export function isMonitoringAlert(eventType: string): boolean {
   return Object.prototype.hasOwnProperty.call(MONITORING_ALERTS, eventType);
 }
+
+// A watcher's proof-of-fire replay (metadata test = "true") is not an incident:
+// it stays in `recent` (marked by its metadata) and never turns the light red.
+const NOT_A_TEST = sql`coalesce(${emailEvents.metadata}->>'test', '') <> 'true'`;
 
 /** Broken = raised within this window; older alerts are history, not a red light. */
 const BROKEN_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -65,7 +79,7 @@ function utcDay(d: Date): string {
  * whatever happened to its email. Broken alerts first, then by name.
  */
 export async function readMonitoringAlerts(days: number, now = new Date()): Promise<MonitoringAlertFeed> {
-  const types = Object.keys(MONITORING_ALERTS);
+  const types = Object.keys(FEED_LABELS);
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1)));
 
   const counts = await db
@@ -76,7 +90,7 @@ export async function readMonitoringAlerts(days: number, now = new Date()): Prom
       last: sql<Date>`max(${emailEvents.createdAt})`,
     })
     .from(emailEvents)
-    .where(and(inArray(emailEvents.eventType, types), gte(emailEvents.createdAt, start)))
+    .where(and(inArray(emailEvents.eventType, types), gte(emailEvents.createdAt, start), NOT_A_TEST))
     .groupBy(emailEvents.eventType, sql`2`);
 
   const typeList = sql.join(types.map((t) => sql`${t}`), sql`, `);
@@ -113,7 +127,7 @@ export async function readMonitoringAlerts(days: number, now = new Date()): Prom
         : `Not raised in ${days} days`;
     return {
       eventType,
-      label: MONITORING_ALERTS[eventType],
+      label: FEED_LABELS[eventType],
       verdict: (broken ? "broken" : "ok") as "broken" | "ok",
       reason,
       lastRaisedAt: last ? last.toISOString() : null,

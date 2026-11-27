@@ -446,6 +446,46 @@ export const DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE: StaffTemplate = {
   ].join("\n"),
 };
 
+/**
+ * security_alert (SECURITY-ALERTS-1128): a fleet watcher saw a sign of a
+ * break-in. Every value it reads in the HTML body is the escaped `*Html` twin
+ * built by lib/security-alert.ts: the evidence quotes what an attacker chose.
+ */
+export const SECURITY_ALERT_TEMPLATE: StaffTemplate = {
+  name: "security_alert",
+  subject: "{{subjectPrefix}}Security alert: {{summary}}",
+  htmlBody: [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;background-color:#f6f7f9;margin:0;padding:0;">`,
+    `<tr><td style="padding:24px 12px;">`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed;width:100%;max-width:560px;margin:0 auto;background-color:#ffffff;border:1px solid #fecaca;border-radius:8px;">`,
+    `<tr><td style="${CELL}padding-top:24px;padding-bottom:4px;font-size:18px;line-height:24px;font-weight:600;color:#b91c1c;">{{subjectPrefix}}Security alert</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:20px;font-size:15px;line-height:22px;color:#111827;word-break:break-word;">{{summaryHtml}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">What we saw</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;font-family:Menlo,Consolas,monospace;font-size:13px;line-height:19px;">{{evidenceHtml}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">First seen</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{firstSeenHtml}}</td></tr>`,
+    `<tr><td style="${LABEL}padding-bottom:2px;">Watcher</td></tr>`,
+    `<tr><td style="${VALUE}padding-bottom:16px;">{{kindHtml}}</td></tr>`,
+    `<tr><td style="${CELL}padding-bottom:24px;font-size:13px;line-height:19px;color:#6b7280;">One email per incident. It is also red on dashboard v2 Monitoring.</td></tr>`,
+    `</table>`,
+    `</td></tr>`,
+    `</table>`,
+  ].join(""),
+  textBody: [
+    "{{subjectPrefix}}Security alert",
+    "",
+    "{{summary}}",
+    "",
+    "What we saw:",
+    "{{evidence}}",
+    "",
+    "{{firstSeenLine}}",
+    "Watcher: {{kind}}",
+    "",
+    "One email per incident. It is also red on dashboard v2 Monitoring.",
+  ].join("\n"),
+};
+
 export const STAFF_TEMPLATES: StaffTemplate[] = [
   PROVIDER_CREDITS_EXHAUSTED_TEMPLATE,
   MAILING_LIST_RELEASE_HALTED_TEMPLATE,
@@ -456,6 +496,7 @@ export const STAFF_TEMPLATES: StaffTemplate[] = [
   TRIGGER_OCCURRENCE_STUCK_TEMPLATE,
   SENDING_DOMAIN_BLOCKLISTED_TEMPLATE,
   DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE,
+  SECURITY_ALERT_TEMPLATE,
 ];
 
 /**

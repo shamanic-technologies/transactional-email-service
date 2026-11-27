@@ -38,7 +38,7 @@ import sendRoutes from "../../src/routes/send.js";
 import { createRun, createPlatformRun, updatePlatformRun } from "../../src/lib/runs-client.js";
 import { resolveUserEmail } from "../../src/lib/client-service.js";
 import { ADMIN_EMAILS } from "../../src/lib/staff-recipients.js";
-import { SENDING_DOMAIN_BLOCKLISTED_TEMPLATE as TPL, DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE as DISTRY_TPL } from "../../src/templates/staff-alerts.js";
+import { SENDING_DOMAIN_BLOCKLISTED_TEMPLATE as TPL, DISTRY_NONCLIENT_DAY_BUDGET_REACHED_TEMPLATE as DISTRY_TPL, SECURITY_ALERT_TEMPLATE as SEC_TPL } from "../../src/templates/staff-alerts.js";
 
 const app = express();
 app.use(express.json());
@@ -230,6 +230,77 @@ describe("POST /platform-staff-alert distry_nonclient_day_budget_reached (emaile
   it("refuses a caller-chosen recipient", async () => {
     const res = await post({ ...DISTRY_BODY, recipientEmail: "someone@example.com" });
     expect(res.status).toBe(400);
+    expect(gatewayCalls()).toHaveLength(0);
+  });
+});
+
+describe("POST /platform-staff-alert security_alert (emailed + Monitoring, SECURITY-ALERTS-1128)", () => {
+  const SEC_METADATA = {
+    kind: "caddy_traversal",
+    summary: "Someone tried to read files outside the site on api.distribute.you",
+    evidence: "IP 203.0.113.7\nGET /v1/../../etc/passwd -> 400\n14 requests in 2 min",
+    firstSeenAt: "2026-11-28T03:12:00Z",
+  };
+  const SEC_BODY = { eventType: "security_alert", eventId: "caddy_traversal:203.0.113.7:2026-11-28", metadata: SEC_METADATA };
+
+  beforeEach(() => {
+    mockSelectLimit.mockResolvedValue([{ ...SEC_TPL, fromAddress: null, layout: "none", stream: "broadcast" }]);
+  });
+
+  it("emails the staff list once with every fact, subject = the summary", async () => {
+    const res = await post(SEC_BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: true, duplicate: false, eventId: SEC_BODY.eventId, runId: "platform-run-1" });
+    const calls = gatewayCalls();
+    expect(calls).toHaveLength(ADMIN_EMAILS.length);
+    const sent = JSON.parse(String(calls[0][1].body));
+    expect(sent.to).toBe(ADMIN_EMAILS[0]);
+    expect(sent.subject).toBe(`Security alert: ${SEC_METADATA.summary}`);
+    expect(sent.textBody).toContain(SEC_METADATA.evidence);
+    expect(sent.textBody).toContain("First seen: 2026-11-28T03:12:00Z");
+    expect(sent.htmlBody).toContain("IP 203.0.113.7<br>GET /v1/../../etc/passwd -&gt; 400<br>14 requests in 2 min");
+    expect(sent.htmlBody).toContain("caddy_traversal");
+    expect(mockValues).toHaveBeenCalledWith(expect.objectContaining({ eventType: "security_alert", status: "pending", orgId: null, metadata: { ...SEC_METADATA, eventId: SEC_BODY.eventId } }));
+  });
+
+  it("escapes what an attacker chose: no markup of theirs reaches the HTML", async () => {
+    const res = await post({ ...SEC_BODY, metadata: { ...SEC_METADATA, evidence: 'UA <img src=x onerror="alert(1)">', summary: "<b>hi</b>\nthere" } });
+
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(String(gatewayCalls()[0][1].body));
+    expect(sent.htmlBody).not.toContain("<img");
+    expect(sent.htmlBody).not.toContain("<b>hi");
+    expect(sent.htmlBody).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    expect(sent.subject).toBe("Security alert: <b>hi</b> there");
+  });
+
+  it("a test replay says [TEST] in the subject", async () => {
+    await post({ ...SEC_BODY, metadata: { ...SEC_METADATA, test: "true" } });
+    const sent = JSON.parse(String(gatewayCalls()[0][1].body));
+    expect(sent.subject).toBe(`[TEST] Security alert: ${SEC_METADATA.summary}`);
+  });
+
+  it("firstSeenAt is optional", async () => {
+    const { firstSeenAt: _f, ...rest } = SEC_METADATA;
+    const res = await post({ ...SEC_BODY, metadata: rest });
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(String(gatewayCalls()[0][1].body));
+    expect(sent.htmlBody).toContain("not stated");
+    expect(sent.textBody).not.toContain("First seen");
+  });
+
+  it("kind, summary and evidence are required", async () => {
+    const res = await post({ ...SEC_BODY, metadata: { kind: "x", summary: " " } });
+    expect(res.status).toBe(400);
+    expect(res.body.missing).toEqual(["summary", "evidence"]);
+    expect(gatewayCalls()).toHaveLength(0);
+  });
+
+  it("the same incident id again answers duplicate and sends nothing", async () => {
+    mockReturning.mockResolvedValueOnce([]);
+    const res = await post(SEC_BODY);
+    expect(res.body).toEqual({ sent: false, duplicate: true, eventId: SEC_BODY.eventId, runId: null });
     expect(gatewayCalls()).toHaveLength(0);
   });
 });

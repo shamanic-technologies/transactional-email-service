@@ -27,6 +27,12 @@
 // explicit exception to "no monitoring email" (DISTRY-GUEST-CAPS-1119). One
 // occurrence per UTC day (the caller's eventId).
 //
+// security_alert: any fleet security watcher (key-service, api-service, the
+// box's watchers), an intrusion signal. EMAILED and also red on Monitoring
+// (lib/security-alert.ts, SECURITY-ALERTS-1128, owner 2026-11-28). One
+// occurrence per incident (the caller's eventId), never per request. Optional
+// metadata: firstSeenAt; test: "true" for a watcher's proof-of-fire replay.
+//
 // Its own module: tests `vi.mock` route dependencies whole, and src/schemas.ts
 // reads this list at import time.
 export const PLATFORM_STAFF_ALERTS: Record<string, readonly string[]> = {
@@ -47,6 +53,7 @@ export const PLATFORM_STAFF_ALERTS: Record<string, readonly string[]> = {
     "messagesRefused",
     "budgetEnvVar",
   ],
+  security_alert: ["kind", "summary", "evidence"],
 };
 
 export function isPlatformStaffAlert(eventType: string): boolean {
