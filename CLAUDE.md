@@ -225,6 +225,20 @@ and the `dy_sub` link. Gmail placement is judged per sending DOMAIN: `news.distr
 list (2026-11-19 seeds); never widen its list again without a seed test (README "Pace from a damaged domain").
 Guard: "archived members" block in `tests/integration/mailing-list-releases.test.ts`.
 
+## No customer ever names a template, a recipient or the content (PHISH-SEND-1127)
+
+2026-11-20 an API-signup org wrote `phish*`/`spo*` templates (the store is GLOBAL: no org column, last
+writer wins) through the gateway's `PUT /v1/emails/templates` with its user key, then sent them to
+addresses of its choice through `POST /v1/emails/send`. All 12 failed only by luck (an unrelated SES Bcc
+bug). api-service #1547 made both server-only; a customer may only trigger a product lifecycle event
+addressed to themselves (SELF-EMAILS-1127). The same actors then ran code on our Windmill workers and
+read every service key (RCE-WORKFLOWS-1127), so the API key of this service is not a boundary on its own:
+`transactional-email.distribute.you` serves nothing publicly (Caddy 404, PHISH-SEND-1127), callers use
+the docker hostname. Never add a public door here, never let an identity-header caller pick a template
+it wrote for a recipient it chose. A "recipient is a stranger to the org" Monitoring chart was measured
+and rejected: 28 of 210 legit sends in 60 days go to client team members who are not account users or
+to prospects, so it would be red on healthy mail.
+
 ## A monitoring alert is RECORDED, never emailed (SIGNUP-EMAILS-1111)
 
 Owner 2026-10-22: « no email in my inbox please »; a monitoring alert is red on dashboard v2 Monitoring.
