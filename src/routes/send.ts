@@ -20,6 +20,7 @@ import { sentMessageColumns } from "../lib/sent-emails.js";
 import { FOUNDER_EMAIL } from "../lib/founder.js";
 import { ADMIN_EMAILS, isStaffRecipientActor, payerFor } from "../lib/staff-recipients.js";
 import { ALERT_RECORDED, isMonitoringAlert } from "../lib/monitoring-alerts.js";
+import { gatewayReplyTo } from "../lib/reply-threading.js";
 
 const router = Router();
 
@@ -94,6 +95,10 @@ const REQUIRED_METADATA: Record<string, string[]> = {
 // Staff-bound events that must never carry a caller-supplied recipient, blind
 // copy or visible copy on ANY route, /send included — a "provider is dry" alert
 // is internal and has no customer-facing form.
+// Every field by which a caller shapes who a message reaches or who its replies
+// reach. A staff-only alert and /platform-send refuse all of them.
+const CALLER_DELIVERY_FIELDS = ["recipientEmail", "bccEmails", "ccEmails", "replyToEmail", "replyToAddresses", "inReplyTo", "references"] as const;
+
 const STAFF_ONLY_DELIVERY_EVENTS = new Set(["provider_credits_exhausted", "campaign_failing", "audience_refill_failed", "trigger_silent", "trigger_occurrence_stuck"]);
 
 
@@ -229,10 +234,10 @@ async function handleSend(req: Request, res: Response) {
     // Staff-only alerts carry no caller-chosen destination on any route
     if (
       STAFF_ONLY_DELIVERY_EVENTS.has(body.eventType) &&
-      (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined || body.replyToEmail !== undefined)
+      CALLER_DELIVERY_FIELDS.some((f) => body[f] !== undefined)
     ) {
       res.status(400).json({
-        error: `'${body.eventType}' does not accept recipientEmail, bccEmails, ccEmails or replyToEmail: it is delivered to the internal staff recipient list only`,
+        error: `'${body.eventType}' does not accept ${CALLER_DELIVERY_FIELDS.join(", ")}: it is delivered to the internal staff recipient list only`,
       });
       return;
     }
@@ -497,7 +502,9 @@ async function handleSend(req: Request, res: Response) {
           bcc: bccList.length > 0 ? bccList.join(",") : undefined,
           cc: ccList.length > 0 ? ccList.join(",") : undefined,
           // Absent = undefined, so the gateway client keeps its founder default
-          replyTo: body.replyToEmail,
+          replyTo: body.replyToAddresses ? gatewayReplyTo(body.replyToAddresses) : body.replyToEmail,
+          inReplyTo: body.inReplyTo,
+          references: body.references?.join(" "),
           stream: template.stream,
           // A message only staff read is platform-paid: it reaches staff even
           // when the org it is about has no credit, and costs that org nothing.
@@ -565,10 +572,10 @@ async function handlePlatformSend(req: Request, res: Response) {
     return;
   }
 
-  const body = req.body as { recipientEmail?: unknown; bccEmails?: unknown; ccEmails?: unknown; replyToEmail?: unknown };
-  if (body.recipientEmail !== undefined || body.bccEmails !== undefined || body.ccEmails !== undefined || body.replyToEmail !== undefined) {
+  const body = (req.body ?? {}) as Partial<Record<(typeof CALLER_DELIVERY_FIELDS)[number], unknown>>;
+  if (CALLER_DELIVERY_FIELDS.some((f) => body[f] !== undefined)) {
     res.status(400).json({
-      error: "platform-send does not accept recipientEmail, bccEmails, ccEmails or replyToEmail: staff-bound notifications are delivered to the internal staff recipient list only",
+      error: `platform-send does not accept ${CALLER_DELIVERY_FIELDS.join(", ")}: staff-bound notifications are delivered to the internal staff recipient list only`,
     });
     return;
   }

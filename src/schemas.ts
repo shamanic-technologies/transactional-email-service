@@ -4,6 +4,7 @@ import { TEMPLATE_LAYOUTS } from "./lib/brand-layout.js";
 import { DELIVERY_STREAMS } from "./lib/delivery-stream.js";
 import { ORGLESS_PLATFORM_EVENTS } from "./lib/orgless-events.js";
 import { PLATFORM_STAFF_ALERTS } from "./lib/platform-staff-alerts.js";
+import { MAX_REFERENCES, MAX_REPLY_TO_ADDRESSES, MessageIdSchema, ReplyToAddressesSchema } from "./lib/reply-threading.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -44,7 +45,23 @@ export const SendRequestSchema = z
       description:
         "Reply address of the email being sent: forwarded as the provider-level Reply-To, so a recipient who hits Reply writes to this address. Never rendered into templates or stored in metadata. When absent, replies go to kevin@distribute.you exactly as before. Rejected on the staff-routed events that already refuse a caller-supplied recipient list.",
     }),
+    replyToAddresses: ReplyToAddressesSchema.optional().openapi({
+      description:
+        `Several reply addresses for the email being sent (1 to ${MAX_REPLY_TO_ADDRESSES}), each \`{ name?, email }\`, e.g. \`[{ "name": "Jane Doe", "email": "jane@acme.com" }, { "email": "kevin@ourdomain.com" }]\`. Delivered as ONE Reply-To header listing every address in this order (display names quoted by email-gateway), so a recipient who hits Reply writes to all of them (RFC 5322 3.6.2). A malformed address or a name with a line break refuses the send with 400. Mutually exclusive with \`replyToEmail\` (both = 400). Absent = exactly as before. Never rendered into templates or stored in metadata. Rejected on the staff-routed events that already refuse a caller-supplied recipient list.`,
+    }),
+    inReplyTo: MessageIdSchema.optional().openapi({
+      description:
+        "RFC 5322 Message-ID (angle brackets included) of the message this email answers, delivered as the In-Reply-To header so a reply to it stays in that conversation. Absent = no In-Reply-To header. Rejected on the staff-routed events that already refuse a caller-supplied recipient list.",
+    }),
+    references: z.array(MessageIdSchema).min(1).max(MAX_REFERENCES).optional().openapi({
+      description:
+        `The thread chain this email belongs to, oldest first: RFC 5322 Message-IDs (angle brackets included, 1 to ${MAX_REFERENCES}), delivered as ONE space-separated References header. Absent = no References header. Rejected on the staff-routed events that already refuse a caller-supplied recipient list.`,
+    }),
     metadata: z.record(z.string(), z.unknown()).optional().openapi({ description: "Template variables for {{variable}} interpolation" }),
+  })
+  .refine((b) => !(b.replyToEmail !== undefined && b.replyToAddresses !== undefined), {
+    message: "replyToEmail and replyToAddresses are mutually exclusive: name every reply address in replyToAddresses",
+    path: ["replyToAddresses"],
   })
   .openapi("SendRequest");
 
@@ -1160,7 +1177,7 @@ registry.registerPath({
     "For machine callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.\n\n" +
     "**Required headers:** `x-org-id`. `x-user-id` and `x-run-id` are honoured when present but never required, and are never substituted with a placeholder when absent.\n\n" +
     "**Accepted event types:** staff-bound events only (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`). Any other event type is rejected with 400, so no request on this path can reach a customer.\n\n" +
-    "`recipientEmail`, `bccEmails`, `ccEmails` and `replyToEmail` are rejected with 400: delivery is to the internal staff recipient list only.\n\n" +
+    "`recipientEmail`, `bccEmails`, `ccEmails`, `replyToEmail`, `replyToAddresses`, `inReplyTo` and `references` are rejected with 400: delivery is to the internal staff recipient list only.\n\n" +
     "**`provider_credits_exhausted`** — the event type a backend service raises when it detects that a paid third-party provider has run out of credits (e.g. apollo-service on Apollo.io credit exhaustion). Send it here: an org and an API key are enough, no acting user is needed.\n\n" +
     "```json\n" +
     "{\n" +
