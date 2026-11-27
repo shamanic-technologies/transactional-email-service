@@ -543,6 +543,32 @@ describe("pause, resume and cancel", () => {
     expect(new Set(mailed()).size).toBe(mailed().length);
   });
 
+  it("never resumes a release that runs under no campaign: it is relaunched under one (NEWSLETTER-0MARKUP-1121)", async () => {
+    await seedList(50);
+    const created = await createRelease({ subject: "Campaign-less", body: "hi", dailyLimit: 10 });
+    const releaseId = created.body.releaseId;
+
+    await tick();
+    const beforePause = mailed().length;
+    await request(app).post(`/mailing-lists/releases/${releaseId}/pause`).set(AUTH).expect(200);
+    // A release created before NEWSLETTER-CAMPAIGN-1108 carries no campaign.
+    await sql`UPDATE mailing_list_releases SET campaign_id = NULL WHERE id = ${releaseId}`;
+
+    const resumed = await request(app).post(`/mailing-lists/releases/${releaseId}/resume`).set(AUTH);
+    expect(resumed.status).toBe(409);
+    expect(resumed.body.code).toBe("campaign_required");
+    expect((await readRelease(releaseId)).status).toBe("paused");
+
+    await drain();
+    expect(mailed().length).toBe(beforePause);
+
+    await request(app).post(`/mailing-lists/releases/${releaseId}/cancel`).set(AUTH).expect(200);
+    const relaunched = await request(app).post(`/mailing-lists/releases/${releaseId}/relaunch`).set(AUTH).send({ dailyLimit: 50 });
+    expect(relaunched.status).toBe(201);
+    const [row] = await sql`SELECT campaign_id FROM mailing_list_releases WHERE id = ${relaunched.body.releaseId}`;
+    expect(row.campaign_id).toBe("campaign_newsletter");
+  });
+
   it("cancels for good: it sends nothing more, never resumes, and says so for every waiting address", async () => {
     await seedList(50);
     const created = await createRelease({ subject: "Cancelled", body: "hi", dailyLimit: 50 });

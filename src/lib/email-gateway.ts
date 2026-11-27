@@ -3,6 +3,7 @@ import { gatewaySendError } from "./send-outcome.js";
 import { FOUNDER_EMAIL } from "./founder.js";
 import type { DeliveryStream } from "./delivery-stream.js";
 import type { OutcomeSubject } from "./outcome-subject.js";
+import type { ReplyToAddress } from "./reply-threading.js";
 
 const EMAIL_GATEWAY_SERVICE_URL = process.env.EMAIL_GATEWAY_SERVICE_URL || "https://email-gateway.distribute.you";
 const EMAIL_GATEWAY_SERVICE_API_KEY = process.env.EMAIL_GATEWAY_SERVICE_API_KEY;
@@ -23,8 +24,12 @@ interface SendEmailParams {
   bcc?: string;
   /** Visible copy, comma-separated. Omitted means the message carries no Cc header. */
   cc?: string;
-  /** Reply address. Omitted means replies are invited to the founder. */
-  replyTo?: string;
+  /** One reply address, or several structured ones (REP-REPLY-1127; the gateway renders the header). Omitted means replies are invited to the founder. */
+  replyTo?: string | ReplyToAddress[];
+  /** In-Reply-To Message-ID (angle brackets included). Omitted = no key on the wire. */
+  inReplyTo?: string;
+  /** References: space-separated Message-IDs. Omitted = no key on the wire. */
+  references?: string;
   /** Omitted = the gateway's default (broadcast), byte for byte today's send. */
   stream?: DeliveryStream;
   /** `platform` = platform-paid (no org credit gate, no cost on the org). Omitted = no key on the wire, the org pays. */
@@ -96,6 +101,8 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
       ...(bcc && { bcc }),
       ...(cc && { cc }),
       replyTo,
+      ...(params.inReplyTo && { inReplyTo: params.inReplyTo }),
+      ...(params.references && { references: params.references }),
       // Only the non-default choice is put on the wire, so every other send's
       // request body is unchanged.
       ...(params.stream === "transactional" && { stream: params.stream }),

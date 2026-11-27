@@ -46,6 +46,10 @@ When present, these are stored in the `email_events` table and forwarded to all 
 | `recipientEmail` | No       | Direct recipient email (overrides client-service resolution if provided) |
 | `bccEmails`      | No       | Blind-copy recipient emails delivered as provider-level BCC; not rendered into templates or stored in metadata. On a customer-facing event `kevin@distribute.you` is added to whatever is supplied here (see Blind copy and replies); on a staff-routed event nothing is added |
 | `ccEmails`       | No       | Visible-copy recipient emails delivered as provider-level Cc; not rendered into templates or stored in metadata. Nothing is ever added to this list, and omitting it sends no Cc header at all (see Visible copy). Rejected on the staff-routed events that already refuse a caller-supplied recipient list |
+| `replyToEmail`   | No       | One reply address (Reply-To). Absent = `kevin@distribute.you` |
+| `replyToAddresses` | No     | Several reply addresses, `[{ name?, email }]` (1-10), delivered as ONE Reply-To header in this order, so Reply writes to all of them. Mutually exclusive with `replyToEmail` (400). See Replying inside a thread |
+| `inReplyTo`      | No       | Message-ID (`<id@host>`) this email answers, delivered as the In-Reply-To header |
+| `references`     | No       | Thread chain, oldest first: Message-IDs (`<id@host>`, 1-50), delivered as ONE space-separated References header |
 | `metadata`       | No       | Template-specific data                   |
 
 **Error responses:**
@@ -75,7 +79,7 @@ Mailing-list updates (markdown and authored HTML) carry it too, followed by a `G
 
 Same body, dedup, template resolution, run tracking and response shape as `POST /send`, for callers that hold an organisation and an API key but no end-user identity — e.g. stripe-service reacting to a Stripe webhook, where the customer acted inside Stripe's billing portal and no user of ours took any action.
 
-Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails` and `ccEmails` are rejected for the same reason.
+Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails`, `ccEmails`, `replyToEmail`, `replyToAddresses`, `inReplyTo` and `references` are rejected for the same reason.
 
 **Monitoring alerts are recorded, never emailed** (SIGNUP-EMAILS-1111, owner 2026-10-22: a monitoring alert is red on dashboard v2 Monitoring, never an email): `provider_credits_exhausted`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck` (and `sending_domain_blocklisted` on `/platform-staff-alert`, the newsletter release halt/stall raised by the worker) keep their validation and dedup bound, but write one `email_events` row with status `recorded` and reach no gateway, no run, no template. Response: `{ results: [{ email, sent: false, reason: "monitoring_alert" | "duplicate" }] }`. Read them with `GET /internal/monitoring-alerts`. Business news (signups, payment method removed, daily digest, uncollectable debt) is still emailed. The alert sections below describe each alert's facts and dedup; where they say "mails staff", read "records for Monitoring".
 
@@ -606,6 +610,10 @@ The blind copy is exactly ONE address, hardcoded in `src/lib/founder.ts`. A mult
 
 Internal visibility does not rest on the blind copy alone: Postmark keeps the full message in its Activity archive for 45 days, and postmark-service writes a permanent metadata row per send.
 
+### Replying inside a thread (REP-REPLY-1127)
+
+`replyToAddresses`, `inReplyTo` and `references` let a caller make Reply in the recipient's own mail app write to SEVERAL people, inside an existing conversation. Built for instantly-service's positive-reply email to a sales rep: Reply-To = the prospect + our thread's sending mailbox, In-Reply-To/References = the prospect's thread, so the rep's Reply lands in the prospect's conversation and in the mailbox we poll. Addresses travel structured (`{name?, email}`) to email-gateway, which renders the header and quotes every display name: nothing here joins a header string, so a comma in a name cannot split an address. A name with a line break, a double quote or a backslash (the gateway refuses those too), a malformed address or Message-ID is a 400, nothing sent. All three are optional and a caller naming none sends the exact gateway body it sent before (Reply-To = founder default, no threading keys). Refused on the staff-routed events and on `POST /platform-send`, like `replyToEmail`.
+
 ### Visible copy
 
 `ccEmails` puts an address on the Cc header, which every recipient of the message can see and a reply-all reaches. That is the difference from a blind copy, and it is a difference about the reader rather than about the plumbing: somebody blind-copied receives an email addressed to a stranger, which reads as mis-sent, and their reply-all reaches nobody on our side. So a person who is a PARTY to the conversation goes in Cc, and a person who is only watching it goes in Bcc.
@@ -706,6 +714,7 @@ src/
     mailing-list-sender.ts # The address an update leaves from when the caller states none
     why.ts              # "Revenue made easy." sign-off: who gets it, where it goes, never twice
     brand-layout.ts     # distribute.you email chrome wrapped around bare customer templates
+    reply-threading.ts  # Several Reply-To addresses + In-Reply-To/References: validation, gateway shape (REP-REPLY-1127)
     delivery-stream.ts  # Template delivery: broadcast (default) or transactional (person-to-person, no unsubscribe)
     update-body.ts      # Turns a stated body into the two parts a message carries; shared by preview, send and release
     release-pacing.ts   # Pure: how much one tick may send, and when outcomes are bad enough to stop
