@@ -103,3 +103,50 @@ describe("POST /platform-staff-alert inbox_placement_below_bar (retired, databas
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("POST /platform-staff-alert security_alert (database-backed, SECURITY-ALERTS-1128)", () => {
+  const SEC = {
+    eventType: "security_alert",
+    eventId: "caddy_traversal:203.0.113.7:2026-11-28",
+    metadata: { kind: "caddy_traversal", summary: "Someone tried to read files outside the site", evidence: "IP 203.0.113.7\nGET /../etc/passwd -> 400" },
+  };
+
+  it("emails once per incident and is served red on Monitoring", async () => {
+    const first = await post(SEC);
+    const second = await post(SEC);
+    expect(first.body).toMatchObject({ sent: true, duplicate: false });
+    expect(second.body).toMatchObject({ sent: false, duplicate: true });
+    expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(ADMIN_EMAILS.length);
+    const sent = vi.mocked(sendOrglessPlatformEmail).mock.calls[0][0];
+    expect(sent.subject).toBe("Security alert: Someone tried to read files outside the site");
+    expect(sent.htmlBody).toContain("GET /../etc/passwd -&gt; 400");
+
+    const res = await request(app).get("/internal/monitoring-alerts?days=7").set("x-api-key", API_KEY);
+    const sec = res.body.alerts.find((a: { eventType: string }) => a.eventType === "security_alert");
+    expect(sec.verdict).toBe("broken");
+    expect(sec.label).toBe("Someone may be breaking in");
+    expect(sec.daily[6].count).toBe(ADMIN_EMAILS.length);
+    expect(sec.recent[0].metadata.kind).toBe("caddy_traversal");
+  });
+
+  it("a [TEST] replay is emailed but never turns Monitoring red", async () => {
+    const res = await post({ ...SEC, eventId: "test:caddy_traversal", metadata: { ...SEC.metadata, test: "true" } });
+    expect(res.body.sent).toBe(true);
+    expect(vi.mocked(sendOrglessPlatformEmail).mock.calls[0][0].subject).toMatch(/^\[TEST\] Security alert: /);
+
+    const feed = await request(app).get("/internal/monitoring-alerts?days=7").set("x-api-key", API_KEY);
+    const sec = feed.body.alerts.find((a: { eventType: string }) => a.eventType === "security_alert");
+    expect(sec.verdict).toBe("ok");
+    expect(sec.recent[0].metadata.test).toBe("true");
+  });
+
+  it("is refused on POST /send: raised on /platform-staff-alert only", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("x-api-key", API_KEY)
+      .set({ "x-org-id": "org_test", "x-user-id": "user_test", "x-run-id": "run_test" })
+      .send({ eventType: "security_alert", recipientEmail: "someone@example.com", metadata: SEC.metadata });
+    expect(res.status).toBe(400);
+    expect(sendOrglessPlatformEmail).not.toHaveBeenCalled();
+  });
+});

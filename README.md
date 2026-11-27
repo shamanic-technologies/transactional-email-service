@@ -81,7 +81,9 @@ Same body, dedup, template resolution, run tracking and response shape as `POST 
 
 Only staff-bound event types are accepted (`signup_notification`, `signin_notification`, `user_active`, `brand_daily_budget_changed`, `payment_method_removed`, `staff_daily_digest`, `provider_credits_exhausted`, `unpaid_debt_uncollectable`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck`), so no request on this path can reach a customer. `recipientEmail`, `bccEmails`, `ccEmails`, `replyToEmail`, `replyToAddresses`, `inReplyTo` and `references` are rejected for the same reason.
 
-**Monitoring alerts are recorded, never emailed** (SIGNUP-EMAILS-1111, owner 2026-10-22: a monitoring alert is red on dashboard v2 Monitoring, never an email): `provider_credits_exhausted`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck` (and `sending_domain_blocklisted` on `/platform-staff-alert`, the newsletter release halt/stall raised by the worker) keep their validation and dedup bound, but write one `email_events` row with status `recorded` and reach no gateway, no run, no template. Response: `{ results: [{ email, sent: false, reason: "monitoring_alert" | "duplicate" }] }`. Read them with `GET /internal/monitoring-alerts`. Business news (signups, payment method removed, daily digest, uncollectable debt) is still emailed. The alert sections below describe each alert's facts and dedup; where they say "mails staff", read "records for Monitoring".
+**Monitoring alerts are recorded, never emailed** (SIGNUP-EMAILS-1111, owner 2026-10-22: a monitoring alert is red on dashboard v2 Monitoring, never an email): `provider_credits_exhausted`, `campaign_failing`, `audience_refill_failed`, `trigger_silent`, `trigger_occurrence_stuck` (and `sending_domain_blocklisted` on `/platform-staff-alert`, the newsletter release halt/stall raised by the worker) keep their validation and dedup bound, but write one `email_events` row with status `recorded` and reach no gateway, no run, no template. Response: `{ results: [{ email, sent: false, reason: "monitoring_alert" | "duplicate" }] }`. Read them with `GET /internal/monitoring-alerts`. Business news (signups, payment method removed, daily digest, uncollectable debt) is still emailed.
+
+**Security alerts are emailed AND red on Monitoring** (SECURITY-ALERTS-1128, owner 2026-11-28): `POST /platform-staff-alert` with `eventType: "security_alert"`, API key only, no org/user. Required metadata `kind` (slug of the watcher + signal), `summary` (one line: what happened, where; also the subject `Security alert: <summary>`), `evidence` (a few lines: IP, path, caller, counts); optional `firstSeenAt` (ISO), `test: "true"` (a watcher's proof-of-fire replay: subject prefixed `[TEST] `, never red). Mailed to the staff list only, once per `eventId` (= one incident, never one request), HTML values escaped (the evidence quotes what an attacker chose). Served on `GET /internal/monitoring-alerts` as `security_alert`. Refused on `POST /send`. The alert sections below describe each alert's facts and dedup; where they say "mails staff", read "records for Monitoring".
 
 With no acting user, the `email_events` row stores `user_id = NULL`, the runs-service run is created org-only, no `x-user-id` is forwarded downstream, and no actor email is added to metadata.
 
@@ -289,7 +291,7 @@ Every transactional email sent to a client, so it shows in that person's Unibox 
 
 ### `GET /internal/monitoring-alerts`
 
-**Internal endpoint** — requires `x-api-key` only. Query: `days` (1-90, default 30). Read by dashboard v2 Monitoring (SIGNUP-EMAILS-1111). Every monitoring alert type with `{ eventType, label, verdict: "broken" | "ok", reason, lastRaisedAt, daily: [{ day, count }], recent: [{ raisedAt, orgId, campaignId, metadata }] }`, broken first. `broken` = raised in the last 24 h. History includes alerts that were still emailed before this change.
+**Internal endpoint** — requires `x-api-key` only. Query: `days` (1-90, default 30). Read by dashboard v2 Monitoring (SIGNUP-EMAILS-1111). Every monitoring alert type with `{ eventType, label, verdict: "broken" | "ok", reason, lastRaisedAt, daily: [{ day, count }], recent: [{ raisedAt, orgId, campaignId, metadata }] }`, broken first. `broken` = raised in the last 24 h. History includes alerts that were still emailed before this change. `security_alert` is served too (emailed AND shown, SECURITY-ALERTS-1128); a row whose metadata says `test: "true"` never counts toward `daily` or `broken`, it only shows in `recent`.
 
 ### `GET /internal/subscriber-links/{linkId}`
 
@@ -727,7 +729,8 @@ src/
     release-health.ts   # Reads a release's own delivery outcomes back from email-gateway, keyed on the release's run
     release-worker.ts   # The interval that releases an update over days: claim, reconcile suppression, send, settle
     staff-recipients.ts # Where a staff-bound message goes; shared by /send and the release worker
-    monitoring-alerts.ts # Alerts recorded for dashboard v2 Monitoring, never emailed; GET /internal/monitoring-alerts reader
+    monitoring-alerts.ts # Alerts recorded for dashboard v2 Monitoring, never emailed (+ security_alert, emailed AND shown); GET /internal/monitoring-alerts reader
+    security-alert.ts   # security_alert template variables: escaped HTML twins, [TEST] prefix (SECURITY-ALERTS-1128)
     send-outcome.ts     # Gateway 504 send_outcome_unknown -> SendOutcomeUnknownError: maybe delivered, never re-sent
     staff-events.ts     # Event types routed to the staff list instead of a client (ADMIN_NOTIFICATION_EVENTS)
     sign-rendered.ts    # Dresses a rendered customer template as distribute.you (layout / why); shared by send, preview, Unibox replay
@@ -761,7 +764,7 @@ src/
   templates/
     index.ts            # Template registry (DB lookup, {{var}} interpolation)
     syntax.ts           # Template syntax contract: refuses any {{ that is not a {{name}} placeholder
-    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted, mailing_list_release_halted, mailing_list_release_stalled, campaign_failing, audience_refill_failed, trigger_silent, trigger_occurrence_stuck)
+    staff-alerts.ts     # Staff-alert templates this service owns, upserted on boot (provider_credits_exhausted, mailing_list_release_halted, mailing_list_release_stalled, campaign_failing, audience_refill_failed, trigger_silent, trigger_occurrence_stuck, sending_domain_blocklisted, distry_nonclient_day_budget_reached, security_alert)
 tests/
   migrations.test.ts    # Validates migration files use idempotent patterns
   ...

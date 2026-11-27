@@ -14,6 +14,7 @@ import { traceEvent } from "../lib/trace-event.js";
 import { OrglessSendRequestSchema, PreviewSendRequestSchema, SendRequestSchema } from "../schemas.js";
 import { ORGLESS_PLATFORM_EVENTS, isOrglessPlatformEvent } from "../lib/orgless-events.js";
 import { PLATFORM_STAFF_ALERTS, isPlatformStaffAlert, platformStaffAlertDedupKey } from "../lib/platform-staff-alerts.js";
+import { SECURITY_ALERT, securityAlertTemplateVars } from "../lib/security-alert.js";
 import { ADMIN_NOTIFICATION_EVENTS } from "../lib/staff-events.js";
 import { signRendered } from "../lib/sign-rendered.js";
 import { sentMessageColumns } from "../lib/sent-emails.js";
@@ -230,6 +231,13 @@ async function handleSend(req: Request, res: Response) {
 
     const body = parsed.data;
     const { orgId, userId, runId, campaignId: headerCampaignId, brandIds: headerBrandIds, workflowSlug, featureSlug, audienceId } = res.locals as PlatformIdentityLocals;
+
+    // A security alert is raised on POST /platform-staff-alert only: there it is
+    // rendered from escaped values and goes to the staff list, never a chosen address.
+    if (body.eventType === SECURITY_ALERT) {
+      res.status(400).json({ error: `'${SECURITY_ALERT}' is raised on POST /platform-staff-alert only` });
+      return;
+    }
 
     // Staff-only alerts carry no caller-chosen destination on any route
     if (
@@ -764,8 +772,9 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
     res.status(404).json({ error: messageOf(err), code: "template_not_found" });
     return;
   }
-  // Staff mail: no brand layout, no why (signRendered is for customer mail)
-  const template = templateFn(metadata);
+  // Staff mail: no brand layout, no why (signRendered is for customer mail).
+  // security_alert renders from escaped derived variables (lib/security-alert.ts).
+  const template = templateFn(eventType === SECURITY_ALERT ? securityAlertTemplateVars(metadata) : metadata);
   const recordedMetadata = { ...metadata, eventId };
 
   let sentRunId: string | null = null;

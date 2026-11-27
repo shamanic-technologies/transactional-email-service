@@ -668,6 +668,16 @@ export const DistryNonclientDayBudgetReachedMetadataSchema = z
   })
   .openapi("DistryNonclientDayBudgetReachedMetadata");
 
+export const SecurityAlertMetadataSchema = z
+  .object({
+    kind: z.string().min(1).openapi({ description: "Short slug naming the watcher and the signal.", example: "caddy_traversal" }),
+    summary: z.string().min(1).openapi({ description: "One line, plain words: what happened, where. Also the email subject.", example: "Someone tried to read files outside the site on api.distribute.you" }),
+    evidence: z.string().min(1).openapi({ description: "A few lines of facts: IP, path, caller, counts. Shown escaped, line breaks kept.", example: "IP 203.0.113.7\nGET /v1/../../etc/passwd -> 400 no_traversal\n14 requests in 2 min" }),
+    firstSeenAt: z.string().optional().openapi({ description: "When the incident was first seen, ISO 8601.", example: "2026-11-28T03:12:00Z" }),
+    test: z.string().optional().openapi({ description: "\"true\" marks a watcher's proof-of-fire replay: subject prefixed [TEST], never red on Monitoring.", example: "true" }),
+  })
+  .openapi("SecurityAlertMetadata");
+
 export const InboxPlacementBelowBarMetadataSchema = z
   .object({
     provider: z.string().min(1).openapi({ description: "The inbox provider, human label.", example: "Google" }),
@@ -691,8 +701,8 @@ export const PlatformStaffAlertRequestSchema = z
         "Caller-chosen id of ONE occurrence of the fact (e.g. `<domain>:<list>:<listedSince>`). The same id delivers once, ever: a second call answers 200 `duplicate: true`. A call whose delivery failed (502) can be retried with the same id and sends.",
       example: "boostdistribute.com:SURBL:2026-10-16",
     }),
-    metadata: z.union([SendingDomainBlocklistedMetadataSchema, DistryNonclientDayBudgetReachedMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
-      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`. `sending_domain_blocklisted` is RECORDED for dashboard v2 Monitoring and emails nobody (`sent: false`); `distry_nonclient_day_budget_reached` is EMAILED to the staff list (owner exception 2026-11-19), once per eventId.",
+    metadata: z.union([SendingDomainBlocklistedMetadataSchema, DistryNonclientDayBudgetReachedMetadataSchema, SecurityAlertMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
+      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`. `sending_domain_blocklisted` is RECORDED for dashboard v2 Monitoring and emails nobody (`sent: false`); `distry_nonclient_day_budget_reached` is EMAILED to the staff list (owner exception 2026-11-19), once per eventId; `security_alert` is EMAILED to the staff list AND served red on `GET /internal/monitoring-alerts` (owner 2026-11-28), once per eventId = once per incident.",
     }),
   })
   .strict()
