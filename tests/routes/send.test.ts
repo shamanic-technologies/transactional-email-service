@@ -284,6 +284,74 @@ describe("POST /send", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("forwards several replyToAddresses to the gateway, structured and in order", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({
+        eventType: "positive-reply-celebration",
+        recipientEmail: "rep@example.com",
+        replyToAddresses: [
+          { name: "Prospect Name", email: "p@acme.ch" },
+          { name: "Lourd, Kevin", email: "kevin@ourdomain.com" },
+          { email: "bare@ourdomain.com" },
+        ],
+        inReplyTo: "<abc123@mail.acme.ch>",
+        references: ["<first@ourdomain.com>", "<abc123@mail.acme.ch>"],
+      });
+
+    expect(res.status).toBe(200);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(options.body);
+
+    expect(body.to).toBe("rep@example.com");
+    // Structured all the way: a comma in a name can never split one address in two
+    expect(body.replyTo).toEqual([
+      { name: "Prospect Name", email: "p@acme.ch" },
+      { name: "Lourd, Kevin", email: "kevin@ourdomain.com" },
+      { email: "bare@ourdomain.com" },
+    ]);
+    expect(body.inReplyTo).toBe("<abc123@mail.acme.ch>");
+    expect(body.references).toBe("<first@ourdomain.com> <abc123@mail.acme.ch>");
+    expect(body.bcc).toBe("kevin@distribute.you");
+    expect(JSON.stringify(body)).not.toContain("replyToAddresses");
+  });
+
+  it("a caller naming neither reply list nor threading sends the exact same gateway body as before", async () => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", recipientEmail: "customer@example.com" });
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.replyTo).toBe("kevin@distribute.you");
+    expect(body).not.toHaveProperty("inReplyTo");
+    expect(body).not.toHaveProperty("references");
+  });
+
+  it.each([
+    ["a malformed address", { replyToAddresses: [{ email: "a@x.com, b@x.com" }] }],
+    ["a name with a line break", { replyToAddresses: [{ name: "Evil\r\nBcc: x@y.com", email: "a@x.com" }] }],
+    ["more than 10 addresses", { replyToAddresses: Array.from({ length: 11 }, (_, i) => ({ email: `a${i}@x.com` })) }],
+    ["an empty list", { replyToAddresses: [] }],
+    ["both replyToEmail and replyToAddresses", { replyToEmail: "a@x.com", replyToAddresses: [{ email: "b@x.com" }] }],
+    ["an inReplyTo without angle brackets", { inReplyTo: "abc@host" }],
+    ["a references entry without angle brackets", { references: ["<ok@host>", "bad@host"] }],
+  ])("refuses %s", async (_label, extra) => {
+    const res = await request(app)
+      .post("/send")
+      .set("X-API-Key", "test-service-key")
+      .set(HEADERS)
+      .send({ eventType: "campaign_created", recipientEmail: "customer@example.com", ...extra });
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps a caller's bccEmails and adds the founder to them", async () => {
     const res = await request(app)
       .post("/send")
@@ -1334,6 +1402,15 @@ describe("POST /platform-send — payment_method_removed (no acting user)", () =
     expect(withBcc.status).toBe(400);
     expect(withCc.status).toBe(400);
     expect(withReplyTo.status).toBe(400);
+
+    for (const extra of [{ replyToAddresses: [{ email: "a@x.com" }] }, { inReplyTo: "<a@x>" }, { references: ["<a@x>"] }]) {
+      const r = await request(app)
+        .post("/platform-send")
+        .set("X-API-Key", "test-service-key")
+        .set(ORG_ONLY)
+        .send({ eventType: "payment_method_removed", ...extra });
+      expect(r.status).toBe(400);
+    }
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
