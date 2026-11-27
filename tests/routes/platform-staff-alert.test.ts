@@ -33,6 +33,10 @@ vi.mock("../../src/lib/runs-client.js", () => ({
 vi.mock("../../src/lib/trace-event.js", () => ({ traceEvent: vi.fn() }));
 
 import request from "supertest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resetSecurityOriginCache } from "../../src/lib/security-origin.js";
 import express from "express";
 import sendRoutes from "../../src/routes/send.js";
 import { createRun, createPlatformRun, updatePlatformRun } from "../../src/lib/runs-client.js";
@@ -275,10 +279,84 @@ describe("POST /platform-staff-alert security_alert (emailed + Monitoring, SECUR
     expect(sent.subject).toBe("Security alert: <b>hi</b> there");
   });
 
-  it("a test replay says [TEST] in the subject", async () => {
-    await post({ ...SEC_BODY, metadata: { ...SEC_METADATA, test: "true" } });
-    const sent = JSON.parse(String(gatewayCalls()[0][1].body));
-    expect(sent.subject).toBe(`[TEST] Security alert: ${SEC_METADATA.summary}`);
+  it("a test replay is recorded for Monitoring and emails nobody", async () => {
+    const res = await post({ ...SEC_BODY, metadata: { ...SEC_METADATA, test: "true" } });
+    expect(res.body).toEqual({ sent: false, duplicate: false, eventId: SEC_BODY.eventId, runId: null, ours: "a test replay" });
+    expect(gatewayCalls()).toHaveLength(0);
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "recorded", dedupKey: `platform-staff-alert:security_alert:${SEC_BODY.eventId}:ours`, metadata: expect.objectContaining({ ours: "a test replay", test: "true" }) })
+    );
+  });
+
+  describe("caused by us (SECURITY-ALERTS-OURS-1128)", () => {
+    let dir: string;
+    const NOW = Date.now();
+    const writeStaff = (entries: Record<string, string>) => writeFileSync(join(dir, "staff-ips.json"), JSON.stringify(entries));
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "sec-origin-"));
+      process.env.SECURITY_STAFF_IPS_FILE = join(dir, "staff-ips.json");
+      resetSecurityOriginCache();
+      writeStaff({ "94.131.226.180": new Date(NOW - 10 * 60_000).toISOString() });
+    });
+    afterEach(() => {
+      delete process.env.SECURITY_STAFF_IPS_FILE;
+      resetSecurityOriginCache();
+    });
+
+    const ours = (metadata: Record<string, string>) => post({ ...SEC_BODY, metadata: { ...SEC_METADATA, ...metadata } });
+
+    it("a staff IP (logged in with our SSH key): recorded, 0 email", async () => {
+      const res = await ours({ summary: "The platform API key was used from 94.131.226.180", originIp: "94.131.226.180" });
+      expect(res.body.ours).toMatch(/94\.131\.226\.180 logged into our server/);
+      expect(res.body.sent).toBe(false);
+      expect(gatewayCalls()).toHaveLength(0);
+    });
+
+    it("from inside the box (docker exec, curl on the box) while one of us is logged in: recorded, 0 email", async () => {
+      for (const originIp of ["172.18.0.1", "172.18.0.23", "127.0.0.1", "::ffff:172.18.0.9", "62.83.93.230"]) {
+        const res = await ours({ originIp });
+        expect(res.body.ours, originIp).toMatch(/from inside our server/);
+      }
+      expect(gatewayCalls()).toHaveLength(0);
+    });
+
+    it("a staff test account: recorded, 0 email", async () => {
+      const res = await ours({ actorUserId: "d0855655-d7a4-41b5-af49-e2dd357b60fe", originIp: "203.0.113.7" });
+      expect(res.body.ours).toBe("our staff test account kevin@pressbeat.io");
+      expect(gatewayCalls()).toHaveLength(0);
+    });
+
+    it("the outside scanner (195.178.110.132) still emails", async () => {
+      const res = await ours({ summary: "One address got 315 error answers in 5 minutes (probing)", originIp: "195.178.110.132" });
+      expect(res.body).toEqual({ sent: true, duplicate: false, eventId: SEC_BODY.eventId, runId: "platform-run-1" });
+      expect(gatewayCalls()).toHaveLength(ADMIN_EMAILS.length);
+    });
+
+    it("inside the box with NOBODY of us logged in (the 2026-11-20 Windmill case) still emails", async () => {
+      writeStaff({ "94.131.226.180": new Date(NOW - 3 * 3_600_000).toISOString() });
+      const res = await ours({ originIp: "172.18.0.31" });
+      expect(res.body.sent).toBe(true);
+      expect(gatewayCalls()).toHaveLength(ADMIN_EMAILS.length);
+    });
+
+    it("inside the box but acting for a customer still emails", async () => {
+      const res = await ours({ originIp: "172.18.0.1", originRelays: "true" });
+      expect(res.body.sent).toBe(true);
+    });
+
+    it("no staff list readable: emails", async () => {
+      process.env.SECURITY_STAFF_IPS_FILE = join(dir, "absent.json");
+      resetSecurityOriginCache();
+      const res = await ours({ originIp: "94.131.226.180" });
+      expect(res.body.sent).toBe(true);
+    });
+
+    it("a caller cannot state `ours` itself", async () => {
+      const res = await ours({ originIp: "195.178.110.132", ours: "trust me" });
+      expect(res.body.sent).toBe(true);
+      expect(mockValues).toHaveBeenCalledWith(expect.objectContaining({ status: "pending", metadata: expect.not.objectContaining({ ours: "trust me" }) }));
+    });
   });
 
   it("firstSeenAt is optional", async () => {

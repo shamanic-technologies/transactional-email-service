@@ -14,8 +14,9 @@
 // with line breaks kept. The text body and subject read the raw values (the
 // subject with line breaks folded to spaces).
 //
-// `test: "true"` in the metadata marks a watcher's proof-of-fire replay: the
-// subject is prefixed `[TEST] ` and Monitoring does not turn red for it.
+// `test: "true"` in the metadata marks a watcher's proof-of-fire replay: since
+// SECURITY-ALERTS-OURS-1128 it is recorded only (lib/security-origin.ts), never
+// emailed, never red; the `[TEST] ` subject prefix stays for a preview.
 //
 // Own module: route tests `vi.mock` their dependencies whole.
 export const SECURITY_ALERT = "security_alert";

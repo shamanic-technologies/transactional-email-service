@@ -15,6 +15,7 @@ import { OrglessSendRequestSchema, PreviewSendRequestSchema, SendRequestSchema }
 import { ORGLESS_PLATFORM_EVENTS, isOrglessPlatformEvent } from "../lib/orgless-events.js";
 import { PLATFORM_STAFF_ALERTS, isPlatformStaffAlert, platformStaffAlertDedupKey } from "../lib/platform-staff-alerts.js";
 import { SECURITY_ALERT, securityAlertTemplateVars } from "../lib/security-alert.js";
+import { ownOriginReason } from "../lib/security-origin.js";
 import { ADMIN_NOTIFICATION_EVENTS } from "../lib/staff-events.js";
 import { signRendered } from "../lib/sign-rendered.js";
 import { sentMessageColumns } from "../lib/sent-emails.js";
@@ -735,6 +736,29 @@ async function handlePlatformStaffAlert(req: Request, res: Response) {
   if (missing.length > 0) {
     res.status(400).json({ error: `'${eventType}' requires non-empty string metadata: ${missing.join(", ")}`, code: "missing_metadata", missing });
     return;
+  }
+
+  // A security alert caused by us (SECURITY-ALERTS-OURS-1128, lib/security-origin.ts): recorded for
+  // Monitoring with the reason, never emailed. Its own dedup key, so the same incident raised later by
+  // someone who is NOT us still finds its plain key free and emails.
+  if (eventType === SECURITY_ALERT) {
+    delete metadata.ours; // only this service states it
+    const ours = ownOriginReason(metadata);
+    if (ours) {
+      let recordedCount = 0;
+      for (const email of ADMIN_EMAILS) {
+        const dedupKey = `${platformStaffAlertDedupKey(eventType, eventId, email, ADMIN_EMAILS.length)}:ours`;
+        const recorded = await db
+          .insert(emailEvents)
+          .values({ eventType, recipientEmail: email, dedupKey, userId: null, orgId: null, status: ALERT_RECORDED, metadata: { ...metadata, eventId, ours } })
+          .onConflictDoNothing({ target: emailEvents.dedupKey })
+          .returning({ id: emailEvents.id });
+        recordedCount += recorded.length;
+      }
+      console.log(`[platform-staff-alert] security_alert ${eventId} is ours (${ours}): recorded, not emailed`);
+      res.json({ sent: false, duplicate: recordedCount === 0, eventId, runId: null, ours });
+      return;
+    }
   }
 
   // Recorded for dashboard v2 Monitoring, never emailed (lib/monitoring-alerts.ts).
