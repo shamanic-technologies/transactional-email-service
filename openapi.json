@@ -132,7 +132,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200,
-                  "description": "Display name, e.g. \"Jane Doe\". Absent = the bare address."
+                  "description": "Display name, e.g. \"Jane Doe\" (commas and non-ASCII fine; a double quote, backslash or line break = 400). Absent = the bare address."
                 },
                 "email": {
                   "type": "string",

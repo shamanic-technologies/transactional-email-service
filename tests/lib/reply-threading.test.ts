@@ -14,7 +14,9 @@ describe("reply-threading", () => {
     expect(ReplyToAddressesSchema.safeParse([{ email: "nope" }]).success).toBe(false);
     expect(ReplyToAddressesSchema.safeParse([]).success).toBe(false);
     expect(ReplyToAddressesSchema.safeParse(Array.from({ length: 11 }, (_, i) => ({ email: `a${i}@x.com` }))).success).toBe(false);
-    expect(ReplyToAddressesSchema.safeParse([{ name: "Doe, Jane", email: "a@x.com" }]).success).toBe(true);
+    expect(ReplyToAddressesSchema.safeParse([{ name: 'J "JD" Doe', email: "a@x.com" }]).success).toBe(false);
+    expect(ReplyToAddressesSchema.safeParse([{ name: "J \\ Doe", email: "a@x.com" }]).success).toBe(false);
+    expect(ReplyToAddressesSchema.safeParse([{ name: "Doe, Jéan", email: "a@x.com" }]).success).toBe(true);
   });
 
   it("accepts only an angle-bracketed Message-ID", () => {

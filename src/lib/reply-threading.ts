@@ -9,8 +9,9 @@ import { z } from "zod";
 // Addresses travel STRUCTURED ({name?, email}) all the way to email-gateway,
 // which renders the one RFC 5322 Reply-To header (quoting every display name).
 // Nothing here parses or joins a header string: a comma inside a name can
-// never split one address into two. A line break in a name is refused
-// (header injection), as the gateway also does.
+// never split one address into two. A name with a line break (header injection), a double quote or a
+// backslash is refused here, as email-gateway refuses it: a 400 at our door
+// instead of a failed send.
 
 export const MAX_REPLY_TO_ADDRESSES = 10;
 export const MAX_REFERENCES = 50;
@@ -20,9 +21,9 @@ export const ReplyToAddressSchema = z.object({
     .string()
     .min(1)
     .max(200)
-    .refine((v) => !/[\r\n]/.test(v), "name must not contain a line break")
+    .refine((v) => !/[\r\n"\\]/.test(v), "name must not contain a line break, a double quote or a backslash")
     .optional()
-    .describe("Display name, e.g. \"Jane Doe\". Absent = the bare address."),
+    .describe("Display name, e.g. \"Jane Doe\" (commas and non-ASCII fine; a double quote, backslash or line break = 400). Absent = the bare address."),
   email: z.string().email().describe("The address"),
 });
 
