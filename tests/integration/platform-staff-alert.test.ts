@@ -1,4 +1,8 @@
 import request from "supertest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resetSecurityOriginCache } from "../../src/lib/security-origin.js";
 import { vi, beforeAll, beforeEach, afterAll, describe, it, expect } from "vitest";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { eq } from "drizzle-orm";
@@ -129,15 +133,44 @@ describe("POST /platform-staff-alert security_alert (database-backed, SECURITY-A
     expect(sec.recent[0].metadata.kind).toBe("caddy_traversal");
   });
 
-  it("a [TEST] replay is emailed but never turns Monitoring red", async () => {
+  it("a [TEST] replay is recorded, emails nobody and never turns Monitoring red", async () => {
     const res = await post({ ...SEC, eventId: "test:caddy_traversal", metadata: { ...SEC.metadata, test: "true" } });
-    expect(res.body.sent).toBe(true);
-    expect(vi.mocked(sendOrglessPlatformEmail).mock.calls[0][0].subject).toMatch(/^\[TEST\] Security alert: /);
+    expect(res.body).toMatchObject({ sent: false, ours: "a test replay" });
+    expect(sendOrglessPlatformEmail).not.toHaveBeenCalled();
 
     const feed = await request(app).get("/internal/monitoring-alerts?days=7").set("x-api-key", API_KEY);
     const sec = feed.body.alerts.find((a: { eventType: string }) => a.eventType === "security_alert");
     expect(sec.verdict).toBe("ok");
-    expect(sec.recent[0].metadata.test).toBe("true");
+    expect(sec.recent[0].metadata).toMatchObject({ test: "true", ours: "a test replay" });
+  });
+
+  // SECURITY-ALERTS-OURS-1128: caused by us = listed on Monitoring with the reason, never emailed, never red;
+  // the same incident later raised from outside still emails (its own dedup key).
+  it("an alert from inside the box while one of us is logged in: listed as ours, 0 email; the same incident from outside: 1 email", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sec-origin-it-"));
+    process.env.SECURITY_STAFF_IPS_FILE = join(dir, "staff-ips.json");
+    writeFileSync(process.env.SECURITY_STAFF_IPS_FILE, JSON.stringify({ "94.131.226.180": new Date().toISOString() }));
+    resetSecurityOriginCache();
+    try {
+      const mine = await post({ ...SEC, metadata: { ...SEC.metadata, originIp: "172.18.0.1" } });
+      expect(mine.body).toMatchObject({ sent: false, duplicate: false });
+      expect(mine.body.ours).toMatch(/from inside our server/);
+      expect(sendOrglessPlatformEmail).not.toHaveBeenCalled();
+
+      const feed = await request(app).get("/internal/monitoring-alerts?days=7").set("x-api-key", API_KEY);
+      const sec = feed.body.alerts.find((a: { eventType: string }) => a.eventType === "security_alert");
+      expect(sec.verdict).toBe("ok");
+      expect(sec.recent[0].metadata.ours).toMatch(/from inside our server/);
+
+      const outsider = await post({ ...SEC, metadata: { ...SEC.metadata, originIp: "195.178.110.132" } });
+      expect(outsider.body).toMatchObject({ sent: true, duplicate: false });
+      expect(sendOrglessPlatformEmail).toHaveBeenCalledTimes(ADMIN_EMAILS.length);
+      const after = await request(app).get("/internal/monitoring-alerts?days=7").set("x-api-key", API_KEY);
+      expect(after.body.alerts.find((a: { eventType: string }) => a.eventType === "security_alert").verdict).toBe("broken");
+    } finally {
+      delete process.env.SECURITY_STAFF_IPS_FILE;
+      resetSecurityOriginCache();
+    }
   });
 
   it("is refused on POST /send: raised on /platform-staff-alert only", async () => {

@@ -674,7 +674,10 @@ export const SecurityAlertMetadataSchema = z
     summary: z.string().min(1).openapi({ description: "One line, plain words: what happened, where. Also the email subject.", example: "Someone tried to read files outside the site on api.distribute.you" }),
     evidence: z.string().min(1).openapi({ description: "A few lines of facts: IP, path, caller, counts. Shown escaped, line breaks kept.", example: "IP 203.0.113.7\nGET /v1/../../etc/passwd -> 400 no_traversal\n14 requests in 2 min" }),
     firstSeenAt: z.string().optional().openapi({ description: "When the incident was first seen, ISO 8601.", example: "2026-11-28T03:12:00Z" }),
-    test: z.string().optional().openapi({ description: "\"true\" marks a watcher's proof-of-fire replay: subject prefixed [TEST], never red on Monitoring.", example: "true" }),
+    test: z.string().optional().openapi({ description: "\"true\" marks a watcher's proof-of-fire replay: recorded for Monitoring, never emailed, never red.", example: "true" }),
+    originIp: z.string().optional().openapi({ description: "The address the action came from, as the producer saw it: the edge client address when it crossed the edge, else the TCP peer (a docker address). Decides whether the alert was caused by us (SECURITY-ALERTS-OURS-1128).", example: "172.18.0.1" }),
+    originRelays: z.string().optional().openapi({ description: "\"true\" when the request acted for someone else (a customer key, a customer session, an org identity): a box origin is then that person's act, not ours.", example: "true" }),
+    actorUserId: z.string().optional().openapi({ description: "Internal user id of the signed-in actor, if any (our staff test accounts are ours).", example: "d0855655-d7a4-41b5-af49-e2dd357b60fe" }),
   })
   .openapi("SecurityAlertMetadata");
 
@@ -702,7 +705,7 @@ export const PlatformStaffAlertRequestSchema = z
       example: "boostdistribute.com:SURBL:2026-10-16",
     }),
     metadata: z.union([SendingDomainBlocklistedMetadataSchema, DistryNonclientDayBudgetReachedMetadataSchema, SecurityAlertMetadataSchema, InboxPlacementBelowBarMetadataSchema]).openapi({
-      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`. `sending_domain_blocklisted` is RECORDED for dashboard v2 Monitoring and emails nobody (`sent: false`); `distry_nonclient_day_budget_reached` is EMAILED to the staff list (owner exception 2026-11-19), once per eventId; `security_alert` is EMAILED to the staff list AND served red on `GET /internal/monitoring-alerts` (owner 2026-11-28), once per eventId = once per incident.",
+      description: "Template variables of the event type, all non-empty strings. A missing or blank key is a 400 `missing_metadata` naming it in `missing`. `sending_domain_blocklisted` is RECORDED for dashboard v2 Monitoring and emails nobody (`sent: false`); `distry_nonclient_day_budget_reached` is EMAILED to the staff list (owner exception 2026-11-19), once per eventId; `security_alert` is EMAILED to the staff list AND served red on `GET /internal/monitoring-alerts` (owner 2026-11-28), once per eventId = once per incident, unless it was caused by us (a test replay, a staff test account, an address that logged into the box with our SSH key, the box itself while one of us is logged in): then it is recorded for Monitoring with `ours` = the reason, never emailed, never red (SECURITY-ALERTS-OURS-1128).",
     }),
   })
   .strict()
@@ -714,6 +717,7 @@ export const PlatformStaffAlertResponseSchema = z
     duplicate: z.boolean().openapi({ description: "True when this event id was already delivered: nothing was sent again. Not an error." }),
     eventId: z.string().openapi({ description: "The caller's event id, echoed." }),
     runId: z.string().nullable().openapi({ description: "The org-less platform run the send is declared under. Null on a duplicate." }),
+    ours: z.string().optional().openapi({ description: "security_alert only: present when the alert was caused by us, the reason in plain words. Recorded for Monitoring, not emailed. A later call with the same eventId that is NOT ours still emails." }),
   })
   .openapi("PlatformStaffAlertResponse");
 

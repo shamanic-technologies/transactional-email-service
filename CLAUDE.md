@@ -239,6 +239,16 @@ it wrote for a recipient it chose. A "recipient is a stranger to the org" Monito
 and rejected: 28 of 210 legit sends in 60 days go to client team members who are not account users or
 to prospects, so it would be red on healthy mail.
 
+## A security alert caused by US is recorded, never emailed (SECURITY-ALERTS-OURS-1128)
+
+Owner 2026-11-28: « ne pas envoyer ces alertes si ça vient de toi ». `src/lib/security-origin.ts` is the ONE place deciding
+« ours? » for every producer; producers hand FACTS (`originIp`, `originRelays`, `actorUserId`), never a verdict, and never skip
+raising an alert themselves. Ours = test replay, pinned staff test account, an IP in the box watcher's SSH staff list (24 h,
+`/box-security/staff-ips.json`), or box-internal relaying nobody WHILE a staff SSH login is < 2 h old. Keep that last
+condition: key-service is internal-only, so the 2026-11-20 attacker (code on Windmill workers, no SSH) read as box-internal.
+Ours rows: `recorded`, dedup `<key>:ours`, metadata `ours` = reason, never red; the same eventId from outside still emails.
+Never a list of caller names to silence (sessions pick a new name each time).
+
 ## A monitoring alert is RECORDED, never emailed (SIGNUP-EMAILS-1111)
 
 Owner 2026-10-22: « no email in my inbox please »; a monitoring alert is red on dashboard v2 Monitoring.
@@ -262,7 +272,7 @@ Owner 2026-11-28, after the 11-20 break-in: « alertes massives notamment à moi
 `eventId` (one incident, never one request) AND is served on `GET /internal/monitoring-alerts` (`EMAILED_MONITORING_ALERTS`:
 never put it in `MONITORING_ALERTS`, that list means recorded-only). Raised by key-service, api-service and the box watchers.
 The HTML reads only the escaped `*Html` twins built in `src/lib/security-alert.ts`: the evidence quotes an attacker's path/UA,
-and `interpolate` escapes nothing. `test: "true"` = `[TEST] ` subject, never red. Refused on `/send`.
+and `interpolate` escapes nothing. `test: "true"` = recorded only, never emailed, never red. Refused on `/send`.
 
 ## Commands
 
