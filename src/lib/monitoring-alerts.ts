@@ -41,9 +41,10 @@ export function isMonitoringAlert(eventType: string): boolean {
   return Object.prototype.hasOwnProperty.call(MONITORING_ALERTS, eventType);
 }
 
-// A watcher's proof-of-fire replay (metadata test = "true") is not an incident:
-// it stays in `recent` (marked by its metadata) and never turns the light red.
-const NOT_A_TEST = sql`coalesce(${emailEvents.metadata}->>'test', '') <> 'true'`;
+// A watcher's proof-of-fire replay (metadata test = "true") and a security alert
+// caused by us (metadata ours = the reason, SECURITY-ALERTS-OURS-1128) are not
+// incidents: they stay in `recent` (marked by their metadata) and never turn the light red.
+const NOT_A_TEST = sql`coalesce(${emailEvents.metadata}->>'test', '') <> 'true' AND ${emailEvents.metadata}->>'ours' IS NULL`;
 
 /** Broken = raised within this window; older alerts are history, not a red light. */
 const BROKEN_WINDOW_MS = 24 * 60 * 60 * 1000;
