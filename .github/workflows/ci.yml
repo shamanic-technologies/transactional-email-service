@@ -8,25 +8,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, box]
 
     # One Postgres per run, started and destroyed with the job. Nothing else
     # points at it, so a run can build the schema from nothing and truncate
     # freely without reaching another run, a shared box, or production.
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: transactional_email_service_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
 
     env:
       NODE_ENV: test
@@ -38,6 +24,11 @@ jobs:
       EMAIL_GATEWAY_SERVICE_API_KEY: fake-email-gateway-key
 
     steps:
+      # Postgres 17 runs inside the box runner (GITHUB-PRIVATE-1128), thrown away with it.
+      - name: Create the test database
+        run: createdb -h localhost -U postgres -O postgres transactional_email_service_test
+        env:
+          PGPASSWORD: postgres
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
